@@ -14,7 +14,8 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
 
   const hasPieces = (() => {
     try {
-      return Array.isArray(JSON.parse(job.options).pieces) && JSON.parse(job.options).pieces.length > 0;
+      const pieces = JSON.parse(job.options).pieces;
+      return Array.isArray(pieces) && pieces.length > 0;
     } catch {
       return false;
     }

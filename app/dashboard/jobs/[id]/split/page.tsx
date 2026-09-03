@@ -47,6 +47,27 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
     return DISPLAY_LONG_SIDE / Math.max(naturalW, naturalH);
   }
 
+  // Mirrors the placement page's (app/dashboard/ui-sheets/page.tsx)
+  // canvasWidth/canvasHeight sizing: long side pinned to DISPLAY_LONG_SIDE,
+  // short side scaled by aspect ratio. Must match displayScale() above so
+  // the rendered image's actual on-screen scale is the same value the crop
+  // math assumes — a fixed 512px-wide box for a portrait image would render
+  // at a different effective scale than displayScale() computes, silently
+  // corrupting crops for any box the user drags, resizes, or adds.
+  const displayW = imageDims
+    ? imageDims.width >= imageDims.height
+      ? DISPLAY_LONG_SIDE
+      : (imageDims.width / imageDims.height) * DISPLAY_LONG_SIDE
+    : DISPLAY_LONG_SIDE;
+  const displayH = imageDims
+    ? imageDims.height >= imageDims.width
+      ? DISPLAY_LONG_SIDE
+      : (imageDims.height / imageDims.width) * DISPLAY_LONG_SIDE
+    : DISPLAY_LONG_SIDE;
+
+  const included = draggable.boxes.filter(b => b.included);
+  const hasEmptyLabel = included.some(b => !b.label.trim());
+
   function handleAddBox() {
     draggable.addBox({
       id: crypto.randomUUID(),
@@ -61,12 +82,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
   }
 
   async function handleSplit() {
-    if (!job || !imageDims || splitting) return;
-    const included = draggable.boxes.filter(b => b.included);
-    if (included.some(b => !b.label.trim())) {
-      setError('Every included piece needs a label before splitting.');
-      return;
-    }
+    if (!job || !imageDims || splitting || hasEmptyLabel) return;
 
     setSplitting(true);
     setError(null);
@@ -132,9 +148,9 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
         + Add box
       </button>
 
-      <div style={{ position: 'relative', width: DISPLAY_LONG_SIDE, marginBottom: 20 }}>
+      <div style={{ position: 'relative', width: displayW, height: displayH, marginBottom: 20 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`/api/images/${job.result_path}`} alt={job.prompt} style={{ width: '100%', display: 'block' }} />
+        <img src={`/api/images/${job.result_path}`} alt={job.prompt} style={{ width: '100%', height: '100%', display: 'block' }} />
         {draggable.boxes.map(box => (
           <div
             key={box.id}
@@ -152,7 +168,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
           >
             <input
               value={box.label}
-              onChange={e => draggable.updateBox(box.id, { label: e.target.value } as any)}
+              onChange={e => draggable.updateBox(box.id, { label: e.target.value })}
               onMouseDown={e => e.stopPropagation()}
               placeholder="label (required)"
               style={{ width: '90%', fontSize: 11, background: 'rgba(0,0,0,0.6)', border: 'none', color: 'var(--ink)' }}
@@ -162,7 +178,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
               style={{ position: 'absolute', right: -4, bottom: -4, width: 10, height: 10, background: 'var(--accent)', cursor: 'nwse-resize' }}
             />
             <button
-              onClick={() => draggable.updateBox(box.id, { included: !box.included } as any)}
+              onClick={() => draggable.updateBox(box.id, { included: !box.included })}
               style={{ position: 'absolute', top: -8, right: -8, width: 16, height: 16, fontSize: 10, lineHeight: 1 }}
             >
               {box.included ? 'x' : '+'}
@@ -173,8 +189,8 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
 
       {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
 
-      <button className="btn btn-primary" onClick={handleSplit} disabled={splitting}>
-        {splitting ? 'Splitting…' : `Split into ${draggable.boxes.filter(b => b.included).length} elements`}
+      <button className="btn btn-primary" onClick={handleSplit} disabled={splitting || hasEmptyLabel}>
+        {splitting ? 'Splitting…' : `Split into ${included.length} elements`}
       </button>
     </>
   );
