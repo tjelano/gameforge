@@ -263,9 +263,12 @@ the things that matter):
 - Migration 006: real temp SQLite file, same shape as migration 004's test —
   apply 001-006, verify the new columns exist with correct defaults, verify
   a normal (non-sheet) asset insert still works unchanged.
-- "Already split" derivation: a plain unit test against a real temp DB —
-  insert a sheet job, assert not-split; insert a child asset with matching
-  `source_job_id`, assert split.
+- **Caught during planning, not tested separately:** "already split"
+  derivation was never promoted to actual code anywhere — nothing in the
+  UI needs to ask that question, since a split sheet job just naturally
+  stops appearing in the Jobs "needs a decision" view once it falls out of
+  the existing 5-minute active window, the same as any other old complete
+  job. There's no function to unit test.
 - `generateUiAsset()`'s poll loop: mock `fetch` (not a live network call in
   automated tests) to exercise processing → completed, processing → failed,
   and timeout paths without spending real Pixellab credits on every test run.
