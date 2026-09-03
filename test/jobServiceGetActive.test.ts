@@ -80,4 +80,15 @@ describe('JobService.getActive()', () => {
     const active = await jobService.getActive();
     expect(active.map(j => j.id)).not.toContain(OLD_ORDINARY_JOB_ID);
   });
+
+  it('does not throw when an old job has a non-array, non-object pieces value (options is unvalidated at the /api/generate boundary)', async () => {
+    insertJob(OLD_ORDINARY_JOB_ID, {
+      status: 'complete',
+      updatedAt: Date.now() - ONE_HOUR_MS,
+      options: JSON.stringify({ pieces: 'oops, a bare string' }),
+    });
+
+    const active = await jobService.getActive();
+    expect(active.map(j => j.id)).not.toContain(OLD_ORDINARY_JOB_ID);
+  });
 });

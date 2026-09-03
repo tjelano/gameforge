@@ -28,6 +28,7 @@ class JobServiceImpl {
       WHERE status IN ('pending', 'processing')
       OR (status IN ('complete', 'failed', 'promoted', 'discarded') AND updated_at > ?)
       OR (status IN ('complete', 'failed', 'promoted', 'discarded')
+          AND json_type(options, '$.pieces') = 'array'
           AND json_array_length(json_extract(options, '$.pieces')) > 0)
       ORDER BY created_at DESC
     `).all(Date.now() - ACTIVE_WINDOW_MS);
