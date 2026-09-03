@@ -12,6 +12,11 @@ const ORIGINAL_STYLE_ID = '11111111-1111-1111-1111-111111111111';
 const FORKED_STYLE_ID = '22222222-2222-2222-2222-222222222222';
 const SHEET_JOB_ID = '33333333-3333-3333-3333-333333333333';
 const ASSET_ID = '44444444-4444-4444-4444-444444444444';
+// A UUID that is never inserted into the local jobs table — simulates a
+// second machine that pulled an asset whose source_job_id refers to a job
+// that only ever existed on the machine that created it (jobs are local-only).
+const ORPHAN_JOB_ID = '99999999-9999-9999-9999-999999999999';
+const ORPHAN_ASSET_ID = '88888888-8888-8888-8888-888888888888';
 
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-importfields-'));
@@ -90,13 +95,46 @@ describe('GitService.importFromJson() persists every current schema field, not j
     expect(row.forked_from).toBe(ORIGINAL_STYLE_ID);
   });
 
-  it('persists source_job_id, nine_slice_margins, and states on an asset', async () => {
+  it('persists nine_slice_margins and states on an asset, but never imports source_job_id (machine-local provenance)', async () => {
     await gitService.importFromJson();
     const db = DatabaseConnection.getInstance();
     const row = db.prepare('SELECT source_job_id, nine_slice_margins, states FROM assets WHERE id = ?').get(ASSET_ID) as any;
-    expect(row.source_job_id).toBe(SHEET_JOB_ID);
+    // source_job_id is intentionally NOT written by importFromJson() (see
+    // Critical #1 fix in GitService.ts) — it stays NULL even though the
+    // incoming JSON has a source_job_id pointing at a real local job.
+    expect(row.source_job_id).toBeNull();
     expect(JSON.parse(row.nine_slice_margins)).toEqual({ top: 4, right: 4, bottom: 4, left: 4 });
     expect(JSON.parse(row.states)).toEqual(['hover', 'pressed']);
+  });
+
+  it('imports an asset whose source_job_id points at a job that does not exist locally, without throwing, and lands it as NULL', async () => {
+    // Deliberately do NOT insert ORPHAN_JOB_ID into the local jobs table —
+    // this is the exact scenario the other fixtures in this file avoid by
+    // always pre-inserting the referenced job row first.
+    await fsPromises.writeFile(
+      path.join(tempRoot, 'data', 'assets', `asset-${ORPHAN_ASSET_ID}.json`),
+      JSON.stringify({
+        id: ORPHAN_ASSET_ID, style_id: ORIGINAL_STYLE_ID, created_by: 'user-1', asset_type: 'button',
+        prompt: 'Map', image_path: 'map.png', created_at: 3000, is_deleted: 0,
+        source_job_id: ORPHAN_JOB_ID,
+        nine_slice_margins: null,
+        states: JSON.stringify([]),
+      })
+    );
+
+    await expect(gitService.importFromJson()).resolves.not.toThrow();
+
+    const db = DatabaseConnection.getInstance();
+    const jobRow = db.prepare('SELECT 1 FROM jobs WHERE id = ?').get(ORPHAN_JOB_ID);
+    expect(jobRow).toBeUndefined(); // confirms this really was the no-local-job case
+
+    const row = db.prepare('SELECT source_job_id FROM assets WHERE id = ?').get(ORPHAN_ASSET_ID) as any;
+    expect(row.source_job_id).toBeNull();
+
+    // Also confirms the loop didn't abort partway: the asset that sorts
+    // after this one (by filename) still got imported.
+    const otherRow = db.prepare('SELECT id FROM assets WHERE id = ?').get(ASSET_ID) as any;
+    expect(otherRow).toBeDefined();
   });
 
   it('updates these fields on a re-import (ON CONFLICT DO UPDATE), not just on first insert', async () => {

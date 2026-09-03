@@ -83,9 +83,14 @@ class GitServiceImpl {
         throw new Error(`Conflict markers found in ${filePath}. Please resolve manually.`);
       }
       const data = AssetSchema.parse(JSON.parse(content));
+      // source_job_id is deliberately NOT imported: it's machine-local
+      // provenance pointing at a jobs row, and jobs are never git-synced
+      // (DATA_DIRS above). Writing it here would FK-fail on any machine
+      // that doesn't happen to have that job locally, aborting the whole
+      // import. nine_slice_margins/states are portable and still synced.
       db.prepare(`
-        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id, nine_slice_margins, states)
-        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @source_job_id, @nine_slice_margins, @states)
+        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, nine_slice_margins, states)
+        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states)
         ON CONFLICT(id) DO UPDATE SET
           style_id = excluded.style_id,
           created_by = excluded.created_by,
@@ -94,7 +99,6 @@ class GitServiceImpl {
           image_path = excluded.image_path,
           created_at = excluded.created_at,
           is_deleted = excluded.is_deleted,
-          source_job_id = excluded.source_job_id,
           nine_slice_margins = excluded.nine_slice_margins,
           states = excluded.states
       `).run(data);
