@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
 import { assetService } from '@/lib/services/AssetService';
+import { NineSliceMarginsSchema } from '@/lib/database/schema';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 const UpdateAssetSchema = z.object({
   prompt: z.string().min(1).optional(),
   assetType: z.string().min(1).optional(),
+  nineSliceMargins: NineSliceMarginsSchema.nullable().optional(),
+  states: z.array(z.string()).optional(),
 });
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
