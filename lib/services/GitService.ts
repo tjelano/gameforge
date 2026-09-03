@@ -63,12 +63,13 @@ class GitServiceImpl {
       }
       const data = StyleSchema.parse(JSON.parse(content));
       db.prepare(`
-        INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
-        VALUES (@id, @name, @created_by, @parameters, @is_deleted, @created_at, @updated_at)
+        INSERT INTO styles (id, name, created_by, parameters, forked_from, is_deleted, created_at, updated_at)
+        VALUES (@id, @name, @created_by, @parameters, @forked_from, @is_deleted, @created_at, @updated_at)
         ON CONFLICT(id) DO UPDATE SET
           name = excluded.name,
           created_by = excluded.created_by,
           parameters = excluded.parameters,
+          forked_from = excluded.forked_from,
           is_deleted = excluded.is_deleted,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
@@ -83,8 +84,8 @@ class GitServiceImpl {
       }
       const data = AssetSchema.parse(JSON.parse(content));
       db.prepare(`
-        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted)
-        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted)
+        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id, nine_slice_margins, states)
+        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @source_job_id, @nine_slice_margins, @states)
         ON CONFLICT(id) DO UPDATE SET
           style_id = excluded.style_id,
           created_by = excluded.created_by,
@@ -92,7 +93,10 @@ class GitServiceImpl {
           prompt = excluded.prompt,
           image_path = excluded.image_path,
           created_at = excluded.created_at,
-          is_deleted = excluded.is_deleted
+          is_deleted = excluded.is_deleted,
+          source_job_id = excluded.source_job_id,
+          nine_slice_margins = excluded.nine_slice_margins,
+          states = excluded.states
       `).run(data);
     }
   }
