@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export type PieceKind = 'rounded_rect' | 'circle' | 'polygon';
 
 /** Canvas-space form used for all drag/resize interaction — a uniform
@@ -112,6 +114,40 @@ export const OUTPUT_SIZE_PRESETS = [
   { width: 688, height: 384, label: '688x384 (16:9 landscape)' },
   { width: 384, height: 688, label: '384x688 (9:16 portrait)' },
 ] as const;
+
+/** Mirrors PlacedPiece — the shape toUiPiece() expects as input. `sides`
+ * is required when kind is 'polygon' (toUiPiece throws otherwise), and
+ * left optional for the other two kinds. */
+const PlacedPieceSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(['rounded_rect', 'circle', 'polygon']),
+    label: z.string().min(1),
+    x: z.number(),
+    y: z.number(),
+    w: z.number().positive(),
+    h: z.number().positive(),
+    sides: z.number().int().positive().optional(),
+  })
+  .refine((piece) => piece.kind !== 'polygon' || piece.sides !== undefined, {
+    message: 'polygon pieces require sides',
+  });
+
+/** Structural, hardening validation for a UI-sheet generation job's
+ * options blob, parsed server-side in worker.ts right before a metered
+ * Pixellab call — the browser UI's MAX_PIECES_PER_SHEET cap and
+ * /api/generate's options validation (z.record(...).unknown()) don't
+ * enforce this shape on their own. */
+export const UiSheetOptionsSchema = z.object({
+  pieces: z.array(PlacedPieceSchema).min(1).max(MAX_PIECES_PER_SHEET),
+  imageSize: z
+    .object({ width: z.number(), height: z.number() })
+    .refine(
+      (size) => OUTPUT_SIZE_PRESETS.some((preset) => preset.width === size.width && preset.height === size.height),
+      { message: 'imageSize must match one of the output size presets' }
+    ),
+  colorPalette: z.string().optional(),
+});
 
 /** True when one box covers more than `PIECE_OVERLAP_WARNING_RATIO` of
  * the other's area — a cheap warning signal, not a submit blocker. */
