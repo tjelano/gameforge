@@ -19,15 +19,24 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
   const draggable = useDraggableBoxes<PlacedPiece & { included: boolean }>([]);
 
   useEffect(() => {
+    // Same ignore-flag shape as useStyles.ts's mount effect: Strict Mode
+    // (the only runtime this app has — see README, there's no production
+    // deploy target) double-invokes this effect in dev, and without a
+    // guard the second run's addBox calls would seed every piece twice
+    // under identical ids (updateBox patches all matching ids at once, so
+    // the duplicates stay in lockstep and are invisible to the user until
+    // they're uploaded twice at split time).
+    let ignore = false;
     (async () => {
       const res = await fetch(`/api/jobs/${id}`);
       const body = await res.json();
-      if (!body.success) return;
+      if (ignore || !body.success) return;
       setJob(body.data);
 
       const options = JSON.parse(body.data.options);
       const img = new Image();
       img.onload = () => {
+        if (ignore) return;
         setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
         // Piece coordinates are already in the same 0-512-long-side space
         // this editor renders its display canvas at (DISPLAY_LONG_SIDE
@@ -40,6 +49,9 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
       };
       img.src = `/api/images/${body.data.result_path}`;
     })();
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
