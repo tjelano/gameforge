@@ -1,0 +1,48 @@
+# GameForge AI Directives
+
+# NOTE: intended as a symlink to AGENTS.md (that's the source of truth —
+# keep this file in sync with it manually), but this machine can't
+# create a real symlink without admin/Developer Mode, so it's a plain
+# copy instead. If AGENTS.md changes, update this file too.
+
+## STRICT RULES FOR AI CODE GENERATION
+
+### FORBIDDEN
+- Wrapper classes around existing services
+- DTOs (use Zod schemas directly)
+- Factory patterns
+- Repository patterns (use DataStore directly)
+- Custom error classes (use standard Error)
+- Utility libraries (lodash, ramda, etc.)
+- Storing URLs in the database (store filenames only)
+- Aliasing a single fs import to serve both sync and async calls —
+  when a file needs both, import them under distinct names:
+  `import fs from 'fs'` and `import fsPromises from 'fs/promises'`
+
+### REQUIRED
+- Flat, procedural logic over deep nesting
+- Direct SQL queries over ORM
+- Direct Zod validation over DTOs
+- `try/catch` for ALL file system operations, with logging on error
+- `fs.mkdir(dir, { recursive: true })` before every file write
+- `path.join(getProjectRoot(), ...)` for all physical paths
+- Check `signal?.aborted` immediately in async generators
+- Disable UI buttons on submission to prevent double-click
+- Extract shared helpers for safety-critical logic on sight —
+  not once it's been copy-pasted a certain number of times
+
+### POSITIVE BEHAVIORAL MODEL
+- **Flat over nested:** A 50-line route handler is BETTER than splitting across files.
+- **Direct over abstracted:** Use direct SQL and direct Zod validation.
+- **Simple over generic:** Write specific code that does exactly one thing well.
+- **200-line guideline:** Not a rigid limit. Prefer readability over artificial fragmentation.
+
+## Project-specific notes
+
+- Schema (styles/assets/jobs columns, jobs.status enum) lives in `lib/database/schema.ts` — see
+  AGENTS.md for the full note on why.
+- No auth system — `created_by` is a client-persisted UUID, not a real account.
+- `cleanupOrphanedImages()` protects in-flight job images, not just asset images — see AGENTS.md before
+  changing this.
+- Migration 004, `resolveConflicts()`, and `cleanupOrphanedImages()` all have tests that run against a
+  real temp SQLite file and/or a real temp git repo — follow that pattern for new git-sync/migration code.
