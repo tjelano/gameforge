@@ -225,6 +225,21 @@ configured Aseprite path.
   (`cmd.exe`, `powershell.exe`, anything). With it, they can only ever
   trigger something already named like Aseprite.
 
+  **Round 3 of the review sharpened this further:** a filename-only check
+  is not enough, because `path.isAbsolute()` (used by Task 2's settings
+  route to reject relative paths) accepts Windows UNC paths
+  (`\\server\share\...`) as well as genuine local paths — and a UNC path's
+  *basename* can still match the Aseprite filename pattern. Without an
+  additional check, the exact network-only attacker this mitigation is
+  meant to narrow could host a payload named `aseprite-evil.exe` on a
+  share they control and point the setting at it — no local file-write
+  access required, defeating the mitigation entirely, and risking NTLM
+  credential exposure during the `fs.statSync` call itself. Both
+  `looksLikeAsepriteExecutable` and the settings route's own validation
+  now additionally require the path be rooted on a genuine local drive
+  letter (`/^[A-Za-z]:[\\/]/`), rejecting UNC and device/extended-length
+  paths (`\\.\...`, `\\?\...`) outright.
+
   **This app's total lack of authentication is accepted, pre-existing,
   whole-system risk, not something this feature changes.** Whether that's
   acceptable depends entirely on who has access to whatever VPN or tunnel

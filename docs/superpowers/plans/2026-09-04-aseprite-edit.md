@@ -110,15 +110,23 @@ describe('DatabaseConnection migration runner idempotency', () => {
   });
 });
 
-describe('BEGIN IMMEDIATE lock actually serializes concurrent connections', () => {
+describe('BEGIN IMMEDIATE + busy_timeout lock contention', () => {
   it('a second connection blocks (per busy_timeout) rather than erroring immediately while the first holds the lock', () => {
-    // This is the specific mechanism the migration-runner fix depends on:
-    // does BEGIN IMMEDIATE + busy_timeout genuinely make a second writer
-    // wait, rather than fail instantly? Two real, separate better-sqlite3
-    // connections to the SAME file exercise SQLite's actual file-level
-    // locking — this is the part that matters for proving the lock works;
-    // it doesn't require two separate OS processes, since SQLite's locking
-    // is per-connection/per-file-handle, identical whether those handles
+    // This proves the specific locking primitive the migration-runner fix
+    // depends on: does BEGIN IMMEDIATE + busy_timeout genuinely make a
+    // second writer wait, rather than fail instantly? It does NOT, on its
+    // own, prove the full end-to-end migration race is closed — that
+    // additionally depends on the re-check-inside-the-lock logic in
+    // runMigrations() being correct, which is established by code
+    // inspection (the refactor above) plus the idempotency test in the
+    // previous describe block. This test is supporting evidence for one
+    // real mechanism the fix relies on, not a substitute for reasoning
+    // through the whole fix.
+    //
+    // Two real, separate better-sqlite3 connections to the SAME file
+    // exercise SQLite's actual file-level locking — this doesn't require
+    // two separate OS processes, since SQLite's locking is
+    // per-connection/per-file-handle, identical whether those handles
     // live in one process or two. A genuine two-OS-process test would
     // additionally need to solve this project's @/ path-alias resolution
     // inside a spawned child process for no extra evidence about the
@@ -127,22 +135,29 @@ describe('BEGIN IMMEDIATE lock actually serializes concurrent connections', () =
     DatabaseConnection.getInstance(); // ensures data.db + migrations table exist
 
     const dbA = new Database(dbPath);
-    dbA.pragma('busy_timeout = 5000');
-    dbA.exec('BEGIN IMMEDIATE'); // holds the write lock, uncommitted
-
     const dbB = new Database(dbPath);
-    dbB.pragma('busy_timeout = 200'); // short on purpose so the test doesn't hang
-    const start = Date.now();
-    expect(() => dbB.exec('BEGIN IMMEDIATE')).toThrow();
-    const elapsed = Date.now() - start;
-    // Proves B actually waited on A's lock rather than failing instantly —
-    // an instant SQLITE_BUSY with no wait would mean busy_timeout isn't
-    // doing anything, which would make the whole fix meaningless.
-    expect(elapsed).toBeGreaterThanOrEqual(150);
+    try {
+      dbA.pragma('busy_timeout = 5000');
+      dbA.exec('BEGIN IMMEDIATE'); // holds the write lock, uncommitted
 
-    dbA.exec('ROLLBACK');
-    dbA.close();
-    dbB.close();
+      dbB.pragma('busy_timeout = 200'); // short on purpose so the test doesn't hang
+      const start = Date.now();
+      expect(() => dbB.exec('BEGIN IMMEDIATE')).toThrow();
+      const elapsed = Date.now() - start;
+      // Proves B actually waited on A's lock rather than failing instantly
+      // — an instant SQLITE_BUSY with no wait would mean busy_timeout
+      // isn't doing anything, which would make the whole fix meaningless.
+      expect(elapsed).toBeGreaterThanOrEqual(150);
+
+      dbA.exec('ROLLBACK');
+    } finally {
+      // finally, not just inline at the end: a failed assertion above must
+      // not leave these file handles open — on Windows in particular, an
+      // unclosed handle blocks the temp dir this test created from being
+      // deleted in afterEach.
+      dbA.close();
+      dbB.close();
+    }
   });
 });
 ```
@@ -480,6 +495,13 @@ describe('GET/PUT /api/settings/aseprite-path', () => {
     const body = await res.json();
     expect(body.data.path).toBe('C:\\Aseprite\\Aseprite.exe');
   });
+
+  it('PUT rejects a UNC path with a 400 — round 3 review finding: a UNC path is absolute but not local', async () => {
+    const res = await putPath(putRequest({ path: '\\\\attacker-server\\share\\aseprite.exe' }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
 });
 ```
 
@@ -494,23 +516,34 @@ Expected: FAIL — `Cannot find module '@/app/api/settings/aseprite-path/route'`
 // app/api/settings/aseprite-path/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import path from 'path';
 import { settingsService } from '@/lib/services/SettingsService';
 import { ASEPRITE_PATH_SETTING_KEY } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
+// A genuine local drive path (C:\...), not a UNC share (\\server\share\...)
+// or a device/extended-length path (\\.\..., \\?\...). Deliberately NOT
+// path.isAbsolute() alone — that accepts UNC paths too, and round 3 of
+// this plan's adversarial review found that matters: without this, a
+// network-only caller (no local file access) could point the setting at a
+// share they control. The same check (independently, not imported — see
+// Task 3's Interfaces section for why) is the actual final enforcement,
+// in lib/services/shared/editDecision.ts's looksLikeAsepriteExecutable,
+// re-checked at edit time regardless of what this route allowed through.
+// This one is a fail-fast convenience, not the security boundary itself.
+function isLocalDrivePath(candidate: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(candidate);
+}
+
 // Trimmed first, then either '' (clears the setting — decideEditAction in
-// Task 3 already treats '' the same as null/unset) or a genuinely absolute
-// path. A relative path here would resolve from wherever the Next.js
-// server process happens to be running, not from anywhere meaningful to
-// the user — round 2 review finding 2.
+// Task 3 already treats '' the same as null/unset) or a genuine local
+// drive path.
 const SetPathSchema = z.object({
   path: z
     .string()
     .transform(s => s.trim())
-    .refine(s => s === '' || path.isAbsolute(s), {
-      message: 'Path must be empty (to clear) or an absolute path.',
+    .refine(s => s === '' || isLocalDrivePath(s), {
+      message: 'Path must be empty (to clear) or an absolute local path (e.g. C:\\...).',
     }),
 });
 
@@ -543,7 +576,7 @@ export async function PUT(req: NextRequest) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/asepritePathSettings.test.ts`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 5: Write the Settings page**
 
@@ -695,9 +728,17 @@ git commit -m "Add Aseprite path setting: API route, settings page, nav entry"
   }): EditDecision;
 
   function isSafeStoredFilename(filename: string): boolean;
+  function isLocalDrivePath(candidate: string): boolean;
   function looksLikeAsepriteExecutable(asepritePath: string): boolean;
   ```
-  Consumed by Task 4's `POST /api/assets/[id]/edit` route.
+  Consumed by Task 4's `POST /api/assets/[id]/edit` route. Task 2's
+  settings route (which runs earlier) independently duplicates the same
+  one-line drive-path regex in its own Zod validation — deliberately not
+  shared, since Task 2 executes before this task creates this file, and
+  Task 2's check is a fail-fast UX convenience only. `looksLikeAsepriteExecutable`
+  here is the actual, final enforcement, re-checked at edit time regardless
+  of what Task 2's route allowed through — the two don't need to share a
+  module to both be correct.
 
 This is a pure function — no fs, no DB, no process access. The route (Task 4) computes the boolean/string inputs and hands them in; that split is what makes every rejection branch unit-testable without touching a real filesystem or spawning anything.
 
@@ -810,6 +851,19 @@ describe('looksLikeAsepriteExecutable', () => {
   it('rejects a non-.exe file even if named aseprite', () => {
     expect(looksLikeAsepriteExecutable('C:\\notes\\aseprite.txt')).toBe(false);
   });
+
+  it('rejects a UNC path even with a matching filename — round 3 review finding: a network-only attacker (no local file access) could host a payload on a share they control and point the setting at it, since the basename alone would otherwise pass', () => {
+    expect(looksLikeAsepriteExecutable('\\\\attacker-server\\share\\aseprite-evil.exe')).toBe(false);
+  });
+
+  it('rejects a Windows device/extended-length path even with a matching filename', () => {
+    expect(looksLikeAsepriteExecutable('\\\\.\\aseprite.exe')).toBe(false);
+    expect(looksLikeAsepriteExecutable('\\\\?\\C:\\aseprite.exe')).toBe(false);
+  });
+
+  it('rejects a relative path even with a matching filename', () => {
+    expect(looksLikeAsepriteExecutable('aseprite.exe')).toBe(false);
+  });
 });
 ```
 
@@ -836,12 +890,25 @@ export function isSafeStoredFilename(filename: string): boolean {
   return !filename.includes('/') && !filename.includes('\\') && !filename.includes('..');
 }
 
+// A genuine local drive path (C:\...), not a UNC share (\\server\share\...)
+// or a Windows device/extended-length path (\\.\..., \\?\...). Round 3 of
+// this plan's adversarial review found that path.isAbsolute() alone
+// accepts UNC paths — a network-only attacker (no local file-write access
+// needed) could host a maliciously-named payload on a share they control
+// and point the setting at it, since the filename check below would
+// otherwise pass on its basename alone. This closes that: only a path
+// that's actually rooted on a local drive letter is ever considered.
+export function isLocalDrivePath(candidate: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(candidate);
+}
+
 // Proportionate mitigation for this app having no auth anywhere (see this
 // task's own Interfaces section above for the full reasoning): restricts
 // what can be launched to something whose filename actually looks like
-// Aseprite, rather than any already-present executable on the machine.
+// Aseprite AND that lives on a local drive, rather than any already-present
+// executable on the machine or anything reachable over the network.
 export function looksLikeAsepriteExecutable(asepritePath: string): boolean {
-  return /^aseprite.*\.exe$/i.test(path.basename(asepritePath));
+  return isLocalDrivePath(asepritePath) && /^aseprite.*\.exe$/i.test(path.basename(asepritePath));
 }
 
 export function decideEditAction(params: {
@@ -878,7 +945,7 @@ export function decideEditAction(params: {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/editDecision.test.ts`
-Expected: PASS (15 tests: 7 for `decideEditAction`, 4 for `isSafeStoredFilename`, 4 for `looksLikeAsepriteExecutable`).
+Expected: PASS (18 tests: 7 for `decideEditAction`, 4 for `isSafeStoredFilename`, 7 for `looksLikeAsepriteExecutable`).
 
 - [ ] **Step 5: Commit**
 
@@ -1099,6 +1166,30 @@ describe('POST /api/assets/[id]/edit', () => {
     const body = await res.json();
     expect(body.success).toBe(false);
   });
+
+  it('reports a launch failure instead of crashing when spawn throws synchronously', async () => {
+    const { settingsService } = await import('@/lib/services/SettingsService');
+    const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
+    await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
+    await settingsService.set('aseprite_path', fakeAsepritePath);
+    const imagePath = path.join(tempRoot, 'storage', 'images', 'confirm.png');
+    await fsPromises.writeFile(imagePath, 'fake-png-bytes');
+
+    // The unlikely-but-still-handled case: spawn() itself throws
+    // synchronously (e.g. an invalid options object), rather than
+    // returning and failing later via the 'error' event this file's other
+    // test covers. The route's outer try/catch around the spawn call is
+    // what this exercises.
+    spawnMock.mockImplementationOnce(() => {
+      throw new Error('spawn failed synchronously');
+    });
+
+    const { POST } = await import('@/app/api/assets/[id]/edit/route');
+    const res = await POST(editRequest(), { params: Promise.resolve({ id: ASSET_WITH_IMAGE_ID }) });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
 });
 ```
 
@@ -1249,7 +1340,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/assetEdit.test.ts`
-Expected: PASS (9 tests). The success-path and error-path tests each take a little over 300ms in real time (the bounded wait genuinely waits), which is fine — this file isn't run often enough for that to matter.
+Expected: PASS (10 tests). The success-path test and the async-spawn-error test each take a little over 300ms in real time (the bounded wait genuinely waits before either resolves) — the synchronous-throw test does not, since it never reaches that wait at all. Fine either way; this file isn't run often enough for the extra time to matter.
 
 - [ ] **Step 5: Add the button to the asset detail page**
 

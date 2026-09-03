@@ -53,3 +53,28 @@ Accepted #4 in full: `isRegularFile()` now logs any stat failure that isn't `ENO
 Accepted #5 in full: fixed every stale spec section identified — the Settings page section's path-validation description, the Edit action section's `existsSync` → `statSync(...).isFile()` and the outcome count (4 → 7), and the Testing section's now-inaccurate "spawn is not automatically tested" claim (the wiring — arguments, both error paths — genuinely is now, via a mocked `child_process`; only the real external effect, Aseprite actually opening, still isn't).
 
 Partially accepted #1, by tightening language rather than adding access control: rewrote the spec's Security note to be explicit about exactly what `looksLikeAsepriteExecutable` does and doesn't defend against. Codex's critique ("can be a renamed payload") requires an attacker who can already write files to the machine — a strictly stronger capability than "reach this app over HTTP," and an attacker with local file-write access already has far more direct ways to cause harm, on any system, unrelated to this feature. The mitigation's actual, honest scope is narrower: it closes the *specific new capability* this feature adds for a network-only attacker (no local file access) — without it, such an attacker could launch any already-present executable; with it, only something already named like Aseprite. The spec now states plainly that this app's total lack of authentication is accepted, pre-existing, whole-system risk this feature does not change, and that the real fix for an untrusted VPN/tunnel is a trusted VPN/tunnel, not a per-route patch — exactly the "label as accepted risk, not a mitigation" framing Codex asked for, applied to the parts of the claim that hold up under the corrected threat model rather than to the whole claim as stated.
+
+## Round 3 — Codex
+
+VERDICT: REVISE
+
+1. **Network-only attacker bypass remains, via UNC paths.** `\\attacker-server\share\aseprite-evil.exe` is absolute (passes `path.isAbsolute()`), and its *basename* (`aseprite-evil.exe`) passes the filename regex — a network-only attacker (no local file-write access, exactly the threat model the mitigation targets) could host a payload on a share they control and point the setting at it. The `fs.statSync` call against that path also risks NTLM credential exposure. Asked to reject UNC/device paths before any filesystem call, requiring a local-drive path (`^[A-Za-z]:\\`).
+2. Task 1 Step 0 confirmed correct: `BEGIN IMMEDIATE` inside `try`, `ROLLBACK` correctly gated on `db.inTransaction`.
+3. The Zod schema confirmed correct: trims, allows `''` to clear, rejects relative paths via `path.isAbsolute()`.
+4. The two-connection lock test proves lock contention + `busy_timeout`, not the full end-to-end migration race — reasonable supporting evidence given the re-check-inside-the-lock logic is plainly correct by inspection, but the test's own framing shouldn't claim more than that. Also: wrap `dbA`/`dbB` cleanup in `finally` so a failed assertion doesn't leave Windows file handles locked.
+5. The spec claims both a synchronous-throw path and an async-error path are tested for the spawn wiring, but the plan only had the async-error test — spec/plan drift again.
+
+Confirms the accepted-risk framing (once UNC/network paths are excluded) is proportionate: "the filename check is a narrow risk reducer, not authentication, and the revised spec now says that accurately."
+
+### Claude's response
+
+Finding 1 is the sharpest thing either round has surfaced — genuinely reopens the exact bypass the mitigation was supposed to close, via a vector (UNC paths) neither of us had considered. Accepted immediately and in full:
+- Added `isLocalDrivePath` (`/^[A-Za-z]:[\\/]/`) to `lib/services/shared/editDecision.ts`, folded into `looksLikeAsepriteExecutable` (now requires BOTH the drive-letter root AND the Aseprite-like filename). Added 3 new tests: UNC rejection, device/extended-length-path rejection (`\\.\...`, `\\?\...`), relative-path rejection.
+- Task 2's settings route independently duplicates the same one-line check (not imported from Task 3's module — Task 2 executes before Task 3 in this plan, so importing from it would create a forward-reference the SDD process can't satisfy; this route's check is a fail-fast UX convenience anyway, not the actual security boundary, which remains `looksLikeAsepriteExecutable`, re-checked at edit time regardless of what got saved). Added a UNC-rejection test there too.
+- Updated the spec's Security note with the full mechanism and the fix.
+
+Accepted #4 in full: reworded the test's own comment to claim only what it actually proves (lock contention + busy_timeout, not the full race — that's the idempotency test plus code inspection, per this task's existing reasoning), and wrapped `dbA`/`dbB` in `try/finally`.
+
+Accepted #5 in full: added the missing synchronous-throw test to `test/assetEdit.test.ts` (`spawnMock.mockImplementationOnce(() => { throw ... })`, asserting a 500 without crashing) — the spec's claim is now actually true rather than aspirational.
+
+No pushback this round — all 3 substantive findings (1, 4, 5) were correct and are fixed; 2 and 3 were confirmations, not findings.
