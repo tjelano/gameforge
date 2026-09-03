@@ -4,7 +4,7 @@ import path from 'path';
 import { DatabaseConnection } from '@/lib/database';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
-import { AssetSchema, type Asset } from '@/lib/database/schema';
+import { AssetSchema, NineSliceMarginsSchema, type Asset, type NineSliceMargins } from '@/lib/database/schema';
 
 class AssetServiceImpl {
   async create(input: {
@@ -13,23 +13,37 @@ class AssetServiceImpl {
     assetType: string;
     prompt: string;
     imagePath: string | null;
+    sourceJobId?: string | null;
   }): Promise<Asset> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();
     db.prepare(`
-      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now());
+      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now(), input.sourceJobId ?? null);
     return (await this.getById(id))!;
   }
 
-  async update(id: string, patch: { prompt?: string; assetType?: string }): Promise<Asset | null> {
+  async update(id: string, patch: {
+    prompt?: string;
+    assetType?: string;
+    nineSliceMargins?: NineSliceMargins | null;
+    states?: string[];
+  }): Promise<Asset | null> {
     const existing = await this.getById(id);
     if (!existing) return null;
     const db = DatabaseConnection.getInstance();
-    db.prepare('UPDATE assets SET prompt = ?, asset_type = ? WHERE id = ?').run(
+
+    const nineSliceMargins = patch.nineSliceMargins !== undefined
+      ? (patch.nineSliceMargins === null ? null : JSON.stringify(NineSliceMarginsSchema.parse(patch.nineSliceMargins)))
+      : existing.nine_slice_margins;
+    const states = patch.states !== undefined ? JSON.stringify(patch.states) : existing.states;
+
+    db.prepare('UPDATE assets SET prompt = ?, asset_type = ?, nine_slice_margins = ?, states = ? WHERE id = ?').run(
       patch.prompt ?? existing.prompt,
       patch.assetType ?? existing.asset_type,
+      nineSliceMargins,
+      states,
       id
     );
     return this.getById(id);

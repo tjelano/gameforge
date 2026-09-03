@@ -40,8 +40,9 @@ function releaseLock(): void {
 async function processJob(job: any): Promise<void> {
   const db = DatabaseConnection.getInstance();
 
+  let options: any;
   try {
-    JSON.parse(job.options);
+    options = JSON.parse(job.options);
   } catch (e) {
     // Malformed options JSON is a hard failure, not something to
     // silently ignore or default around — it means the row was
@@ -52,7 +53,11 @@ async function processJob(job: any): Promise<void> {
   }
 
   try {
-    const result = await getImageGenerator().generate(job.prompt, job.style_id);
+    const isUiSheet = Array.isArray(options.pieces) && options.pieces.length > 0;
+    const result = isUiSheet
+      ? await getImageGenerator().generateUiAsset(job.prompt, options.pieces, options.imageSize, options.colorPalette)
+      : await getImageGenerator().generate(job.prompt, job.style_id);
+
     db.prepare(`UPDATE jobs SET status = 'complete', result_path = ?, updated_at = ? WHERE id = ?`)
       .run(result.path, Date.now(), job.id);
     console.log(`✅ Job ${job.id} complete -> ${result.path}`);
