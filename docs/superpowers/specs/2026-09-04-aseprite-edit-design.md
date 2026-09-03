@@ -90,29 +90,42 @@ asset image: **"Edit in Aseprite"**. Only rendered when `asset.image_path`
 is set (matches the existing conditional that already gates showing the
 image itself).
 
-Click → `POST /api/assets/[id]/edit` (no body). Server-side, in order:
+Click → `POST /api/assets/[id]/edit` (no body). Server-side, in order
+(finalized after adversarial review — see the Security note below for why
+steps 2 and 4 exist):
 
 1. Look up the asset. If it has no `image_path`, return
    `{ success: false, error: 'This asset has no image.' }`.
-2. Read `aseprite_path` from `SettingsService`. If unset, return
+2. Validate the stored `image_path` is a bare filename (no `/`, `\`, or
+   `..`) before resolving it to a physical path. If not, return
+   `{ success: false, error: 'Invalid image path.' }`.
+3. Read `aseprite_path` from `SettingsService`. If unset, return
    `{ success: false, error: 'Set your Aseprite path in Settings first.' }`.
-3. Resolve both paths to absolute (`path.join(getProjectRoot(), 'storage',
+4. Validate the configured path's filename actually looks like Aseprite
+   (`aseprite*.exe`, case-insensitive). If not, return
+   `{ success: false, error: 'Configured path must point to an Aseprite executable.' }`.
+5. Resolve both paths to absolute (`path.join(getProjectRoot(), 'storage',
    'images', asset.image_path)` for the image, the raw stored value for
    Aseprite) and check both exist via `fs.existsSync`, in a try/catch per
    this project's fs-operation rule. Missing image file →
    `{ success: false, error: 'Image file not found on disk.' }`. Missing
    Aseprite →
    `{ success: false, error: 'Aseprite not found at the configured path. Check Settings.' }`.
-4. Spawn: `child_process.spawn(asepritePath, [imageAbsolutePath], {
-   detached: true, stdio: 'ignore' }).unref()`. **Array-form arguments,
-   never a shell string** — this is what keeps the image's filename (a
-   server-generated UUID-based name, but treated as untrusted regardless)
-   from ever being re-parsed as shell syntax. No `shell: true`, no string
-   concatenation into a command line.
-5. Return `{ success: true }` immediately. The route does not wait for
-   Aseprite to exit — `.unref()` lets the Node process exit cleanly
-   without babysitting the spawned child, and the detached child keeps
-   running independent of the request/response cycle.
+6. Spawn: `child_process.spawn(asepritePath, [imageAbsolutePath], {
+   detached: true, stdio: 'ignore' })`. **Array-form arguments, never a
+   shell string** — this is what keeps either value from ever being
+   re-parsed as shell syntax. No `shell: true`, no string concatenation
+   into a command line. Attach a `once('error', ...)` listener and wait up
+   to 300ms for it before calling `.unref()` — `spawn`'s realistic failure
+   mode (bad permissions, not actually executable) surfaces asynchronously
+   on this event, not as a synchronous throw; without a listener, an
+   unhandled `'error'` event crashes the Node process.
+7. If the bounded wait produced an error, return
+   `{ success: false, error: 'Could not launch Aseprite. Check the configured path.' }`.
+   Otherwise return `{ success: true }`. Either way the route does not
+   wait for Aseprite to fully start or exit — only for that narrow,
+   near-immediate failure window — and the detached child keeps running
+   independent of the request/response cycle either way.
 
 Client-side: on click, POST, show a small inline status — "Opening
 Aseprite…" then either nothing further (success — user tabs over to the
@@ -155,11 +168,41 @@ log server-side detail even though the user only sees the generic
 
 ## Security note
 
-The only externally-influenceable input reaching `child_process.spawn` is
-the asset's `image_path` (a server-generated filename, not user-typed) and
-the Aseprite path (set by the machine's own user via Settings, not by a
-network request from anyone else — this app has no auth, so "the machine's
-own user" is the only meaningful trust boundary here, same as everywhere
-else in GameForge). Using the array-args spawn form means neither value is
-ever interpreted as shell syntax regardless of its content, so this holds
-even if that assumption were ever wrong.
+**Updated after this spec's plan went through adversarial review** (Codex,
+via `claudex-loop:codex-review` — see
+`docs/superpowers/plans/2026-09-04-aseprite-edit-review-log.md` for the
+full argument). The original version of this note assumed "the machine's
+own user" was the only trust boundary that mattered, since this app has no
+authentication anywhere. That assumption was wrong: GameForge's own
+`README.md` explicitly documents running it behind a VPN or tunnel for
+remote access, which means an unauthenticated caller reaching this feature
+over the network is a real, supported scenario — not a hypothetical.
+
+Two inputs reach `child_process.spawn`: the asset's `image_path` and the
+configured Aseprite path.
+
+- `image_path` is server-generated in the normal upload flow, but
+  `AssetSchema` does not format-validate it, and a row can arrive via
+  git-imported JSON unchecked. It is now validated with
+  `isSafeStoredFilename` (rejecting `/`, `\`, `..`) before ever being
+  joined into a physical path — the same guard
+  `app/api/images/[filename]/route.ts` already uses for reads.
+- The Aseprite path is set via the Settings page, which — like every other
+  route in this app — has no authentication. An unauthenticated remote
+  caller (over a VPN/tunnel the user set up themselves, per the README)
+  could in principle set this path and then trigger the edit action. This
+  plan does not build real access control for this one route — doing so
+  would be inconsistent (every other route, including git push/pull and
+  asset deletion, is equally unauthenticated) and disproportionate for
+  this feature. Instead, `looksLikeAsepriteExecutable` restricts what can
+  ever be configured and launched to a filename that actually looks like
+  Aseprite (`aseprite*.exe`, case-insensitive), closing off the sharper
+  edge of the risk — "launch any already-present executable on the
+  machine" — down to "only ever launches something named aseprite.exe."
+  This narrows the risk; it does not eliminate it. The underlying gap
+  (this app has no authentication anywhere) is a pre-existing, whole-system
+  property this feature did not introduce and is not scoped to fix.
+
+Using the array-args spawn form for both invocations means neither value
+is ever interpreted as shell syntax regardless of its content, independent
+of the above.

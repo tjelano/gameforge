@@ -4,7 +4,7 @@
 
 **Goal:** Add a one-click "Edit in Aseprite" action on an asset's detail page that launches Aseprite, pointed at that asset's actual image file, on the local machine.
 
-**Architecture:** A new local-only `settings` table (never git-synced) stores the Aseprite executable path per machine, set via a new Settings page. A new API route resolves the asset's image path and the configured Aseprite path, runs a pure decision function to pick one of five outcomes (asset has no image / path not configured / image missing on disk / Aseprite missing on disk / ok to launch), and on the "ok" outcome spawns Aseprite as a detached child process using array-form arguments (no shell string, no injection surface).
+**Architecture:** A new local-only `settings` table (never git-synced) stores the Aseprite executable path per machine, set via a new Settings page. A new API route resolves the asset's image path and the configured Aseprite path, runs a pure decision function to pick one of seven outcomes (no image / unsafe stored image path / path not configured / configured path doesn't look like Aseprite / image missing on disk / Aseprite missing on disk / ok to launch), and on the "ok" outcome spawns Aseprite as a detached child process using array-form arguments (no shell string, no injection surface). This plan also fixes one pre-existing, unrelated bug found during its own adversarial review: a cross-process race in the migration runner (Task 1, Step 0).
 
 **Tech Stack:** Next.js App Router API routes, Node's `child_process.spawn`, better-sqlite3, Zod, Vitest with real temp SQLite (this project's established pattern — see `test/assetUpdate.test.ts` for the exact fixture shape reused throughout this plan).
 
@@ -15,7 +15,9 @@
 - No install automation of any kind — Aseprite must already be present on the machine; V1 only locates and launches it (see spec's "Out of scope").
 - `settings` table is machine-local config: never added to `GitService`'s `DATA_DIRS`, never exported to `data/`.
 - `child_process.spawn` MUST be called with the array-of-args form (`spawn(exePath, [imagePath], {...})`), never a shell string or `shell: true` — this is what keeps any value from being re-parsed as shell syntax (Global Constraint from the spec's Security note).
-- Every fs/process operation wrapped in try/catch with `console.error` logging on failure (project Hard Rule, `AGENTS.md`).
+- The asset's stored `image_path` MUST be validated as a bare filename (`isSafeStoredFilename` — no `/`, `\`, or `..`) before being joined into a physical path, mirroring the guard `app/api/images/[filename]/route.ts` already uses — added after this plan's adversarial review found `AssetSchema` does not format-validate `image_path`, and git-imported asset JSON reaches it unchecked.
+- The configured Aseprite path MUST resolve to a filename matching `looksLikeAsepriteExecutable` (`/^aseprite.*\.exe$/i` on the basename) before it is ever passed to `spawn` — a proportionate mitigation for this app having no authentication anywhere (see spec's Security note for the full reasoning and its limits).
+- Every fs/process operation wrapped in try/catch with `console.error` logging on failure (project Hard Rule, `AGENTS.md`); `spawn`'s asynchronous `'error'` event MUST also be handled (a synchronous try/catch alone does not catch it and an unhandled `'error'` event crashes the process).
 - Every new API response follows the `{success, data, error}` contract already used throughout this codebase.
 - Direct SQL via better-sqlite3, no ORM; direct Zod validation at API boundaries, no DTOs (project Hard Rules).
 
@@ -25,6 +27,7 @@
 
 | File | Responsibility |
 |---|---|
+| `lib/database/index.ts` | Fix cross-process race in the migration runner (pre-existing bug, fixed in Task 1) |
 | `lib/database/migrations/007_add_settings_table.sql` | New `settings(key, value)` table |
 | `lib/services/SettingsService.ts` | `get`/`set` on the settings table, direct SQL |
 | `app/api/settings/aseprite-path/route.ts` | `GET`/`PUT` for the `aseprite_path` setting |
@@ -42,10 +45,138 @@
 - Create: `lib/database/migrations/007_add_settings_table.sql`
 - Create: `lib/services/SettingsService.ts`
 - Modify: `lib/config.ts`
+- Modify: `lib/database/index.ts` (migration-runner concurrency fix — see Step 0 below)
 - Test: `test/settingsService.test.ts`
+- Test: `test/migrationConcurrency.test.ts`
 
 **Interfaces:**
 - Produces: `settingsService.get(key: string): Promise<string | null>`, `settingsService.set(key: string, value: string): Promise<void>`, and the constant `ASEPRITE_PATH_SETTING_KEY` from `@/lib/config` — consumed by Task 2's API route and Task 4's edit route (this project's convention: constants shared by 2+ files live in `lib/config.ts`, see its existing `IO_WRITE_BATCH_SIZE`/`WORKER_BATCH_SIZE`).
+
+**Note — this task also fixes a pre-existing, unrelated bug found during this plan's adversarial review (see `docs/superpowers/plans/2026-09-04-aseprite-edit-review-log.md`, Round 1, finding 6):** `DatabaseConnection.runMigrations()` reads which migrations are already applied once, then applies each unapplied file in its own transaction. This app's own documented normal startup runs two separate processes (`npm run dev` and `npm run dev:worker`) that each independently call `DatabaseConnection.getInstance()` — if both start close together after a new migration file is added (exactly what happens the first time this feature's own migration 007 gets deployed), both processes can read "not yet applied" before either commits, and the second one to run fails when it hits already-created schema objects. This isn't specific to migration 007 — every prior migration has had this exposure — but it's small, contained to one file, and fixing it now protects this feature's own first real startup, so it's fixed here rather than filed away.
+
+- [ ] **Step 0: Fix the migration-runner race first (TDD)**
+
+Write the failing test:
+
+```typescript
+// test/migrationConcurrency.test.ts
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fsPromises from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { setProjectRootForTests } from '@/lib/utils/projectRoot';
+import { DatabaseConnection } from '@/lib/database';
+
+let tempRoot: string;
+
+beforeEach(async () => {
+  tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-migrationrace-'));
+  await fsPromises.writeFile(path.join(tempRoot, 'package.json'), JSON.stringify({ name: 'gameforge-test' }));
+  const realMigrationsDir = path.resolve(__dirname, '..', 'lib', 'database', 'migrations');
+  const tempMigrationsDir = path.join(tempRoot, 'lib', 'database', 'migrations');
+  await fsPromises.mkdir(tempMigrationsDir, { recursive: true });
+  for (const file of await fsPromises.readdir(realMigrationsDir)) {
+    await fsPromises.copyFile(path.join(realMigrationsDir, file), path.join(tempMigrationsDir, file));
+  }
+  setProjectRootForTests(tempRoot);
+  DatabaseConnection.resetForTests();
+});
+
+afterEach(async () => {
+  DatabaseConnection.resetForTests();
+  setProjectRootForTests(undefined);
+  if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
+});
+
+describe('DatabaseConnection migration runner idempotency', () => {
+  it('re-opening the same database file does not re-apply or fail on already-applied migrations', () => {
+    // First "process": runs every migration normally via the singleton.
+    const db1 = DatabaseConnection.getInstance();
+    const appliedCount = (db1.prepare('SELECT COUNT(*) as c FROM migrations').get() as { c: number }).c;
+    expect(appliedCount).toBeGreaterThan(0);
+
+    // Simulate a second process opening the SAME underlying file fresh
+    // (resetForTests() closes the cached connection; getInstance() then
+    // re-opens the same data.db path and re-runs the migration runner
+    // against it from scratch) — this is the code path that must not
+    // throw or duplicate rows when every migration is already applied,
+    // which is exactly the state a second real process finds itself in
+    // after the first process wins the race.
+    DatabaseConnection.resetForTests();
+    const db2 = DatabaseConnection.getInstance();
+    const appliedCount2 = (db2.prepare('SELECT COUNT(*) as c FROM migrations').get() as { c: number }).c;
+    expect(appliedCount2).toBe(appliedCount);
+  });
+});
+```
+
+Run: `npx vitest run test/migrationConcurrency.test.ts`
+Expected: PASS even before the refactor — this test proves idempotency (the property the fix below depends on), not the race itself. True cross-process concurrent access isn't practically reproducible in a synchronous, single-threaded test without spawning real OS processes, which is disproportionate for this fix; the refactor's correctness rests on code inspection (this task's own reasoning above: `BEGIN IMMEDIATE` + re-check-inside-the-lock is a standard, well-understood pattern for exactly this race) plus this idempotency test, matching how the spec already treats the `spawn` call itself as "not meaningfully unit-testable, verified manually."
+
+Replace `lib/database/index.ts`'s `runMigrations` method (and remove the now-redundant `tableCheck` block above it) with:
+
+```typescript
+  private static runMigrations(db: Database.Database): void {
+    const migrationsDir = path.join(getProjectRoot(), 'lib', 'database', 'migrations');
+
+    if (!fs.existsSync(migrationsDir)) {
+      throw new Error(`❌ Migrations directory not found: ${migrationsDir}`);
+    }
+
+    const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+    if (files.length === 0) return;
+
+    // IF NOT EXISTS makes this safe to run from multiple processes without
+    // a pre-check — SQLite serializes writers at the file level, so two
+    // concurrent CREATE TABLE IF NOT EXISTS calls are safe in either order.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+
+    for (const file of files) {
+      // BEGIN IMMEDIATE acquires SQLite's write lock right away instead of
+      // lazily on first write. This closes the race where two processes
+      // (the Next.js server and the separate worker process, both calling
+      // DatabaseConnection.getInstance() independently on startup) both
+      // read "not yet applied" before either commits — the second process
+      // to reach BEGIN IMMEDIATE blocks (up to busy_timeout) until the
+      // first finishes, then re-checks applied status before deciding.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const alreadyApplied = db.prepare('SELECT 1 FROM migrations WHERE name = ?').get(file);
+        if (!alreadyApplied) {
+          console.log(`📦 Running migration: ${file}`);
+          const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+          db.exec(sql);
+          db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(file, Date.now());
+          console.log(`✅ Migration complete: ${file}`);
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        console.error(`❌ Migration failed: ${file}`, error);
+        throw error;
+      }
+    }
+  }
+```
+
+Run: `npx vitest run test/migrationConcurrency.test.ts`
+Expected: PASS (2 tests). Then run the FULL suite — this touches shared infrastructure every other test depends on:
+
+Run: `npx vitest run`
+Expected: all existing tests still PASS (this refactor preserves exact behavior for the single-process case; it only changes *how* the lock is acquired, not what gets applied or in what order).
+
+Commit this fix on its own before continuing to Step 1:
+
+```bash
+git add lib/database/index.ts test/migrationConcurrency.test.ts
+git commit -m "Fix cross-process race in migration runner (BEGIN IMMEDIATE)"
+```
 
 - [ ] **Step 1: Write the failing test**
 
@@ -202,7 +333,7 @@ git commit -m "Add settings table and SettingsService for machine-local config"
 
 **Interfaces:**
 - Consumes: `settingsService.get`/`settingsService.set` from Task 1 (`@/lib/services/SettingsService`).
-- Produces: `GET /api/settings/aseprite-path` → `{success:true,data:{path:string}}`; `PUT /api/settings/aseprite-path` (body `{path:string}`) → `{success:true,data:{path:string}}` or `{success:false,error:string}` (400 on empty/missing `path`).
+- Produces: `GET /api/settings/aseprite-path` → `{success:true,data:{path:string}}`; `PUT /api/settings/aseprite-path` (body `{path:string}`) → `{success:true,data:{path:string}}`, or `{success:false,error:string}` (400) when `path` is missing or not a string. An empty string IS accepted — it's how the setting gets cleared (see Round 1 review finding 4: Task 5's manual verification needs to clear the path, and `decideEditAction`'s existing `!params.asepritePathSetting` check already treats an empty string as falsy, i.e. "not configured" — no separate clear/delete endpoint needed).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -267,15 +398,26 @@ describe('GET/PUT /api/settings/aseprite-path', () => {
     expect(getBody.data.path).toBe('C:\\Aseprite\\Aseprite.exe');
   });
 
-  it('PUT rejects an empty path with a 400', async () => {
+  it('PUT accepts an empty path — this is how the setting gets cleared', async () => {
+    await putPath(putRequest({ path: 'C:\\Aseprite\\Aseprite.exe' }));
     const res = await putPath(putRequest({ path: '' }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.success).toBe(false);
+    expect(body.success).toBe(true);
+    expect(body.data.path).toBe('');
+
+    const getRes = await getPath();
+    const getBody = await getRes.json();
+    expect(getBody.data.path).toBe('');
   });
 
   it('PUT rejects a missing path field with a 400', async () => {
     const res = await putPath(putRequest({}));
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT rejects a non-string path with a 400', async () => {
+    const res = await putPath(putRequest({ path: 123 }));
     expect(res.status).toBe(400);
   });
 });
@@ -297,8 +439,10 @@ import { ASEPRITE_PATH_SETTING_KEY } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
+// No .min(1): an empty string is a valid value — it clears the setting.
+// decideEditAction (Task 3) already treats '' the same as null/unset.
 const SetPathSchema = z.object({
-  path: z.string().min(1, 'Path cannot be empty.'),
+  path: z.string(),
 });
 
 export async function GET() {
@@ -330,7 +474,7 @@ export async function PUT(req: NextRequest) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/asepritePathSettings.test.ts`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 5: Write the Settings page**
 
@@ -349,11 +493,16 @@ export default function AsepriteSettingsPage() {
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const res = await fetch('/api/settings/aseprite-path');
-      const body = await res.json();
-      if (ignore) return;
-      if (body.success) setPath(body.data.path);
-      setLoading(false);
+      try {
+        const res = await fetch('/api/settings/aseprite-path');
+        const body = await res.json();
+        if (ignore) return;
+        if (body.success) setPath(body.data.path);
+      } catch {
+        if (!ignore) setResult('Could not reach the server.');
+      } finally {
+        if (!ignore) setLoading(false);
+      }
     })();
     return () => {
       ignore = true;
@@ -468,26 +617,42 @@ git commit -m "Add Aseprite path setting: API route, settings page, nav entry"
 
   function decideEditAction(params: {
     imagePathColumn: string | null;
+    imagePathIsSafe: boolean;
     asepritePathSetting: string | null;
+    asepritePathLooksLikeAseprite: boolean;
     imageAbsolutePath: string;
     imageExists: boolean;
     asepriteExists: boolean;
   }): EditDecision;
+
+  function isSafeStoredFilename(filename: string): boolean;
+  function looksLikeAsepriteExecutable(asepritePath: string): boolean;
   ```
   Consumed by Task 4's `POST /api/assets/[id]/edit` route.
 
-This is a pure function — no fs, no DB, no process access. The route (Task 4) computes the boolean/string inputs and hands them in; that split is what makes the four failure branches unit-testable without touching a real filesystem or spawning anything.
+This is a pure function — no fs, no DB, no process access. The route (Task 4) computes the boolean/string inputs and hands them in; that split is what makes every rejection branch unit-testable without touching a real filesystem or spawning anything.
+
+`imagePathIsSafe` and `asepritePathLooksLikeAseprite` exist because of two findings from this plan's adversarial review (`docs/superpowers/plans/2026-09-04-aseprite-edit-review-log.md`, Round 1):
+
+- **Finding 2 (path traversal):** `AssetSchema.image_path` is `z.string().nullable()` with no format check, and git-imported asset JSON goes through `AssetSchema.parse()` unchecked — a crafted `image_path` containing `../` or a path separator could resolve outside `storage/images` once `path.join()`'d. `app/api/images/[filename]/route.ts` already guards against exactly this for the *read* path (`filename.includes('/') || includes('\\') || includes('..')` → reject); `isSafeStoredFilename` is the same guard, reused here for the *write/launch* path, which needs it at least as much.
+- **Finding 1 (unauthenticated remote launch):** this app has no auth anywhere, and its own README documents running it behind a VPN/tunnel for remote access — meaning an unauthenticated caller could `PUT` an arbitrary path via Task 2's settings route, then `POST` this route to launch it. Building real access control is out of scope here (every other route in this app is equally unauthenticated today; retrofitting auth onto one route is inconsistent and not what this feature is for). `looksLikeAsepriteExecutable` is a narrower, proportionate mitigation: it restricts what CAN be configured and launched to something whose filename actually looks like Aseprite, closing off the sharper edge of that finding — "launch any already-present executable on the machine" — down to "only ever launches something named aseprite*.exe". It does not eliminate the underlying risk (this app's total lack of auth is a pre-existing, whole-system property, not something this plan is scoped to fix), and the spec's Security section is updated to say so plainly.
 
 - [ ] **Step 1: Write the failing test**
 
 ```typescript
 // test/editDecision.test.ts
 import { describe, it, expect } from 'vitest';
-import { decideEditAction } from '@/lib/services/shared/editDecision';
+import {
+  decideEditAction,
+  isSafeStoredFilename,
+  looksLikeAsepriteExecutable,
+} from '@/lib/services/shared/editDecision';
 
 const BASE = {
   imagePathColumn: 'asset-123.png',
+  imagePathIsSafe: true,
   asepritePathSetting: 'C:\\Aseprite\\Aseprite.exe',
+  asepritePathLooksLikeAseprite: true,
   imageAbsolutePath: 'C:\\project\\storage\\images\\asset-123.png',
   imageExists: true,
   asepriteExists: true,
@@ -499,9 +664,22 @@ describe('decideEditAction', () => {
     expect(result).toEqual({ ok: false, error: 'This asset has no image.' });
   });
 
+  it('rejects an unsafe stored image path before checking anything else', () => {
+    const result = decideEditAction({ ...BASE, imagePathIsSafe: false });
+    expect(result).toEqual({ ok: false, error: 'Invalid image path.' });
+  });
+
   it('rejects when no Aseprite path is configured', () => {
     const result = decideEditAction({ ...BASE, asepritePathSetting: null });
     expect(result).toEqual({ ok: false, error: 'Set your Aseprite path in Settings first.' });
+  });
+
+  it('rejects a configured path whose filename does not look like Aseprite', () => {
+    const result = decideEditAction({ ...BASE, asepritePathLooksLikeAseprite: false });
+    expect(result).toEqual({
+      ok: false,
+      error: 'Configured path must point to an Aseprite executable.',
+    });
   });
 
   it('rejects when the image file is missing on disk', () => {
@@ -526,6 +704,44 @@ describe('decideEditAction', () => {
     });
   });
 });
+
+describe('isSafeStoredFilename', () => {
+  it('accepts a bare filename', () => {
+    expect(isSafeStoredFilename('asset-123.png')).toBe(true);
+  });
+
+  it('rejects a path containing a forward slash', () => {
+    expect(isSafeStoredFilename('../secrets.png')).toBe(false);
+  });
+
+  it('rejects a path containing a backslash', () => {
+    expect(isSafeStoredFilename('..\\secrets.png')).toBe(false);
+  });
+
+  it('rejects a path containing ..', () => {
+    expect(isSafeStoredFilename('foo..png')).toBe(false);
+  });
+});
+
+describe('looksLikeAsepriteExecutable', () => {
+  it('accepts Aseprite.exe (any casing)', () => {
+    expect(looksLikeAsepriteExecutable('C:\\Program Files\\Aseprite\\Aseprite.exe')).toBe(true);
+    expect(looksLikeAsepriteExecutable('C:\\tools\\aseprite.exe')).toBe(true);
+  });
+
+  it('accepts a self-built binary with a version suffix', () => {
+    expect(looksLikeAsepriteExecutable('C:\\aseprite-src\\build\\bin\\aseprite-1.3.7.exe')).toBe(true);
+  });
+
+  it('rejects an unrelated executable', () => {
+    expect(looksLikeAsepriteExecutable('C:\\Windows\\System32\\cmd.exe')).toBe(false);
+    expect(looksLikeAsepriteExecutable('C:\\Windows\\System32\\powershell.exe')).toBe(false);
+  });
+
+  it('rejects a non-.exe file even if named aseprite', () => {
+    expect(looksLikeAsepriteExecutable('C:\\notes\\aseprite.txt')).toBe(false);
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -537,14 +753,33 @@ Expected: FAIL — `Cannot find module '@/lib/services/shared/editDecision'`.
 
 ```typescript
 // lib/services/shared/editDecision.ts
+import path from 'path';
 
 export type EditDecision =
   | { ok: true; asepritePath: string; imagePath: string }
   | { ok: false; error: string };
 
+// Same guard app/api/images/[filename]/route.ts already uses for the read
+// path — reused here because a stored image_path reaches this route
+// without going through that route's own check, and can arrive via
+// git-imported JSON that AssetSchema doesn't format-validate.
+export function isSafeStoredFilename(filename: string): boolean {
+  return !filename.includes('/') && !filename.includes('\\') && !filename.includes('..');
+}
+
+// Proportionate mitigation for this app having no auth anywhere (see this
+// task's own Interfaces section above for the full reasoning): restricts
+// what can be launched to something whose filename actually looks like
+// Aseprite, rather than any already-present executable on the machine.
+export function looksLikeAsepriteExecutable(asepritePath: string): boolean {
+  return /^aseprite.*\.exe$/i.test(path.basename(asepritePath));
+}
+
 export function decideEditAction(params: {
   imagePathColumn: string | null;
+  imagePathIsSafe: boolean;
   asepritePathSetting: string | null;
+  asepritePathLooksLikeAseprite: boolean;
   imageAbsolutePath: string;
   imageExists: boolean;
   asepriteExists: boolean;
@@ -552,8 +787,14 @@ export function decideEditAction(params: {
   if (!params.imagePathColumn) {
     return { ok: false, error: 'This asset has no image.' };
   }
+  if (!params.imagePathIsSafe) {
+    return { ok: false, error: 'Invalid image path.' };
+  }
   if (!params.asepritePathSetting) {
     return { ok: false, error: 'Set your Aseprite path in Settings first.' };
+  }
+  if (!params.asepritePathLooksLikeAseprite) {
+    return { ok: false, error: 'Configured path must point to an Aseprite executable.' };
   }
   if (!params.imageExists) {
     return { ok: false, error: 'Image file not found on disk.' };
@@ -568,7 +809,7 @@ export function decideEditAction(params: {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/editDecision.test.ts`
-Expected: PASS (5 tests).
+Expected: PASS (15 tests: 7 for `decideEditAction`, 4 for `isSafeStoredFilename`, 4 for `looksLikeAsepriteExecutable`).
 
 - [ ] **Step 5: Commit**
 
@@ -587,8 +828,8 @@ git commit -m "Add pure decision function for the Edit-in-Aseprite action"
 - Test: `test/assetEdit.test.ts`
 
 **Interfaces:**
-- Consumes: `assetService.getById(id: string): Promise<Asset | null>` (existing, `@/lib/services/AssetService`), `settingsService.get` + `ASEPRITE_PATH_SETTING_KEY` (Task 1), `decideEditAction` (Task 3).
-- Produces: `POST /api/assets/[id]/edit` → `{success:true,data:{launched:true}}` on success, or `{success:false,error:string}` with status 404 (asset not found) or 400 (any `decideEditAction` rejection) or 500 (spawn itself threw).
+- Consumes: `assetService.getById(id: string): Promise<Asset | null>` (existing, `@/lib/services/AssetService`), `settingsService.get` + `ASEPRITE_PATH_SETTING_KEY` (Task 1), `decideEditAction` + `isSafeStoredFilename` + `looksLikeAsepriteExecutable` (Task 3).
+- Produces: `POST /api/assets/[id]/edit` → `{success:true,data:{launched:true}}` on success, or `{success:false,error:string}` with status 404 (asset not found), 400 (any `decideEditAction` rejection), or 500 (spawn threw synchronously, or emitted an async `'error'` within `SPAWN_ERROR_WAIT_MS`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -598,17 +839,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { EventEmitter } from 'events';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 
-const spawnMock = vi.fn(() => ({ unref: vi.fn() }));
+// A fake ChildProcess: a real EventEmitter (so .once('error', ...) works
+// exactly like the real thing) plus a stubbed unref(). Individual tests
+// can grab the returned emitter via spawnMock.mock.results to fire a
+// simulated async 'error' event.
+function makeFakeChild() {
+  const child = new EventEmitter() as EventEmitter & { unref: () => void };
+  child.unref = vi.fn();
+  return child;
+}
+const spawnMock = vi.fn(makeFakeChild);
 vi.mock('child_process', () => ({ spawn: (...args: unknown[]) => spawnMock(...args) }));
 
 let tempRoot: string;
 const STYLE_ID = '99999999-9999-9999-9999-999999999999';
 const ASSET_WITH_IMAGE_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const ASSET_NO_IMAGE_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+const ASSET_UNSAFE_PATH_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
 function editRequest(): NextRequest {
   return new NextRequest('http://localhost/api/assets/x/edit', { method: 'POST' });
@@ -616,6 +868,7 @@ function editRequest(): NextRequest {
 
 beforeEach(async () => {
   spawnMock.mockClear();
+  spawnMock.mockImplementation(makeFakeChild);
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-assetedit-'));
   await fsPromises.writeFile(path.join(tempRoot, 'package.json'), JSON.stringify({ name: 'gameforge-test' }));
 
@@ -642,6 +895,13 @@ beforeEach(async () => {
     `INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted)
      VALUES (?, ?, 'user-1', 'button', 'No Image', NULL, 1000, 0)`
   ).run(ASSET_NO_IMAGE_ID, STYLE_ID);
+  // Simulates a row that arrived via git-imported JSON, which AssetSchema
+  // does not format-validate — exactly the vector Round 1 review finding 2
+  // described. A normal upload flow never produces a path like this.
+  db.prepare(
+    `INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted)
+     VALUES (?, ?, 'user-1', 'button', 'Unsafe', '../../../outside.png', 1000, 0)`
+  ).run(ASSET_UNSAFE_PATH_ID, STYLE_ID);
 });
 
 afterEach(async () => {
@@ -665,12 +925,36 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(body.error).toBe('This asset has no image.');
   });
 
+  it('400s and never touches the filesystem when the stored image path is unsafe', async () => {
+    const { POST } = await import('@/app/api/assets/[id]/edit/route');
+    const res = await POST(editRequest(), { params: Promise.resolve({ id: ASSET_UNSAFE_PATH_ID }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Invalid image path.');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('400s with a specific message when no Aseprite path is configured', async () => {
     const { POST } = await import('@/app/api/assets/[id]/edit/route');
     const res = await POST(editRequest(), { params: Promise.resolve({ id: ASSET_WITH_IMAGE_ID }) });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('Set your Aseprite path in Settings first.');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('400s when the configured path exists but its filename does not look like Aseprite', async () => {
+    const { settingsService } = await import('@/lib/services/SettingsService');
+    const wrongExePath = path.join(tempRoot, 'notepad.exe');
+    await fsPromises.writeFile(wrongExePath, 'not-aseprite');
+    await settingsService.set('aseprite_path', wrongExePath);
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'images', 'confirm.png'), 'fake-png-bytes');
+
+    const { POST } = await import('@/app/api/assets/[id]/edit/route');
+    const res = await POST(editRequest(), { params: Promise.resolve({ id: ASSET_WITH_IMAGE_ID }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('Configured path must point to an Aseprite executable.');
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
@@ -689,7 +973,7 @@ describe('POST /api/assets/[id]/edit', () => {
 
   it('400s when the image file is missing on disk even though the DB row has a path', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
-    const fakeAsepritePath = path.join(tempRoot, 'fake-aseprite.exe');
+    const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
     await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
     await settingsService.set('aseprite_path', fakeAsepritePath);
     // Deliberately NOT creating storage/images/confirm.png here.
@@ -704,7 +988,7 @@ describe('POST /api/assets/[id]/edit', () => {
 
   it('launches Aseprite with the resolved absolute image path when everything checks out', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
-    const fakeAsepritePath = path.join(tempRoot, 'fake-aseprite.exe');
+    const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
     await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
     await settingsService.set('aseprite_path', fakeAsepritePath);
     const imagePath = path.join(tempRoot, 'storage', 'images', 'confirm.png');
@@ -721,6 +1005,30 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(calledExe).toBe(fakeAsepritePath);
     expect(calledArgs).toEqual([imagePath]);
     expect(calledOpts).toMatchObject({ detached: true, stdio: 'ignore' });
+  });
+
+  it('reports a launch failure instead of crashing when spawn emits an async error', async () => {
+    const { settingsService } = await import('@/lib/services/SettingsService');
+    const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
+    await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
+    await settingsService.set('aseprite_path', fakeAsepritePath);
+    const imagePath = path.join(tempRoot, 'storage', 'images', 'confirm.png');
+    await fsPromises.writeFile(imagePath, 'fake-png-bytes');
+
+    spawnMock.mockImplementationOnce(() => {
+      const child = makeFakeChild();
+      // Simulate the real, asynchronous failure mode: spawn() returns
+      // successfully, then the OS-level failure surfaces on 'error'
+      // shortly after (e.g. permission denied, not actually executable).
+      setImmediate(() => child.emit('error', new Error('spawn EACCES')));
+      return child;
+    });
+
+    const { POST } = await import('@/app/api/assets/[id]/edit/route');
+    const res = await POST(editRequest(), { params: Promise.resolve({ id: ASSET_WITH_IMAGE_ID }) });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.success).toBe(false);
   });
 });
 ```
@@ -741,10 +1049,23 @@ import { spawn } from 'child_process';
 import { assetService } from '@/lib/services/AssetService';
 import { settingsService } from '@/lib/services/SettingsService';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
-import { decideEditAction } from '@/lib/services/shared/editDecision';
+import {
+  decideEditAction,
+  isSafeStoredFilename,
+  looksLikeAsepriteExecutable,
+} from '@/lib/services/shared/editDecision';
 import { ASEPRITE_PATH_SETTING_KEY } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
+
+// How long to wait for spawn's asynchronous 'error' event before giving up
+// and reporting success anyway. spawn() itself returns immediately either
+// way; a real, immediate failure (bad permissions, not actually an
+// executable) reliably surfaces well within this window in practice. This
+// does not wait for Aseprite to fully start or exit — only for the narrow
+// class of near-immediate launch failures, matching the spec's "fire and
+// forget, don't wait for Aseprite to close" design.
+const SPAWN_ERROR_WAIT_MS = 300;
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -755,22 +1076,43 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const asepritePathSetting = await settingsService.get(ASEPRITE_PATH_SETTING_KEY);
-    const imageAbsolutePath = asset.image_path
-      ? path.join(getProjectRoot(), 'storage', 'images', asset.image_path)
-      : '';
+
+    const imagePathIsSafe = !!asset.image_path && isSafeStoredFilename(asset.image_path);
+    const imageAbsolutePath =
+      asset.image_path && imagePathIsSafe
+        ? path.join(getProjectRoot(), 'storage', 'images', asset.image_path)
+        : '';
+    const asepritePathLooksLikeAseprite =
+      !!asepritePathSetting && looksLikeAsepriteExecutable(asepritePathSetting);
+
+    // isFile() rather than existsSync: a directory or other non-regular
+    // path would pass an existsSync-only check and produce a confusing
+    // spawn failure instead of the specific, actionable message below.
+    // statSync throws ENOENT for a path that doesn't exist at all, so the
+    // "doesn't exist" and "exists but isn't a file" cases both correctly
+    // collapse to false here.
+    function isRegularFile(p: string): boolean {
+      try {
+        return fs.statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    }
 
     let imageExists = false;
     let asepriteExists = false;
     try {
-      imageExists = !!asset.image_path && fs.existsSync(imageAbsolutePath);
-      asepriteExists = !!asepritePathSetting && fs.existsSync(asepritePathSetting);
+      imageExists = !!imageAbsolutePath && isRegularFile(imageAbsolutePath);
+      asepriteExists = !!asepritePathSetting && isRegularFile(asepritePathSetting);
     } catch (e) {
       console.error('Failed checking file existence for edit action:', e);
     }
 
     const decision = decideEditAction({
       imagePathColumn: asset.image_path,
+      imagePathIsSafe,
       asepritePathSetting,
+      asepritePathLooksLikeAseprite,
       imageAbsolutePath,
       imageExists,
       asepriteExists,
@@ -781,7 +1123,28 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }
 
     try {
-      spawn(decision.asepritePath, [decision.imagePath], { detached: true, stdio: 'ignore' }).unref();
+      const child = spawn(decision.asepritePath, [decision.imagePath], {
+        detached: true,
+        stdio: 'ignore',
+      });
+
+      const spawnError = await new Promise<Error | null>(resolve => {
+        const timer = setTimeout(() => resolve(null), SPAWN_ERROR_WAIT_MS);
+        child.once('error', err => {
+          clearTimeout(timer);
+          resolve(err);
+        });
+      });
+
+      child.unref();
+
+      if (spawnError) {
+        console.error('Failed to launch Aseprite:', spawnError);
+        return NextResponse.json(
+          { success: false, error: 'Could not launch Aseprite. Check the configured path.' },
+          { status: 500 }
+        );
+      }
     } catch (e) {
       console.error('Failed to spawn Aseprite:', e);
       return NextResponse.json({ success: false, error: 'Could not launch Aseprite.' }, { status: 500 });
@@ -798,7 +1161,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/assetEdit.test.ts`
-Expected: PASS (6 tests).
+Expected: PASS (9 tests). The success-path and error-path tests each take a little over 300ms in real time (the bounded wait genuinely waits), which is fine — this file isn't run often enough for that to matter.
 
 - [ ] **Step 5: Add the button to the asset detail page**
 
