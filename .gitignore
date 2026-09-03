@@ -1,0 +1,12 @@
+node_modules/
+.env*.local
+data.db
+data.db-journal
+data.db-wal
+data.db-shm
+storage/exports/
+.worker.lock
+.next/
+*.local
+*.tsbuildinfo
+.DS_Store
