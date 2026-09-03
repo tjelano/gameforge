@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { DatabaseConnection } from '@/lib/database';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getImageGenerator } from '@/lib/services/ImageGenerator';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
+import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 
 const POLL_INTERVAL_MS = 2000;
 const LOCK_FILE = path.join(getProjectRoot(), '.worker.lock');
@@ -37,11 +39,12 @@ function releaseLock(): void {
   }
 }
 
-async function processJob(job: any): Promise<void> {
+export async function processJob(job: any): Promise<void> {
   const db = DatabaseConnection.getInstance();
 
+  let options: any;
   try {
-    JSON.parse(job.options);
+    options = JSON.parse(job.options);
   } catch (e) {
     // Malformed options JSON is a hard failure, not something to
     // silently ignore or default around — it means the row was
@@ -51,8 +54,28 @@ async function processJob(job: any): Promise<void> {
     return;
   }
 
+  const isUiSheet = Array.isArray(options.pieces) && options.pieces.length > 0;
+
+  // A UI sheet spends a real, metered Pixellab call — validate the shape
+  // and bound the piece count server-side before it gets that far. The
+  // browser's MAX_PIECES_PER_SHEET cap and /api/generate's options
+  // validation (z.record(...).unknown()) don't enforce this on their own.
+  let sheetOptions: ReturnType<typeof UiSheetOptionsSchema.parse> | null = null;
+  if (isUiSheet) {
+    const parsed = UiSheetOptionsSchema.safeParse(options);
+    if (!parsed.success) {
+      db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+      console.error(`❌ Job ${job.id} has invalid UI sheet options:`, parsed.error.message);
+      return;
+    }
+    sheetOptions = parsed.data;
+  }
+
   try {
-    const result = await getImageGenerator().generate(job.prompt, job.style_id);
+    const result = sheetOptions
+      ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
+      : await getImageGenerator().generate(job.prompt, job.style_id);
+
     db.prepare(`UPDATE jobs SET status = 'complete', result_path = ?, updated_at = ? WHERE id = ?`)
       .run(result.path, Date.now(), job.id);
     console.log(`✅ Job ${job.id} complete -> ${result.path}`);
@@ -89,10 +112,16 @@ function scheduleNext(): void {
   }, POLL_INTERVAL_MS);
 }
 
-acquireLock();
-process.on('exit', releaseLock);
-process.on('SIGINT', () => { releaseLock(); process.exit(0); });
-process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
+// Only run the actual worker loop (lock file, signal handlers, polling)
+// when this file is the process entry point (`tsx worker.ts`) — not when
+// a test imports processJob() to exercise it directly.
+const isMainModule = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) {
+  acquireLock();
+  process.on('exit', releaseLock);
+  process.on('SIGINT', () => { releaseLock(); process.exit(0); });
+  process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
 
-console.log(`🚀 GameForge worker started (pid ${process.pid}, batch size ${WORKER_BATCH_SIZE}).`);
-scheduleNext();
+  console.log(`🚀 GameForge worker started (pid ${process.pid}, batch size ${WORKER_BATCH_SIZE}).`);
+  scheduleNext();
+}

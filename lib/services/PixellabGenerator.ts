@@ -3,6 +3,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import type { ImageGenerator, GenerateOptions, GeneratedImage } from '@/lib/services/ImageGenerator';
+import { toUiPiece, type PlacedPiece } from '@/lib/utils/pieceShapes';
 
 const API_BASE = 'https://api.pixellab.ai/v2';
 const MIN_SIZE = 16;
@@ -18,6 +19,21 @@ interface PixfluxResponse {
   image: { type: 'base64'; base64: string; format: string };
   usage?: { type: string; generations?: number; usd?: number };
 }
+
+interface CreateUiAssetResponse {
+  background_job_id: string;
+  ui_asset_id: string;
+  status: string;
+}
+
+interface UiAssetDetail {
+  id: string;
+  status: string | null;
+  image_url: string | null;
+}
+
+const DEFAULT_POLL_INTERVAL_MS = 2000;
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
 
 /**
  * Real Pixellab (api.pixellab.ai) pixflux text-to-image endpoint.
@@ -62,6 +78,80 @@ export class PixellabGenerator implements ImageGenerator {
       path: filename,
       prompt,
       metadata: { width, height, format },
+    };
+  }
+
+  async generateUiAsset(
+    description: string,
+    pieces: PlacedPiece[],
+    imageSize: { width: number; height: number },
+    colorPalette?: string,
+    pollOptions?: { pollIntervalMs?: number; timeoutMs?: number }
+  ): Promise<GeneratedImage> {
+    const pollIntervalMs = pollOptions?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    const timeoutMs = pollOptions?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+    const createRes = await fetch(`${API_BASE}/create-ui-asset`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description,
+        image_size: imageSize,
+        pieces: pieces.map(toUiPiece),
+        color_palette: colorPalette,
+        no_background: true,
+      }),
+    });
+
+    if (!createRes.ok) {
+      const body = await createRes.text().catch(() => '');
+      throw new Error(`Pixellab UI asset creation failed (${createRes.status}): ${body || createRes.statusText}`);
+    }
+
+    const created = (await createRes.json()) as CreateUiAssetResponse;
+    const deadline = Date.now() + timeoutMs;
+
+    let detail: UiAssetDetail;
+    while (true) {
+      if (Date.now() > deadline) {
+        throw new Error(`Pixellab UI asset ${created.ui_asset_id} timed out waiting for completion`);
+      }
+
+      const pollRes = await fetch(`${API_BASE}/ui-assets/${created.ui_asset_id}`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      });
+      if (!pollRes.ok) {
+        throw new Error(`Pixellab UI asset poll failed (${pollRes.status}): ${pollRes.statusText}`);
+      }
+      detail = (await pollRes.json()) as UiAssetDetail;
+
+      if (detail.status === 'completed') break;
+      if (detail.status === 'failed') {
+        throw new Error(`Pixellab UI asset ${created.ui_asset_id} failed`);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    if (!detail.image_url) {
+      throw new Error(`Pixellab UI asset ${created.ui_asset_id} completed with no image_url`);
+    }
+
+    const imageRes = await fetch(detail.image_url);
+    if (!imageRes.ok) {
+      throw new Error(`Failed to download Pixellab UI asset image (${imageRes.status})`);
+    }
+    const bytes = Buffer.from(await imageRes.arrayBuffer());
+
+    const filename = `pixellab-sheet-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.png`;
+    const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
+    await fsPromises.mkdir(imagesDir, { recursive: true });
+    await fsPromises.writeFile(path.join(imagesDir, filename), bytes);
+
+    return {
+      path: filename,
+      prompt: description,
+      metadata: { width: imageSize.width, height: imageSize.height, format: 'png' },
     };
   }
 }

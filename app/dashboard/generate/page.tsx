@@ -6,6 +6,7 @@ import { usePolling } from '@/lib/hooks/usePolling';
 import { useJobStore } from '@/lib/store/useJobStore';
 import { getClientId } from '@/lib/utils/clientId';
 import { JobCard } from '@/app/components/JobCard';
+import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 
 export default function GeneratePage() {
   const { styles, loading: stylesLoading } = useStyles();
@@ -66,16 +67,7 @@ export default function GeneratePage() {
         </div>
       ) : (
         <form className="card" onSubmit={handleSubmit} style={{ marginBottom: 32, maxWidth: 480 }}>
-          <div className="field">
-            <label htmlFor="style">Style Bible</label>
-            <select id="style" value={activeStyleId} onChange={e => setStyleId(e.target.value)}>
-              {styles.map(style => (
-                <option key={style.id} value={style.id}>
-                  {style.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <StyleBiblePicker styles={styles} value={activeStyleId} onChange={setStyleId} />
 
           <div className="field">
             <label htmlFor="assetType">Asset type</label>

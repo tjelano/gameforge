@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+export const NineSliceMarginsSchema = z.object({
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  left: z.number(),
+});
+export type NineSliceMargins = z.infer<typeof NineSliceMarginsSchema>;
+
 export const StyleSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
@@ -21,6 +29,9 @@ export const AssetSchema = z.object({
   image_path: z.string().nullable(),
   created_at: z.number().int(),
   is_deleted: z.union([z.literal(0), z.literal(1)]),
+  source_job_id: z.string().uuid().nullable(),
+  nine_slice_margins: z.string().nullable(),
+  states: z.string(),
 });
 export type Asset = z.infer<typeof AssetSchema>;
 
