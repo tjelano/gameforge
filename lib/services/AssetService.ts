@@ -1,0 +1,135 @@
+import crypto from 'crypto';
+import fsPromises from 'fs/promises';
+import path from 'path';
+import { DatabaseConnection } from '@/lib/database';
+import { getProjectRoot } from '@/lib/utils/projectRoot';
+import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
+import { AssetSchema, type Asset } from '@/lib/database/schema';
+
+class AssetServiceImpl {
+  async create(input: {
+    styleId: string;
+    createdBy: string;
+    assetType: string;
+    prompt: string;
+    imagePath: string | null;
+  }): Promise<Asset> {
+    const db = DatabaseConnection.getInstance();
+    const id = crypto.randomUUID();
+    db.prepare(`
+      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now());
+    return (await this.getById(id))!;
+  }
+
+  async update(id: string, patch: { prompt?: string; assetType?: string }): Promise<Asset | null> {
+    const existing = await this.getById(id);
+    if (!existing) return null;
+    const db = DatabaseConnection.getInstance();
+    db.prepare('UPDATE assets SET prompt = ?, asset_type = ? WHERE id = ?').run(
+      patch.prompt ?? existing.prompt,
+      patch.assetType ?? existing.asset_type,
+      id
+    );
+    return this.getById(id);
+  }
+  /** All non-deleted assets, newest first. */
+  async getActiveAssets(): Promise<Asset[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare('SELECT * FROM assets WHERE is_deleted = 0 ORDER BY created_at DESC').all();
+    return rows.map(row => AssetSchema.parse(row));
+  }
+
+  /** Every asset row, active and soft-deleted alike. Used for Git export. */
+  async getAll(): Promise<Asset[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare('SELECT * FROM assets ORDER BY created_at DESC').all();
+    return rows.map(row => AssetSchema.parse(row));
+  }
+
+  async getById(id: string): Promise<Asset | null> {
+    const db = DatabaseConnection.getInstance();
+    const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(id);
+    return row ? AssetSchema.parse(row) : null;
+  }
+
+  async getPage(limit: number, offset: number): Promise<Asset[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare(
+      'SELECT * FROM assets WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(limit, offset);
+    return rows.map(row => AssetSchema.parse(row));
+  }
+
+  async softDelete(id: string): Promise<void> {
+    const db = DatabaseConnection.getInstance();
+    db.prepare('UPDATE assets SET is_deleted = 1 WHERE id = ?').run(id);
+  }
+
+  /**
+   * Removes physical files in storage/images/ that are no longer needed.
+   *
+   * An image is PROTECTED (never deleted) if it is referenced by:
+   *  - any asset row, active OR soft-deleted — soft-deleted assets must
+   *    stay recoverable, image included, until permanently pruned by
+   *    some future explicit "empty trash" action (not this function).
+   *  - any job with status IN ('pending', 'processing', 'complete') —
+   *    i.e. anything the user hasn't yet promoted or discarded. A
+   *    'complete' job the user simply hasn't looked at yet is not
+   *    orphaned; it's awaiting a decision.
+   *
+   * Everything else in storage/images/ is deleted. Returns the count
+   * of files actually removed.
+   */
+  async cleanupOrphanedImages(): Promise<number> {
+    const db = DatabaseConnection.getInstance();
+    const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
+
+    let filenames: string[];
+    try {
+      filenames = (await fsPromises.readdir(imagesDir, { withFileTypes: true }))
+        .filter(entry => entry.isFile() && entry.name !== '.gitkeep')
+        .map(entry => entry.name);
+    } catch (e) {
+      console.error('Failed to read storage/images for cleanup:', e);
+      return 0;
+    }
+
+    const assetPaths = new Set(
+      (db.prepare('SELECT image_path FROM assets WHERE image_path IS NOT NULL').all() as { image_path: string }[])
+        .map(row => row.image_path)
+    );
+
+    const activeJobPaths = new Set(
+      (db.prepare(`
+        SELECT result_path FROM jobs
+        WHERE result_path IS NOT NULL
+        AND status IN ('pending', 'processing', 'complete')
+      `).all() as { result_path: string }[])
+        .map(row => row.result_path)
+    );
+
+    const orphans = filenames.filter(f => !assetPaths.has(f) && !activeJobPaths.has(f));
+
+    let removed = 0;
+    for (let i = 0; i < orphans.length; i += IO_WRITE_BATCH_SIZE) {
+      const chunk = orphans.slice(i, i + IO_WRITE_BATCH_SIZE);
+      const results = await Promise.all(chunk.map(async (filename) => {
+        const filePath = path.join(imagesDir, filename);
+        try {
+          await fsPromises.unlink(filePath);
+          return true;
+        } catch (e: any) {
+          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned image ${filename}:`, e);
+          return false;
+        }
+      }));
+      removed += results.filter(Boolean).length;
+    }
+
+    return removed;
+  }
+}
+
+export const assetService = new AssetServiceImpl();
