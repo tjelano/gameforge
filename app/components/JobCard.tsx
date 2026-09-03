@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
 
 interface JobCardProps {
@@ -10,6 +11,15 @@ interface JobCardProps {
 
 export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardProps) {
   const canAct = job.status === 'complete' || job.status === 'failed';
+
+  const hasPieces = (() => {
+    try {
+      const pieces = JSON.parse(job.options).pieces;
+      return Array.isArray(pieces) && pieces.length > 0;
+    } catch {
+      return false;
+    }
+  })();
 
   return (
     <div className="card" style={{ display: 'flex', gap: 14 }}>
@@ -52,6 +62,11 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
 
         {(onPromote || onDiscard || onRetry) && (
           <div style={{ display: 'flex', gap: 8 }}>
+            {hasPieces && job.result_path && (
+              <Link href={`/dashboard/jobs/${job.id}/split`} className="btn">
+                Split into elements
+              </Link>
+            )}
             {onPromote && (
               <button
                 className="btn btn-keeper"

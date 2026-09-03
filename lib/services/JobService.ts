@@ -15,7 +15,11 @@ class JobServiceImpl {
    * In-flight jobs (pending/processing), plus jobs that reached a
    * terminal state within the last 5 minutes — so the dashboard's
    * polling hook can show "just finished" without polling every job
-   * ever created.
+   * ever created. UI sheet jobs (options.pieces is a non-empty array)
+   * are always included regardless of age, since a completed sheet
+   * needs to stay reachable for Split/Promote/Discard until the user
+   * acts on it — checked structurally via JSON1, not via asset_type
+   * (which is display-label-only, not a contract).
    */
   async getActive(): Promise<Job[]> {
     const db = DatabaseConnection.getInstance();
@@ -23,6 +27,9 @@ class JobServiceImpl {
       SELECT * FROM jobs
       WHERE status IN ('pending', 'processing')
       OR (status IN ('complete', 'failed', 'promoted', 'discarded') AND updated_at > ?)
+      OR (status IN ('complete', 'failed', 'promoted', 'discarded')
+          AND json_type(options, '$.pieces') = 'array'
+          AND json_array_length(json_extract(options, '$.pieces')) > 0)
       ORDER BY created_at DESC
     `).all(Date.now() - ACTIVE_WINDOW_MS);
     return rows.map(row => JobSchema.parse(row));

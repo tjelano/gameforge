@@ -23,6 +23,9 @@ function assetJson(note: string) {
     image_path: null,
     created_at: 1000,
     is_deleted: 0,
+    source_job_id: null,
+    nine_slice_margins: null,
+    states: '[]',
   });
 }
 

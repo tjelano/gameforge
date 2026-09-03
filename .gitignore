@@ -10,3 +10,4 @@ storage/exports/
 *.local
 *.tsbuildinfo
 .DS_Store
+.worktrees/

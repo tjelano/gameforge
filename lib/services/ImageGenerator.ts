@@ -3,6 +3,7 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { createPlaceholderPng } from '@/lib/utils/placeholderImage';
 import { PixellabGenerator } from '@/lib/services/PixellabGenerator';
+import type { PlacedPiece } from '@/lib/utils/pieceShapes';
 
 export interface GenerateOptions {
   signal?: AbortSignal;
@@ -16,6 +17,12 @@ export interface GeneratedImage {
 
 export interface ImageGenerator {
   generate(prompt: string, styleId: string, options?: GenerateOptions): Promise<GeneratedImage>;
+  generateUiAsset(
+    description: string,
+    pieces: PlacedPiece[],
+    imageSize: { width: number; height: number },
+    colorPalette?: string
+  ): Promise<GeneratedImage>;
 }
 
 const PLACEHOLDER_SIZE = 64;
@@ -50,6 +57,30 @@ export class MockGenerator implements ImageGenerator {
       path: filename,
       prompt,
       metadata: { width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE, format: 'png' },
+    };
+  }
+
+  async generateUiAsset(
+    description: string,
+    _pieces: PlacedPiece[],
+    imageSize: { width: number; height: number },
+    _colorPalette?: string
+  ): Promise<GeneratedImage> {
+    const filename = `mock-sheet-${Date.now()}.png`;
+    // createPlaceholderPng only draws a square; using the long side for both
+    // dimensions means a landscape/portrait placeholder won't exactly match
+    // the requested aspect ratio — fine for a mock no one inspects pixel-by-pixel.
+    const longSide = Math.max(imageSize.width, imageSize.height);
+    const placeholder = createPlaceholderPng(longSide, [0xe8, 0xa3, 0x3d, 0xff]);
+
+    const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
+    await fsPromises.mkdir(imagesDir, { recursive: true });
+    await fsPromises.writeFile(path.join(imagesDir, filename), placeholder);
+
+    return {
+      path: filename,
+      prompt: description,
+      metadata: { width: imageSize.width, height: imageSize.height, format: 'png' },
     };
   }
 }
