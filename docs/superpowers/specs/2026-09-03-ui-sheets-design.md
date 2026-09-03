@@ -86,6 +86,27 @@ and reuse it in both `AssetService` and any route that writes these fields.
 New method on `PixellabGenerator`: `generateUiAsset(pieces, description,
 imageSize, colorPalette?)`.
 
+**Output size is a fixed preset list, not a free-range picker.** The raw
+OpenAPI schema states a 192-688px min/max per axis, but Pixellab's own UI
+(confirmed via screenshot) only actually exposes 10 discrete presets:
+
+| Size | Aspect | Size | Aspect |
+|---|---|---|---|
+| 256x256 | square | 592x448 | 4:3 landscape |
+| 296x224 | 4:3 landscape | 448x592 | 3:4 portrait |
+| 224x296 | 3:4 portrait | 688x384 | 16:9 landscape |
+| 344x192 | 16:9 landscape | 384x688 | 9:16 portrait |
+| 192x344 | 9:16 portrait | 512x512 | square |
+
+GameForge's canvas should offer this exact list as a dropdown rather than
+free-form width/height inputs — fewer odd resolutions no one's actually
+tested. It also simplifies the coordinate-space conversion mentioned above:
+since the piece coordinate space's long axis is always exactly 512, and each
+preset's long side is known ahead of time, the scale factor between the
+canvas and Pixellab's coordinate space for any selected preset is just
+`presetLongSide / 512` — a single known ratio per option, not a general
+aspect-ratio calculation done at request time.
+
 1. `POST /v2/create-ui-asset` with `{ description, image_size, pieces,
    color_palette, no_background: true }`. Response is `202` with
    `{ background_job_id, ui_asset_id, status }` — this endpoint is
