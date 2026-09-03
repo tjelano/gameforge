@@ -1,7 +1,10 @@
 # UI Sheets — design spec
 
 **Date:** 2026-09-03
-**Status:** Approved by user, pending self-review pass below.
+**Status:** Approved. Self-review pass and a final audit against the live
+codebase both done — see inline "Caught during self-review" /
+"Confirmed against the live code" notes throughout. Ready for
+implementation.
 
 ## Motivation
 
@@ -81,6 +84,12 @@ CREATE INDEX idx_assets_source_job_id ON assets(source_job_id);
 `NineSliceMarginsSchema` (`z.object({ top, right, bottom, left }).nullable()`)
 and reuse it in both `AssetService` and any route that writes these fields.
 
+**Checked against the live code:** `AssetService.update()` currently
+hardcodes its `UPDATE` statement to exactly `prompt` and `asset_type` — the
+SQL itself, not just the TypeScript parameter type, needs extending for the
+two new editable fields, same for `UpdateAssetSchema` in the
+`PUT /api/assets/[id]` route.
+
 ## Pixellab integration
 
 New method on `PixellabGenerator`: `generateUiAsset(pieces, description,
@@ -134,8 +143,17 @@ otherwise call the existing `generate()`.
 A new page, not a mode on the existing Generate page — different enough
 workflow (canvas editor vs. a form) that combining them would complicate both.
 
-- **Style Bible picker** — same component/behavior as the existing Generate
-  page. A sheet belongs to a style like everything else GameForge generates.
+- **Style Bible picker** — the existing Generate page has this inlined as a
+  plain `<select>`, not a shared component. Extract it into one now
+  (`<StyleBiblePicker>` or similar) and use it on both pages — matches the
+  precedent already set by `useStyles` itself, pulled out once a second
+  consumer showed up.
+- **Description field maps to `job.prompt`** (required, non-empty, same as
+  every other job) — the sheet's overall description, e.g. "medieval fantasy
+  RPG UI kit." This is distinct from each piece's own `label`
+  (`options.pieces[].label`, e.g. "Inventory") — one overall description,
+  many individually-named pieces. An optional color-palette text field sits
+  alongside it (Pixellab's `color_palette` param, e.g. "brown and gold").
 - **Piece palette** — one-click presets matching Pixellab's own: Button,
   Icon button, Toolbar, Tab, Panel, Window, Health bar, Avatar, Triangle,
   Pentagon, Hexagon, Octagon. Each preset is a convenience that inserts a
@@ -162,9 +180,6 @@ workflow (canvas editor vs. a form) that combining them would complicate both.
   when one piece's box is more than 50% covered by another's — cheap
   client-side rectangle-overlap check, surfaced as an inline warning, not a
   submit blocker.
-- **Description + color palette fields** — same shape as today's Generate
-  page's prompt field, plus the optional `color_palette` string Pixellab's
-  endpoint accepts.
 - Submitting creates a job exactly like `POST /api/generate` does today, with
   `options: { pieces, colorPalette }` and `assetType: 'ui_sheet'` (display
   label only, per the data-model section above).
@@ -202,6 +217,16 @@ alongside them on the Jobs page).
 - Re-opening Split on an already-split job is allowed and unguarded — see
   "Out of scope" above. It just creates more assets; nothing prevents or
   warns about re-splitting the same piece twice.
+- **Confirmed against the live code, not just designed on paper:** because a
+  sheet job stays at `status: 'complete'` forever (no new status), the
+  existing `cleanupOrphanedImages()` already protects the composite
+  indefinitely with zero changes, and the existing 5-minute active-job
+  window already makes an old, already-split job quietly stop showing up in
+  the Jobs "needs a decision" view — no new hide-if-split logic needed
+  anywhere. "Promote to Asset" also stays available on a sheet job
+  unchanged, alongside "Split into elements" — promoting one keeps the whole
+  composite as its own asset too, which is a legitimate, harmless thing to
+  want, not a conflict with also splitting it.
 
 ## 9-slice and states editing
 
