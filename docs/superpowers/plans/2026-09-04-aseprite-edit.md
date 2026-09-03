@@ -64,6 +64,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import Database from 'better-sqlite3';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 
@@ -108,10 +109,46 @@ describe('DatabaseConnection migration runner idempotency', () => {
     expect(appliedCount2).toBe(appliedCount);
   });
 });
+
+describe('BEGIN IMMEDIATE lock actually serializes concurrent connections', () => {
+  it('a second connection blocks (per busy_timeout) rather than erroring immediately while the first holds the lock', () => {
+    // This is the specific mechanism the migration-runner fix depends on:
+    // does BEGIN IMMEDIATE + busy_timeout genuinely make a second writer
+    // wait, rather than fail instantly? Two real, separate better-sqlite3
+    // connections to the SAME file exercise SQLite's actual file-level
+    // locking — this is the part that matters for proving the lock works;
+    // it doesn't require two separate OS processes, since SQLite's locking
+    // is per-connection/per-file-handle, identical whether those handles
+    // live in one process or two. A genuine two-OS-process test would
+    // additionally need to solve this project's @/ path-alias resolution
+    // inside a spawned child process for no extra evidence about the
+    // locking mechanism itself — disproportionate for what it would add.
+    const dbPath = path.join(tempRoot, 'data.db');
+    DatabaseConnection.getInstance(); // ensures data.db + migrations table exist
+
+    const dbA = new Database(dbPath);
+    dbA.pragma('busy_timeout = 5000');
+    dbA.exec('BEGIN IMMEDIATE'); // holds the write lock, uncommitted
+
+    const dbB = new Database(dbPath);
+    dbB.pragma('busy_timeout = 200'); // short on purpose so the test doesn't hang
+    const start = Date.now();
+    expect(() => dbB.exec('BEGIN IMMEDIATE')).toThrow();
+    const elapsed = Date.now() - start;
+    // Proves B actually waited on A's lock rather than failing instantly —
+    // an instant SQLITE_BUSY with no wait would mean busy_timeout isn't
+    // doing anything, which would make the whole fix meaningless.
+    expect(elapsed).toBeGreaterThanOrEqual(150);
+
+    dbA.exec('ROLLBACK');
+    dbA.close();
+    dbB.close();
+  });
+});
 ```
 
 Run: `npx vitest run test/migrationConcurrency.test.ts`
-Expected: PASS even before the refactor — this test proves idempotency (the property the fix below depends on), not the race itself. True cross-process concurrent access isn't practically reproducible in a synchronous, single-threaded test without spawning real OS processes, which is disproportionate for this fix; the refactor's correctness rests on code inspection (this task's own reasoning above: `BEGIN IMMEDIATE` + re-check-inside-the-lock is a standard, well-understood pattern for exactly this race) plus this idempotency test, matching how the spec already treats the `spawn` call itself as "not meaningfully unit-testable, verified manually."
+Expected: PASS even before the refactor for the first `describe` block (idempotency); the second `describe` block's test is independent of the refactor too — it tests SQLite's own locking behavior plus the `busy_timeout` pragma this codebase already sets, not code this task changes. Both together are the evidence for this fix: the lock genuinely serializes concurrent writers (this test), and re-checking applied-status *inside* that lock before deciding to run a migration is what makes "already applied" the correct outcome for whichever connection loses the race (the idempotency test, plus code inspection of the refactor itself — BEGIN IMMEDIATE + re-check-inside-the-lock is a standard, well-understood pattern for exactly this class of race).
 
 Replace `lib/database/index.ts`'s `runMigrations` method (and remove the now-redundant `tableCheck` block above it) with:
 
@@ -138,15 +175,20 @@ Replace `lib/database/index.ts`'s `runMigrations` method (and remove the now-red
     `);
 
     for (const file of files) {
-      // BEGIN IMMEDIATE acquires SQLite's write lock right away instead of
-      // lazily on first write. This closes the race where two processes
-      // (the Next.js server and the separate worker process, both calling
-      // DatabaseConnection.getInstance() independently on startup) both
-      // read "not yet applied" before either commits — the second process
-      // to reach BEGIN IMMEDIATE blocks (up to busy_timeout) until the
-      // first finishes, then re-checks applied status before deciding.
-      db.exec('BEGIN IMMEDIATE');
       try {
+        // BEGIN IMMEDIATE acquires SQLite's write lock right away instead
+        // of lazily on first write. This closes the race where two
+        // processes (the Next.js server and the separate worker process,
+        // both calling DatabaseConnection.getInstance() independently on
+        // startup) both read "not yet applied" before either commits — the
+        // second process to reach BEGIN IMMEDIATE blocks (up to
+        // busy_timeout) until the first finishes, then re-checks applied
+        // status before deciding. It's inside this try (not before it) so
+        // a failure acquiring the lock itself — e.g. busy_timeout
+        // exceeded waiting on the other process — is handled by the same
+        // path as every other failure below, rather than propagating
+        // uncaught from outside the try/catch.
+        db.exec('BEGIN IMMEDIATE');
         const alreadyApplied = db.prepare('SELECT 1 FROM migrations WHERE name = ?').get(file);
         if (!alreadyApplied) {
           console.log(`📦 Running migration: ${file}`);
@@ -157,7 +199,11 @@ Replace `lib/database/index.ts`'s `runMigrations` method (and remove the now-red
         }
         db.exec('COMMIT');
       } catch (error) {
-        db.exec('ROLLBACK');
+        // Only roll back if a transaction is actually open — if BEGIN
+        // IMMEDIATE itself is what failed (e.g. lock-wait timeout), there
+        // is nothing to roll back, and calling ROLLBACK anyway would throw
+        // its own "no transaction is active" error, masking the real one.
+        if (db.inTransaction) db.exec('ROLLBACK');
         console.error(`❌ Migration failed: ${file}`, error);
         throw error;
       }
@@ -420,6 +466,20 @@ describe('GET/PUT /api/settings/aseprite-path', () => {
     const res = await putPath(putRequest({ path: 123 }));
     expect(res.status).toBe(400);
   });
+
+  it('PUT rejects a relative path with a 400', async () => {
+    const res = await putPath(putRequest({ path: 'Aseprite.exe' }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
+
+  it('PUT trims surrounding whitespace before validating and saving', async () => {
+    const res = await putPath(putRequest({ path: '  C:\\Aseprite\\Aseprite.exe  ' }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.path).toBe('C:\\Aseprite\\Aseprite.exe');
+  });
 });
 ```
 
@@ -434,15 +494,24 @@ Expected: FAIL — `Cannot find module '@/app/api/settings/aseprite-path/route'`
 // app/api/settings/aseprite-path/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import path from 'path';
 import { settingsService } from '@/lib/services/SettingsService';
 import { ASEPRITE_PATH_SETTING_KEY } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
-// No .min(1): an empty string is a valid value — it clears the setting.
-// decideEditAction (Task 3) already treats '' the same as null/unset.
+// Trimmed first, then either '' (clears the setting — decideEditAction in
+// Task 3 already treats '' the same as null/unset) or a genuinely absolute
+// path. A relative path here would resolve from wherever the Next.js
+// server process happens to be running, not from anywhere meaningful to
+// the user — round 2 review finding 2.
 const SetPathSchema = z.object({
-  path: z.string(),
+  path: z
+    .string()
+    .transform(s => s.trim())
+    .refine(s => s === '' || path.isAbsolute(s), {
+      message: 'Path must be empty (to clear) or an absolute path.',
+    }),
 });
 
 export async function GET() {
@@ -474,7 +543,7 @@ export async function PUT(req: NextRequest) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/asepritePathSettings.test.ts`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Write the Settings page**
 
@@ -1088,13 +1157,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     // isFile() rather than existsSync: a directory or other non-regular
     // path would pass an existsSync-only check and produce a confusing
     // spawn failure instead of the specific, actionable message below.
-    // statSync throws ENOENT for a path that doesn't exist at all, so the
-    // "doesn't exist" and "exists but isn't a file" cases both correctly
-    // collapse to false here.
+    // statSync throws ENOENT for a path that doesn't exist at all — that's
+    // an ordinary, expected outcome here, not worth logging. Any OTHER
+    // stat failure (e.g. EACCES — permission denied) is unexpected and
+    // genuinely worth a server-side log, even though the user still just
+    // sees the same generic "not found" decision-branch message.
     function isRegularFile(p: string): boolean {
       try {
         return fs.statSync(p).isFile();
-      } catch {
+      } catch (e: any) {
+        if (e?.code !== 'ENOENT') console.error(`Unexpected error checking ${p}:`, e);
         return false;
       }
     }
@@ -1129,9 +1201,25 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       });
 
       const spawnError = await new Promise<Error | null>(resolve => {
-        const timer = setTimeout(() => resolve(null), SPAWN_ERROR_WAIT_MS);
+        let settled = false;
+        const timer = setTimeout(() => {
+          settled = true;
+          resolve(null);
+        }, SPAWN_ERROR_WAIT_MS);
+        // This listener can still fire AFTER the timeout above already
+        // resolved the promise (resolve() on an already-settled promise is
+        // a harmless no-op) — a late failure that arrives after the
+        // response already reported success. That's still worth a
+        // server-side log even though the HTTP response has already gone
+        // out; a call to resolve() below in that case is inert but
+        // harmless.
         child.once('error', err => {
           clearTimeout(timer);
+          if (settled) {
+            console.error('Aseprite failed to launch (after the response already reported success):', err);
+          } else {
+            settled = true;
+          }
           resolve(err);
         });
       });

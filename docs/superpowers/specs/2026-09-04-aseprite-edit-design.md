@@ -76,8 +76,11 @@ sub-menu).
   targets Windows path conventions; not attempting cross-platform
   detection logic since there's nothing to detect).
 - Save button → `PUT /api/settings/aseprite-path` with `{ path: string }`,
-  Zod-validated as a non-empty string. No live "test this path" probe in
-  V1 — the Edit action itself will report clearly if the configured path
+  Zod-validated: trimmed, then either empty (clears the setting) or a
+  genuinely absolute path — a relative path here would resolve from
+  wherever the Next.js server process happens to be running, not from
+  anywhere meaningful to the user. No live "test this path" probe in V1 —
+  the Edit action itself will report clearly if the configured path
   doesn't resolve to a real file, which is the only moment that actually
   matters.
 - On page load, `GET /api/settings/aseprite-path` populates the field with
@@ -106,8 +109,10 @@ steps 2 and 4 exist):
    `{ success: false, error: 'Configured path must point to an Aseprite executable.' }`.
 5. Resolve both paths to absolute (`path.join(getProjectRoot(), 'storage',
    'images', asset.image_path)` for the image, the raw stored value for
-   Aseprite) and check both exist via `fs.existsSync`, in a try/catch per
-   this project's fs-operation rule. Missing image file →
+   Aseprite) and check both are regular files via `fs.statSync(...).isFile()`
+   (not `existsSync` — a directory or other non-regular path would pass an
+   existsSync-only check and produce a confusing spawn failure instead),
+   in a try/catch per this project's fs-operation rule. Missing image file →
    `{ success: false, error: 'Image file not found on disk.' }`. Missing
    Aseprite →
    `{ success: false, error: 'Aseprite not found at the configured path. Check Settings.' }`.
@@ -154,12 +159,19 @@ log server-side detail even though the user only sees the generic
   standard pattern (temp dir, copied real migrations, `setProjectRootForTests`,
   `DatabaseConnection.resetForTests()`) — mirrors every other service test
   in this codebase.
-- The edit route's *decision logic* (which of the 4 outcomes above a given
-  `(asset, settings, filesystem)` combination produces) is written as a
-  plain, dependency-injected function separate from the actual
-  `child_process.spawn` call, so it's unit-testable without launching a
-  real process in CI. The spawn call itself is not meaningfully testable
-  by an automated suite — it launches a real GUI application — and gets
+- The edit route's *decision logic* (which of the 7 outcomes above a given
+  `(asset, settings, filesystem)` combination produces, including the
+  path-safety and executable-filename checks) is written as plain,
+  dependency-injected functions separate from the actual
+  `child_process.spawn` call, so they're unit-testable without launching a
+  real process in CI.
+- The route's *wiring* to `spawn` — which arguments it's called with, and
+  both its error-handling paths (a synchronous throw, and the realistic
+  asynchronous `'error'` event) — is also automatically tested, via a
+  mocked `child_process` module (a real Node `EventEmitter` standing in for
+  the child process, so `.once('error', ...)` behaves exactly like the
+  real thing). What is NOT automatically testable is the actual external
+  effect: whether Aseprite really opens with the right file. That gets
   verified manually against a real local Aseprite install, the same way
   the real Pixellab API call was verified manually in the UI Sheets
   feature's end-to-end walkthrough.
@@ -194,14 +206,33 @@ configured Aseprite path.
   plan does not build real access control for this one route — doing so
   would be inconsistent (every other route, including git push/pull and
   asset deletion, is equally unauthenticated) and disproportionate for
-  this feature. Instead, `looksLikeAsepriteExecutable` restricts what can
-  ever be configured and launched to a filename that actually looks like
-  Aseprite (`aseprite*.exe`, case-insensitive), closing off the sharper
-  edge of the risk — "launch any already-present executable on the
-  machine" — down to "only ever launches something named aseprite.exe."
-  This narrows the risk; it does not eliminate it. The underlying gap
-  (this app has no authentication anywhere) is a pre-existing, whole-system
-  property this feature did not introduce and is not scoped to fix.
+  this feature.
+
+  Instead, `looksLikeAsepriteExecutable` restricts what can ever be
+  configured and launched to a filename that actually looks like Aseprite
+  (`aseprite*.exe`, case-insensitive). **Be precise about what this does
+  and does not do** (sharpened in round 2 of the adversarial review, which
+  correctly pushed back on treating this as a security boundary): it is
+  NOT a defense against an attacker who can already write files onto the
+  machine — such an attacker could trivially rename any payload to
+  `aseprite-evil.exe`, and at that point they already have far more direct
+  ways to cause harm than this one feature, on any system. What it DOES
+  do is narrow the *new* capability this feature specifically adds for an
+  attacker who has ONLY network access to the app (the actual threat this
+  finding named — reachable purely via `PUT` then `POST`, no local
+  filesystem access needed): without this check, such a caller could point
+  the launcher at any executable already present on the machine
+  (`cmd.exe`, `powershell.exe`, anything). With it, they can only ever
+  trigger something already named like Aseprite.
+
+  **This app's total lack of authentication is accepted, pre-existing,
+  whole-system risk, not something this feature changes.** Whether that's
+  acceptable depends entirely on who has access to whatever VPN or tunnel
+  fronts this app — if that access is trusted, this feature adds
+  negligible incremental risk on top of everything else already
+  unauthenticated in this app; if it isn't, the fix is a trusted VPN/tunnel
+  in the first place, not a per-route patch. Nothing in this feature is a
+  substitute for that.
 
 Using the array-args spawn form for both invocations means neither value
 is ever interpreted as shell syntax regardless of its content, independent
