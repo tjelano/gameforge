@@ -94,3 +94,23 @@ Finding 2 is correct and I was wrong to treat task-ordering as a hard constraint
 Accepted finding 1 in full: renamed `isLocalDrivePath` → `isDriveLetterRootedPath` everywhere (implementation, both call sites, all tests), and documented the mapped-drive/reparse-point residual explicitly in both the function's own comment and the spec's Security note — matching this feature's established "narrows, does not eliminate" honesty pattern rather than either silently accepting the imprecise name or over-building real drive-type detection for a residual Codex itself called reasonable to accept.
 
 Added a dedicated `isDriveLetterRootedPath` test suite (4 tests) to match the pattern already established for `isSafeStoredFilename` and `looksLikeAsepriteExecutable`, since Task 3 now imports and uses it directly, not just indirectly through `looksLikeAsepriteExecutable`.
+
+## Round 5 — Codex (final round, MAX_ROUNDS=5)
+
+VERDICT: APPROVED
+
+- Task reorder confirmed clean: Task 1 correctly names Task 3 as the settings-route consumer; Task 2 produces `isDriveLetterRootedPath`; Task 3 imports it; Task 4 consumes Task 2's decision helpers. No duplicate validator remains anywhere.
+- The rename confirmed accurate: the regex rejects UNC/device/extended-length/relative forms; mapped drives and reparse points remain documented residuals, not falsely claimed protections.
+- Both new tests (synchronous-spawn throw, lock-contention) confirmed correctly scoped — the lock test supports the SQLite locking assumption without overclaiming it proves the whole migration race.
+
+### Resolution
+
+Converged after 5 rounds (all 5 used — this is the loop's own cap, not an early stop). Summary of what the argument materially changed from the initial draft:
+
+1. **Two real security gaps closed that neither of us saw at first pass:** a path-traversal vector via git-imported asset JSON (round 1), and a UNC-path bypass of the executable-filename restriction that would have let a network-only attacker (no local file access) defeat the whole mitigation (round 3) — the second one specifically only surfaced because round 2's fix invited a closer look at what `path.isAbsolute()` actually accepts on Windows.
+2. **One pre-existing, unrelated bug fixed as a small connected task:** a cross-process race in the migration runner, live-reachable on this app's own documented two-process startup (`npm run dev` + `npm run dev:worker`), closed via `BEGIN IMMEDIATE` + re-check-inside-the-lock, plus a correctness bug in that very fix (an unconditional `ROLLBACK` that could mask a lock-timeout error) caught one round later.
+3. **Structural: a task reorder + shared-helper extraction that AGENTS.md's own rule required and I'd initially argued around** (Task 2/3 swapped so a genuinely safety-critical check is imported once, not duplicated) — round 4 correctly pushed back on "task ordering" as an excuse rather than a real constraint.
+
+Two disagreements were pushed back on and held, both confirmed correct by Codex in the same or a later round: the JSX-placeholder-escaping claim (round 1, disproven with a compiled `tsc` output as evidence) and the network-only-attacker threat-model framing for the filename restriction (round 2's overcorrection toward "add real access control," resolved by precisely scoping what the mitigation does and doesn't claim rather than either building auth or dropping the mitigation).
+
+Next: hand this to the user for the "who builds it" decision (Codex via `codex-build`, Claude directly, or stop here) — that choice belongs to them, not this log.
