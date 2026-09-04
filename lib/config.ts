@@ -4,3 +4,7 @@
 
 export const IO_WRITE_BATCH_SIZE = Number(process.env.IO_WRITE_BATCH_SIZE) || 25;
 export const WORKER_BATCH_SIZE = Number(process.env.WORKER_BATCH_SIZE) || 5;
+
+// Settings-table key for the Aseprite executable path. Shared between
+// the settings API route and the asset edit route.
+export const ASEPRITE_PATH_SETTING_KEY = 'aseprite_path';
