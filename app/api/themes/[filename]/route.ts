@@ -26,6 +26,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ fil
     if (e.code === 'ENOENT') {
       return NextResponse.json({ success: false, error: 'Theme not found' }, { status: 404 });
     }
+    console.error(`Failed to read theme ${filename}:`, e);
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
 }
