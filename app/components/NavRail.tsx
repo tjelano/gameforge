@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/dashboard/styles', label: 'Style Bibles' },
   { href: '/dashboard/export', label: 'Export' },
   { href: '/dashboard/settings/storage', label: 'Storage' },
+  { href: '/dashboard/settings/aseprite', label: 'Aseprite' },
 ];
 
 export function NavRail() {

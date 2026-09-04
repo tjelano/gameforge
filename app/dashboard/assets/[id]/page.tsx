@@ -12,6 +12,9 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [newState, setNewState] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [editFailed, setEditFailed] = useState(false);
 
   useEffect(() => {
     // Same ignore-flag shape as useStyles.ts / the split page's mount effect:
@@ -60,6 +63,23 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  async function handleEdit() {
+    setEditing(true);
+    setEditStatus(null);
+    setEditFailed(false);
+    try {
+      const res = await fetch(`/api/assets/${id}/edit`, { method: 'POST' });
+      const body = await res.json();
+      setEditStatus(body.success ? 'Opened in Aseprite.' : (body.error ?? 'Could not launch Aseprite.'));
+      setEditFailed(!body.success);
+    } catch {
+      setEditStatus('Could not reach the server.');
+      setEditFailed(true);
+    } finally {
+      setEditing(false);
+    }
+  }
+
   function addState() {
     const trimmed = newState.trim();
     if (!trimmed || states.includes(trimmed)) return;
@@ -75,12 +95,24 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       <p className="page-subtitle">{asset.asset_type}</p>
 
       {asset.image_path && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={`/api/images/${asset.image_path}`}
-          alt={asset.prompt}
-          style={{ maxWidth: 256, imageRendering: 'pixelated', marginBottom: 24, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}
-        />
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/images/${asset.image_path}`}
+            alt={asset.prompt}
+            style={{ maxWidth: 256, imageRendering: 'pixelated', marginBottom: 12, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}
+          />
+          <div style={{ marginBottom: 24 }}>
+            <button className="btn" onClick={handleEdit} disabled={editing}>
+              {editing ? 'Opening…' : 'Edit in Aseprite'}
+            </button>
+            {editStatus && (
+              <p style={{ marginTop: 8, fontSize: 13, color: editFailed ? 'var(--reject)' : 'var(--ink-dim)' }}>
+                {editStatus}
+              </p>
+            )}
+          </div>
+        </>
       )}
 
       <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
