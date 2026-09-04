@@ -14,6 +14,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [editFailed, setEditFailed] = useState(false);
 
   useEffect(() => {
     // Same ignore-flag shape as useStyles.ts / the split page's mount effect:
@@ -65,12 +66,15 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   async function handleEdit() {
     setEditing(true);
     setEditStatus(null);
+    setEditFailed(false);
     try {
       const res = await fetch(`/api/assets/${id}/edit`, { method: 'POST' });
       const body = await res.json();
       setEditStatus(body.success ? 'Opened in Aseprite.' : (body.error ?? 'Could not launch Aseprite.'));
+      setEditFailed(!body.success);
     } catch {
       setEditStatus('Could not reach the server.');
+      setEditFailed(true);
     } finally {
       setEditing(false);
     }
@@ -102,7 +106,11 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
             <button className="btn" onClick={handleEdit} disabled={editing}>
               {editing ? 'Opening…' : 'Edit in Aseprite'}
             </button>
-            {editStatus && <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{editStatus}</p>}
+            {editStatus && (
+              <p style={{ marginTop: 8, fontSize: 13, color: editFailed ? 'var(--reject)' : 'var(--ink-dim)' }}>
+                {editStatus}
+              </p>
+            )}
           </div>
         </>
       )}
