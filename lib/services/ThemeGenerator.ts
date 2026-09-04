@@ -4,7 +4,8 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { z } from 'zod';
-import { AnthropicThemeGenerator } from '@/lib/services/AnthropicThemeGenerator';
+import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
+import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 
 // Deliberately an allowlist grammar per token type, not a full CSS value
 // parser — these values are interpolated directly into a real CSS file
@@ -88,15 +89,28 @@ export class MockThemeGenerator implements ThemeGenerator {
 }
 
 // Lazy, mock-vs-real singleton — same reasoning as getImageGenerator():
-// ESM import hoisting would otherwise evaluate process.env.ANTHROPIC_API_KEY
-// before worker.ts's own env-loading flag has landed it in process.env.
+// ESM import hoisting would otherwise evaluate process.env.THEME_API_PROVIDER
+// and the various *_API_KEY vars before worker.ts's own env-loading flag has
+// landed them in process.env.
 let cachedThemeGenerator: ThemeGenerator | undefined;
 
 export function getThemeGenerator(): ThemeGenerator {
   if (!cachedThemeGenerator) {
-    cachedThemeGenerator = process.env.ANTHROPIC_API_KEY
-      ? new AnthropicThemeGenerator(process.env.ANTHROPIC_API_KEY)
-      : new MockThemeGenerator();
+    const providerName = process.env.THEME_API_PROVIDER;
+
+    if (!providerName || providerName === 'anthropic') {
+      cachedThemeGenerator = process.env.ANTHROPIC_API_KEY
+        ? new ClaudeApiThemeGenerator(process.env.ANTHROPIC_API_KEY, ANTHROPIC_PROVIDER)
+        : new MockThemeGenerator();
+    } else if (providerName === 'cheaperinference') {
+      const apiKey = process.env.CHEAPERINFERENCE_API_KEY;
+      if (!apiKey) {
+        throw new Error('THEME_API_PROVIDER is set to "cheaperinference" but CHEAPERINFERENCE_API_KEY is not configured.');
+      }
+      cachedThemeGenerator = new ClaudeApiThemeGenerator(apiKey, CHEAPERINFERENCE_PROVIDER);
+    } else {
+      throw new Error(`Unknown THEME_API_PROVIDER "${providerName}" — expected "anthropic" or "cheaperinference".`);
+    }
   }
   return cachedThemeGenerator;
 }
