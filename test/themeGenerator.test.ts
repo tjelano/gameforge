@@ -213,6 +213,20 @@ describe('AnthropicThemeGenerator', () => {
     await expect(gen.generate('x', STYLE_ID)).rejects.toThrow();
   });
 
+  it('throws a distinct max_tokens error when the response was truncated before completing the tool call', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        id: 'msg_5', type: 'message', role: 'assistant',
+        content: [{ type: 'text', text: 'Thinking about the ' }],
+        stop_reason: 'max_tokens',
+      }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const gen = new AnthropicThemeGenerator('fake-key');
+    await expect(gen.generate('x', STYLE_ID)).rejects.toThrow(/max_tokens/i);
+  });
+
   it('throws with the response status when the API call itself fails', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response('rate limited', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);

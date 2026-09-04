@@ -6,6 +6,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { assetService } from '@/lib/services/AssetService';
 import { styleService } from '@/lib/services/StyleService';
+import { storageDirFor } from '@/lib/services/shared/assetSafety';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
 import { StyleSchema, AssetSchema } from '@/lib/database/schema';
 
@@ -135,7 +136,7 @@ class GitServiceImpl {
       const chunk = activeAssets.slice(i, i + IO_WRITE_BATCH_SIZE);
       const existenceChecks = chunk.map(async (asset) => {
         if (!asset.image_path) return null;
-        const subdir = asset.output_kind === 'theme' ? 'themes' : 'images';
+        const subdir = storageDirFor(asset.output_kind);
         const physicalPath = path.join(getProjectRoot(), 'storage', subdir, asset.image_path);
         try {
           await fsPromises.access(physicalPath, fs.constants.F_OK);
@@ -177,8 +178,11 @@ class GitServiceImpl {
     await this.ensureDirectoriesExist();
     await this.exportToJson();
 
-    const removed = await assetService.cleanupOrphanedImages();
-    if (removed > 0) console.log(`🧹 Removed ${removed} orphaned images.`);
+    const removedImages = await assetService.cleanupOrphanedImages();
+    const removedThemes = await assetService.cleanupOrphanedThemes();
+    if (removedImages > 0 || removedThemes > 0) {
+      console.log(`🧹 Removed ${removedImages} orphaned images and ${removedThemes} orphaned themes.`);
+    }
 
     const git = this.git();
     const status = await git.status();
@@ -211,8 +215,11 @@ class GitServiceImpl {
 
       await this.exportToJson();
 
-      const removed = await assetService.cleanupOrphanedImages();
-      if (removed > 0) console.log(`🧹 Removed ${removed} orphaned images.`);
+      const removedImages = await assetService.cleanupOrphanedImages();
+      const removedThemes = await assetService.cleanupOrphanedThemes();
+      if (removedImages > 0 || removedThemes > 0) {
+        console.log(`🧹 Removed ${removedImages} orphaned images and ${removedThemes} orphaned themes.`);
+      }
 
       await this.stageFilesForCommit();
 

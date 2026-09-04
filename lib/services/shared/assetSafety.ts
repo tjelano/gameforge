@@ -16,7 +16,7 @@ export function isImageReferencedByAsset(imagePath: string): boolean {
   return result.count > 0;
 }
 
-function storageDirFor(outputKind: 'image' | 'theme'): string {
+export function storageDirFor(outputKind: 'image' | 'theme'): string {
   return outputKind === 'theme' ? 'themes' : 'images';
 }
 

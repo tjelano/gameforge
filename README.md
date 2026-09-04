@@ -36,6 +36,10 @@ Set `PIXELLAB_API_KEY` in `.env.local` for real generation (uses Pixellab's `cre
 endpoint). Without a key, generation falls back to `MockGenerator`, which writes a placeholder image so
 the rest of the pipeline (review, promote, export) is still fully exercisable.
 
+Set `ANTHROPIC_API_KEY` in `.env.local` to enable real website theme generation. Without a key, generation
+falls back to `MockThemeGenerator`, which writes a fixed token set so the rest of the pipeline stays
+exercisable.
+
 **If you're running the worker separately** (`npm run dev:worker`, not through `next dev`), env vars only
 reach it because that script explicitly passes `--env-file-if-exists=.env.local` — a bare `tsx worker.ts`
 does not load `.env.local` on its own the way `next dev` does. If you ever invoke the worker a different

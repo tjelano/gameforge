@@ -41,6 +41,7 @@ type ToolUseBlock = {
 
 interface AnthropicMessageResponse {
   content: Array<{ type: string } & Record<string, unknown>>;
+  stop_reason: string;
 }
 
 /**
@@ -65,7 +66,7 @@ export class AnthropicThemeGenerator implements ThemeGenerator {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: 4096,
         tools: [
           {
             name: 'emit_theme',
@@ -85,6 +86,11 @@ export class AnthropicThemeGenerator implements ThemeGenerator {
     }
 
     const data = (await res.json()) as AnthropicMessageResponse;
+    if (data.stop_reason === 'max_tokens') {
+      throw new Error(
+        'Anthropic response was truncated (stop_reason: max_tokens) before completing the tool call — the theme could not be generated.'
+      );
+    }
     const toolUse = data.content.find((block): block is ToolUseBlock => block.type === 'tool_use');
     if (!toolUse) {
       throw new Error('Anthropic response contained no tool_use block for emit_theme.');

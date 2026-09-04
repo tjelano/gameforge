@@ -83,31 +83,36 @@ class AssetServiceImpl {
   }
 
   /**
-   * Removes physical files in storage/images/ that are no longer needed.
+   * Removes physical files in storage/<subdir>/ that are no longer needed.
+   * Shared by cleanupOrphanedImages() and cleanupOrphanedThemes() — the
+   * protection rule below must stay identical for both, so change it
+   * here, not in either public wrapper.
    *
-   * An image is PROTECTED (never deleted) if it is referenced by:
+   * A file is PROTECTED (never deleted) if it is referenced by:
    *  - any asset row, active OR soft-deleted — soft-deleted assets must
-   *    stay recoverable, image included, until permanently pruned by
+   *    stay recoverable, file included, until permanently pruned by
    *    some future explicit "empty trash" action (not this function).
    *  - any job with status IN ('pending', 'processing', 'complete') —
    *    i.e. anything the user hasn't yet promoted or discarded. A
    *    'complete' job the user simply hasn't looked at yet is not
    *    orphaned; it's awaiting a decision.
    *
-   * Everything else in storage/images/ is deleted. Returns the count
-   * of files actually removed.
+   * Everything else in storage/<subdir>/ is deleted. Returns the count
+   * of files actually removed. Not filtered by output_kind — a theme
+   * filename never appears in an image row's image_path or vice versa,
+   * so the two storage directories never share filenames.
    */
-  async cleanupOrphanedImages(): Promise<number> {
+  private async cleanupOrphanedIn(subdir: 'images' | 'themes'): Promise<number> {
     const db = DatabaseConnection.getInstance();
-    const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
+    const dir = path.join(getProjectRoot(), 'storage', subdir);
 
     let filenames: string[];
     try {
-      filenames = (await fsPromises.readdir(imagesDir, { withFileTypes: true }))
+      filenames = (await fsPromises.readdir(dir, { withFileTypes: true }))
         .filter(entry => entry.isFile() && entry.name !== '.gitkeep')
         .map(entry => entry.name);
     } catch (e) {
-      console.error('Failed to read storage/images for cleanup:', e);
+      console.error(`Failed to read storage/${subdir} for cleanup:`, e);
       return 0;
     }
 
@@ -131,12 +136,12 @@ class AssetServiceImpl {
     for (let i = 0; i < orphans.length; i += IO_WRITE_BATCH_SIZE) {
       const chunk = orphans.slice(i, i + IO_WRITE_BATCH_SIZE);
       const results = await Promise.all(chunk.map(async (filename) => {
-        const filePath = path.join(imagesDir, filename);
+        const filePath = path.join(dir, filename);
         try {
           await fsPromises.unlink(filePath);
           return true;
         } catch (e: any) {
-          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned image ${filename}:`, e);
+          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned file ${filename}:`, e);
           return false;
         }
       }));
@@ -146,60 +151,14 @@ class AssetServiceImpl {
     return removed;
   }
 
-  /**
-   * Removes physical files in storage/themes/ that are no longer needed.
-   * Same protection rule as cleanupOrphanedImages() (see its own comment
-   * for the full reasoning) — deliberately not filtered by output_kind,
-   * since a theme filename never appears in an image row's image_path
-   * or vice versa; the two storage directories never share filenames.
-   */
+  /** Removes physical files in storage/images/ that are no longer needed. See cleanupOrphanedIn(). */
+  async cleanupOrphanedImages(): Promise<number> {
+    return this.cleanupOrphanedIn('images');
+  }
+
+  /** Removes physical files in storage/themes/ that are no longer needed. See cleanupOrphanedIn(). */
   async cleanupOrphanedThemes(): Promise<number> {
-    const db = DatabaseConnection.getInstance();
-    const themesDir = path.join(getProjectRoot(), 'storage', 'themes');
-
-    let filenames: string[];
-    try {
-      filenames = (await fsPromises.readdir(themesDir, { withFileTypes: true }))
-        .filter(entry => entry.isFile() && entry.name !== '.gitkeep')
-        .map(entry => entry.name);
-    } catch (e) {
-      console.error('Failed to read storage/themes for cleanup:', e);
-      return 0;
-    }
-
-    const assetPaths = new Set(
-      (db.prepare('SELECT image_path FROM assets WHERE image_path IS NOT NULL').all() as { image_path: string }[])
-        .map(row => row.image_path)
-    );
-
-    const activeJobPaths = new Set(
-      (db.prepare(`
-        SELECT result_path FROM jobs
-        WHERE result_path IS NOT NULL
-        AND status IN ('pending', 'processing', 'complete')
-      `).all() as { result_path: string }[])
-        .map(row => row.result_path)
-    );
-
-    const orphans = filenames.filter(f => !assetPaths.has(f) && !activeJobPaths.has(f));
-
-    let removed = 0;
-    for (let i = 0; i < orphans.length; i += IO_WRITE_BATCH_SIZE) {
-      const chunk = orphans.slice(i, i + IO_WRITE_BATCH_SIZE);
-      const results = await Promise.all(chunk.map(async (filename) => {
-        const filePath = path.join(themesDir, filename);
-        try {
-          await fsPromises.unlink(filePath);
-          return true;
-        } catch (e: any) {
-          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned theme ${filename}:`, e);
-          return false;
-        }
-      }));
-      removed += results.filter(Boolean).length;
-    }
-
-    return removed;
+    return this.cleanupOrphanedIn('themes');
   }
 }
 
