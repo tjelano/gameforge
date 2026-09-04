@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
+import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 
 interface JobCardProps {
   job: Job;
@@ -37,7 +38,14 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
           overflow: 'hidden',
         }}
       >
-        {job.result_path ? (
+        {job.output_kind === 'theme' && job.result_path ? (
+          <iframe
+            srcDoc={buildThemePreviewHtml(`/api/themes/${job.result_path}`)}
+            title={`Theme preview: ${job.prompt}`}
+            sandbox=""
+            style={{ width: 260, height: 180, border: 'none', transform: 'scale(0.28)', transformOrigin: 'top left' }}
+          />
+        ) : job.result_path ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`/api/images/${job.result_path}`}
