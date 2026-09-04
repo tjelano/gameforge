@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+export const OutputKindSchema = z.enum(['image', 'theme']);
+export type OutputKind = z.infer<typeof OutputKindSchema>;
+
 export const NineSliceMarginsSchema = z.object({
   top: z.number(),
   right: z.number(),
@@ -32,6 +35,7 @@ export const AssetSchema = z.object({
   source_job_id: z.string().uuid().nullable(),
   nine_slice_margins: z.string().nullable(),
   states: z.string(),
+  output_kind: OutputKindSchema.default('image'),
 });
 export type Asset = z.infer<typeof AssetSchema>;
 
@@ -56,5 +60,6 @@ export const JobSchema = z.object({
   created_at: z.number().int(),
   updated_at: z.number().int(),
   options: z.string(), // JSON-serialized options blob
+  output_kind: OutputKindSchema.default('image'),
 });
 export type Job = z.infer<typeof JobSchema>;

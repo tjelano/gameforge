@@ -36,9 +36,9 @@ export async function POST(req: NextRequest) {
 
       const assetId = crypto.randomUUID();
       db.prepare(`
-        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-      `).run(assetId, job.style_id, job.created_by, job.asset_type, job.prompt, job.result_path, Date.now());
+        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, output_kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+      `).run(assetId, job.style_id, job.created_by, job.asset_type, job.prompt, job.result_path, Date.now(), job.output_kind);
 
       db.prepare(`UPDATE jobs SET status = 'promoted', updated_at = ? WHERE id = ?`).run(Date.now(), jobId);
 

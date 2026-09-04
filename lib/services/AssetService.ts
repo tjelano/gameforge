@@ -14,13 +14,14 @@ class AssetServiceImpl {
     prompt: string;
     imagePath: string | null;
     sourceJobId?: string | null;
+    outputKind?: 'image' | 'theme';
   }): Promise<Asset> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();
     db.prepare(`
-      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now(), input.sourceJobId ?? null);
+      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id, output_kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now(), input.sourceJobId ?? null, input.outputKind ?? 'image');
     return (await this.getById(id))!;
   }
 
