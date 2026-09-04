@@ -50,7 +50,7 @@
 - Test: `test/migrationConcurrency.test.ts`
 
 **Interfaces:**
-- Produces: `settingsService.get(key: string): Promise<string | null>`, `settingsService.set(key: string, value: string): Promise<void>`, and the constant `ASEPRITE_PATH_SETTING_KEY` from `@/lib/config` — consumed by Task 2's API route and Task 4's edit route (this project's convention: constants shared by 2+ files live in `lib/config.ts`, see its existing `IO_WRITE_BATCH_SIZE`/`WORKER_BATCH_SIZE`).
+- Produces: `settingsService.get(key: string): Promise<string | null>`, `settingsService.set(key: string, value: string): Promise<void>`, and the constant `ASEPRITE_PATH_SETTING_KEY` from `@/lib/config` — consumed by Task 3's API route and Task 4's edit route (this project's convention: constants shared by 2+ files live in `lib/config.ts`, see its existing `IO_WRITE_BATCH_SIZE`/`WORKER_BATCH_SIZE`).
 
 **Note — this task also fixes a pre-existing, unrelated bug found during this plan's adversarial review (see `docs/superpowers/plans/2026-09-04-aseprite-edit-review-log.md`, Round 1, finding 6):** `DatabaseConnection.runMigrations()` reads which migrations are already applied once, then applies each unapplied file in its own transaction. This app's own documented normal startup runs two separate processes (`npm run dev` and `npm run dev:worker`) that each independently call `DatabaseConnection.getInstance()` — if both start close together after a new migration file is added (exactly what happens the first time this feature's own migration 007 gets deployed), both processes can read "not yet applied" before either commits, and the second one to run fails when it hits already-created schema objects. This isn't specific to migration 007 — every prior migration has had this exposure — but it's small, contained to one file, and fixing it now protects this feature's own first real startup, so it's fixed here rather than filed away.
 
@@ -384,7 +384,289 @@ git commit -m "Add settings table and SettingsService for machine-local config"
 
 ---
 
-### Task 2: Settings API route, Settings page, nav entry
+### Task 2: Edit decision logic
+
+**Files:**
+- Create: `lib/services/shared/editDecision.ts`
+- Test: `test/editDecision.test.ts`
+
+**Interfaces:**
+- Produces:
+  ```typescript
+  type EditDecision =
+    | { ok: true; asepritePath: string; imagePath: string }
+    | { ok: false; error: string };
+
+  function decideEditAction(params: {
+    imagePathColumn: string | null;
+    imagePathIsSafe: boolean;
+    asepritePathSetting: string | null;
+    asepritePathLooksLikeAseprite: boolean;
+    imageAbsolutePath: string;
+    imageExists: boolean;
+    asepriteExists: boolean;
+  }): EditDecision;
+
+  function isSafeStoredFilename(filename: string): boolean;
+  function isDriveLetterRootedPath(candidate: string): boolean;
+  function looksLikeAsepriteExecutable(asepritePath: string): boolean;
+  ```
+  Consumed by Task 3's settings route (imports `isDriveLetterRootedPath`
+  for its own Zod validation — this task runs first specifically so that
+  import is possible, per round 4 of this plan's adversarial review:
+  `AGENTS.md` requires extracting shared helpers for safety-critical logic
+  on sight, and this check is exactly that, so it's a real shared module,
+  not two independently-maintained copies) and Task 4's edit route
+  (imports `decideEditAction`, `isSafeStoredFilename`, and
+  `looksLikeAsepriteExecutable`).
+
+This is a pure function — no fs, no DB, no process access. The route (Task 4) computes the boolean/string inputs and hands them in; that split is what makes every rejection branch unit-testable without touching a real filesystem or spawning anything.
+
+`imagePathIsSafe` and `asepritePathLooksLikeAseprite` exist because of two findings from this plan's adversarial review (`docs/superpowers/plans/2026-09-04-aseprite-edit-review-log.md`, Round 1):
+
+- **Finding 2 (path traversal):** `AssetSchema.image_path` is `z.string().nullable()` with no format check, and git-imported asset JSON goes through `AssetSchema.parse()` unchecked — a crafted `image_path` containing `../` or a path separator could resolve outside `storage/images` once `path.join()`'d. `app/api/images/[filename]/route.ts` already guards against exactly this for the *read* path (`filename.includes('/') || includes('\\') || includes('..')` → reject); `isSafeStoredFilename` is the same guard, reused here for the *write/launch* path, which needs it at least as much.
+- **Finding 1 (unauthenticated remote launch):** this app has no auth anywhere, and its own README documents running it behind a VPN/tunnel for remote access — meaning an unauthenticated caller could `PUT` an arbitrary path via Task 3's settings route, then `POST` this route to launch it. Building real access control is out of scope here (every other route in this app is equally unauthenticated today; retrofitting auth onto one route is inconsistent and not what this feature is for). `looksLikeAsepriteExecutable` is a narrower, proportionate mitigation: it restricts what CAN be configured and launched to something whose filename actually looks like Aseprite, closing off the sharper edge of that finding — "launch any already-present executable on the machine" — down to "only ever launches something named aseprite*.exe". It does not eliminate the underlying risk (this app's total lack of auth is a pre-existing, whole-system property, not something this plan is scoped to fix), and the spec's Security section is updated to say so plainly.
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+// test/editDecision.test.ts
+import { describe, it, expect } from 'vitest';
+import {
+  decideEditAction,
+  isSafeStoredFilename,
+  isDriveLetterRootedPath,
+  looksLikeAsepriteExecutable,
+} from '@/lib/services/shared/editDecision';
+
+const BASE = {
+  imagePathColumn: 'asset-123.png',
+  imagePathIsSafe: true,
+  asepritePathSetting: 'C:\\Aseprite\\Aseprite.exe',
+  asepritePathLooksLikeAseprite: true,
+  imageAbsolutePath: 'C:\\project\\storage\\images\\asset-123.png',
+  imageExists: true,
+  asepriteExists: true,
+};
+
+describe('decideEditAction', () => {
+  it('rejects when the asset has no image at all', () => {
+    const result = decideEditAction({ ...BASE, imagePathColumn: null });
+    expect(result).toEqual({ ok: false, error: 'This asset has no image.' });
+  });
+
+  it('rejects an unsafe stored image path before checking anything else', () => {
+    const result = decideEditAction({ ...BASE, imagePathIsSafe: false });
+    expect(result).toEqual({ ok: false, error: 'Invalid image path.' });
+  });
+
+  it('rejects when no Aseprite path is configured', () => {
+    const result = decideEditAction({ ...BASE, asepritePathSetting: null });
+    expect(result).toEqual({ ok: false, error: 'Set your Aseprite path in Settings first.' });
+  });
+
+  it('rejects a configured path whose filename does not look like Aseprite', () => {
+    const result = decideEditAction({ ...BASE, asepritePathLooksLikeAseprite: false });
+    expect(result).toEqual({
+      ok: false,
+      error: 'Configured path must point to an Aseprite executable.',
+    });
+  });
+
+  it('rejects when the image file is missing on disk', () => {
+    const result = decideEditAction({ ...BASE, imageExists: false });
+    expect(result).toEqual({ ok: false, error: 'Image file not found on disk.' });
+  });
+
+  it('rejects when Aseprite is not found at the configured path', () => {
+    const result = decideEditAction({ ...BASE, asepriteExists: false });
+    expect(result).toEqual({
+      ok: false,
+      error: 'Aseprite not found at the configured path. Check Settings.',
+    });
+  });
+
+  it('approves when everything checks out, returning the resolved paths', () => {
+    const result = decideEditAction(BASE);
+    expect(result).toEqual({
+      ok: true,
+      asepritePath: 'C:\\Aseprite\\Aseprite.exe',
+      imagePath: 'C:\\project\\storage\\images\\asset-123.png',
+    });
+  });
+});
+
+describe('isSafeStoredFilename', () => {
+  it('accepts a bare filename', () => {
+    expect(isSafeStoredFilename('asset-123.png')).toBe(true);
+  });
+
+  it('rejects a path containing a forward slash', () => {
+    expect(isSafeStoredFilename('../secrets.png')).toBe(false);
+  });
+
+  it('rejects a path containing a backslash', () => {
+    expect(isSafeStoredFilename('..\\secrets.png')).toBe(false);
+  });
+
+  it('rejects a path containing ..', () => {
+    expect(isSafeStoredFilename('foo..png')).toBe(false);
+  });
+});
+
+describe('isDriveLetterRootedPath', () => {
+  it('accepts a genuine local drive path', () => {
+    expect(isDriveLetterRootedPath('C:\\Aseprite\\Aseprite.exe')).toBe(true);
+    expect(isDriveLetterRootedPath('C:/Aseprite/Aseprite.exe')).toBe(true);
+  });
+
+  it('rejects a UNC path', () => {
+    expect(isDriveLetterRootedPath('\\\\attacker-server\\share\\aseprite.exe')).toBe(false);
+  });
+
+  it('rejects a device/extended-length path', () => {
+    expect(isDriveLetterRootedPath('\\\\.\\aseprite.exe')).toBe(false);
+    expect(isDriveLetterRootedPath('\\\\?\\C:\\aseprite.exe')).toBe(false);
+  });
+
+  it('rejects a relative path', () => {
+    expect(isDriveLetterRootedPath('aseprite.exe')).toBe(false);
+  });
+});
+
+describe('looksLikeAsepriteExecutable', () => {
+  it('accepts Aseprite.exe (any casing)', () => {
+    expect(looksLikeAsepriteExecutable('C:\\Program Files\\Aseprite\\Aseprite.exe')).toBe(true);
+    expect(looksLikeAsepriteExecutable('C:\\tools\\aseprite.exe')).toBe(true);
+  });
+
+  it('accepts a self-built binary with a version suffix', () => {
+    expect(looksLikeAsepriteExecutable('C:\\aseprite-src\\build\\bin\\aseprite-1.3.7.exe')).toBe(true);
+  });
+
+  it('rejects an unrelated executable', () => {
+    expect(looksLikeAsepriteExecutable('C:\\Windows\\System32\\cmd.exe')).toBe(false);
+    expect(looksLikeAsepriteExecutable('C:\\Windows\\System32\\powershell.exe')).toBe(false);
+  });
+
+  it('rejects a non-.exe file even if named aseprite', () => {
+    expect(looksLikeAsepriteExecutable('C:\\notes\\aseprite.txt')).toBe(false);
+  });
+
+  it('rejects a UNC path even with a matching filename — round 3 review finding: a network-only attacker (no local file access) could host a payload on a share they control and point the setting at it, since the basename alone would otherwise pass', () => {
+    expect(looksLikeAsepriteExecutable('\\\\attacker-server\\share\\aseprite-evil.exe')).toBe(false);
+  });
+
+  it('rejects a Windows device/extended-length path even with a matching filename', () => {
+    expect(looksLikeAsepriteExecutable('\\\\.\\aseprite.exe')).toBe(false);
+    expect(looksLikeAsepriteExecutable('\\\\?\\C:\\aseprite.exe')).toBe(false);
+  });
+
+  it('rejects a relative path even with a matching filename', () => {
+    expect(looksLikeAsepriteExecutable('aseprite.exe')).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run test/editDecision.test.ts`
+Expected: FAIL — `Cannot find module '@/lib/services/shared/editDecision'`.
+
+- [ ] **Step 3: Write the implementation**
+
+```typescript
+// lib/services/shared/editDecision.ts
+import path from 'path';
+
+export type EditDecision =
+  | { ok: true; asepritePath: string; imagePath: string }
+  | { ok: false; error: string };
+
+// Same guard app/api/images/[filename]/route.ts already uses for the read
+// path — reused here because a stored image_path reaches this route
+// without going through that route's own check, and can arrive via
+// git-imported JSON that AssetSchema doesn't format-validate.
+export function isSafeStoredFilename(filename: string): boolean {
+  return !filename.includes('/') && !filename.includes('\\') && !filename.includes('..');
+}
+
+// A path rooted on a genuine drive letter (C:\...), not a UNC share
+// (\\server\share\...) or a Windows device/extended-length path
+// (\\.\..., \\?\...). Round 3 of this plan's adversarial review found
+// that path.isAbsolute() alone accepts UNC paths — a network-only
+// attacker (no local file-write access needed) could host a
+// maliciously-named payload on a share they control and point the
+// setting at it, since the filename check below would otherwise pass on
+// its basename alone. This closes that.
+//
+// Named for exactly what it checks, not more (round 4 finding): a
+// drive-letter-rooted path can still be a mapped network drive (Z:\
+// mapped to a UNC target) or traverse an NTFS reparse point/junction to
+// somewhere else entirely. Detecting either would need real OS-level
+// drive-type/reparse-point queries (e.g. shelling out, or a native
+// addon) — accepted as a residual gap for V1, consistent with this
+// feature's other "narrows, does not eliminate" mitigations (see the
+// spec's Security note).
+export function isDriveLetterRootedPath(candidate: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(candidate);
+}
+
+// Proportionate mitigation for this app having no auth anywhere (see this
+// task's own Interfaces section above for the full reasoning): restricts
+// what can be launched to something whose filename actually looks like
+// Aseprite AND that lives on a local drive, rather than any already-present
+// executable on the machine or anything reachable over the network.
+export function looksLikeAsepriteExecutable(asepritePath: string): boolean {
+  return isDriveLetterRootedPath(asepritePath) && /^aseprite.*\.exe$/i.test(path.basename(asepritePath));
+}
+
+export function decideEditAction(params: {
+  imagePathColumn: string | null;
+  imagePathIsSafe: boolean;
+  asepritePathSetting: string | null;
+  asepritePathLooksLikeAseprite: boolean;
+  imageAbsolutePath: string;
+  imageExists: boolean;
+  asepriteExists: boolean;
+}): EditDecision {
+  if (!params.imagePathColumn) {
+    return { ok: false, error: 'This asset has no image.' };
+  }
+  if (!params.imagePathIsSafe) {
+    return { ok: false, error: 'Invalid image path.' };
+  }
+  if (!params.asepritePathSetting) {
+    return { ok: false, error: 'Set your Aseprite path in Settings first.' };
+  }
+  if (!params.asepritePathLooksLikeAseprite) {
+    return { ok: false, error: 'Configured path must point to an Aseprite executable.' };
+  }
+  if (!params.imageExists) {
+    return { ok: false, error: 'Image file not found on disk.' };
+  }
+  if (!params.asepriteExists) {
+    return { ok: false, error: 'Aseprite not found at the configured path. Check Settings.' };
+  }
+  return { ok: true, asepritePath: params.asepritePathSetting, imagePath: params.imageAbsolutePath };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run test/editDecision.test.ts`
+Expected: PASS (22 tests: 7 for `decideEditAction`, 4 for `isSafeStoredFilename`, 4 for `isDriveLetterRootedPath`, 7 for `looksLikeAsepriteExecutable`).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add lib/services/shared/editDecision.ts test/editDecision.test.ts
+git commit -m "Add pure decision function for the Edit-in-Aseprite action"
+```
+
+---
+
+### Task 3: Settings API route, Settings page, nav entry
 
 **Files:**
 - Create: `app/api/settings/aseprite-path/route.ts`
@@ -393,8 +675,8 @@ git commit -m "Add settings table and SettingsService for machine-local config"
 - Test: `test/asepritePathSettings.test.ts`
 
 **Interfaces:**
-- Consumes: `settingsService.get`/`settingsService.set` from Task 1 (`@/lib/services/SettingsService`).
-- Produces: `GET /api/settings/aseprite-path` → `{success:true,data:{path:string}}`; `PUT /api/settings/aseprite-path` (body `{path:string}`) → `{success:true,data:{path:string}}`, or `{success:false,error:string}` (400) when `path` is missing or not a string. An empty string IS accepted — it's how the setting gets cleared (see Round 1 review finding 4: Task 5's manual verification needs to clear the path, and `decideEditAction`'s existing `!params.asepritePathSetting` check already treats an empty string as falsy, i.e. "not configured" — no separate clear/delete endpoint needed).
+- Consumes: `settingsService.get`/`settingsService.set` from Task 1 (`@/lib/services/SettingsService`); `isDriveLetterRootedPath` from Task 2 (`@/lib/services/shared/editDecision`) — genuinely shared, not duplicated, since Task 2 runs first specifically to make this import possible.
+- Produces: `GET /api/settings/aseprite-path` → `{success:true,data:{path:string}}`; `PUT /api/settings/aseprite-path` (body `{path:string}`) → `{success:true,data:{path:string}}`, or `{success:false,error:string}` (400) when `path` is missing, not a string, or not a genuine local drive path. An empty string IS accepted — it's how the setting gets cleared (see Round 1 review finding 4: Task 5's manual verification needs to clear the path, and `decideEditAction`'s existing `!params.asepritePathSetting` check already treats an empty string as falsy, i.e. "not configured" — no separate clear/delete endpoint needed).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -518,31 +800,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { settingsService } from '@/lib/services/SettingsService';
 import { ASEPRITE_PATH_SETTING_KEY } from '@/lib/config';
+import { isDriveLetterRootedPath } from '@/lib/services/shared/editDecision';
 
 export const dynamic = 'force-dynamic';
 
-// A genuine local drive path (C:\...), not a UNC share (\\server\share\...)
-// or a device/extended-length path (\\.\..., \\?\...). Deliberately NOT
-// path.isAbsolute() alone — that accepts UNC paths too, and round 3 of
-// this plan's adversarial review found that matters: without this, a
-// network-only caller (no local file access) could point the setting at a
-// share they control. The same check (independently, not imported — see
-// Task 3's Interfaces section for why) is the actual final enforcement,
-// in lib/services/shared/editDecision.ts's looksLikeAsepriteExecutable,
-// re-checked at edit time regardless of what this route allowed through.
-// This one is a fail-fast convenience, not the security boundary itself.
-function isLocalDrivePath(candidate: string): boolean {
-  return /^[A-Za-z]:[\\/]/.test(candidate);
-}
-
 // Trimmed first, then either '' (clears the setting — decideEditAction in
-// Task 3 already treats '' the same as null/unset) or a genuine local
-// drive path.
+// Task 2 already treats '' the same as null/unset) or a genuine local
+// drive path. isDriveLetterRootedPath is imported from Task 2's module,
+// not redefined here — this route's check and the edit route's final
+// enforcement (looksLikeAsepriteExecutable, which uses the same function)
+// now share one implementation, per AGENTS.md's rule to extract shared
+// helpers for safety-critical logic on sight.
 const SetPathSchema = z.object({
   path: z
     .string()
     .transform(s => s.trim())
-    .refine(s => s === '' || isLocalDrivePath(s), {
+    .refine(s => s === '' || isDriveLetterRootedPath(s), {
       message: 'Path must be empty (to clear) or an absolute local path (e.g. C:\\...).',
     }),
 });
@@ -704,258 +977,6 @@ git commit -m "Add Aseprite path setting: API route, settings page, nav entry"
 
 ---
 
-### Task 3: Edit decision logic
-
-**Files:**
-- Create: `lib/services/shared/editDecision.ts`
-- Test: `test/editDecision.test.ts`
-
-**Interfaces:**
-- Produces:
-  ```typescript
-  type EditDecision =
-    | { ok: true; asepritePath: string; imagePath: string }
-    | { ok: false; error: string };
-
-  function decideEditAction(params: {
-    imagePathColumn: string | null;
-    imagePathIsSafe: boolean;
-    asepritePathSetting: string | null;
-    asepritePathLooksLikeAseprite: boolean;
-    imageAbsolutePath: string;
-    imageExists: boolean;
-    asepriteExists: boolean;
-  }): EditDecision;
-
-  function isSafeStoredFilename(filename: string): boolean;
-  function isLocalDrivePath(candidate: string): boolean;
-  function looksLikeAsepriteExecutable(asepritePath: string): boolean;
-  ```
-  Consumed by Task 4's `POST /api/assets/[id]/edit` route. Task 2's
-  settings route (which runs earlier) independently duplicates the same
-  one-line drive-path regex in its own Zod validation — deliberately not
-  shared, since Task 2 executes before this task creates this file, and
-  Task 2's check is a fail-fast UX convenience only. `looksLikeAsepriteExecutable`
-  here is the actual, final enforcement, re-checked at edit time regardless
-  of what Task 2's route allowed through — the two don't need to share a
-  module to both be correct.
-
-This is a pure function — no fs, no DB, no process access. The route (Task 4) computes the boolean/string inputs and hands them in; that split is what makes every rejection branch unit-testable without touching a real filesystem or spawning anything.
-
-`imagePathIsSafe` and `asepritePathLooksLikeAseprite` exist because of two findings from this plan's adversarial review (`docs/superpowers/plans/2026-09-04-aseprite-edit-review-log.md`, Round 1):
-
-- **Finding 2 (path traversal):** `AssetSchema.image_path` is `z.string().nullable()` with no format check, and git-imported asset JSON goes through `AssetSchema.parse()` unchecked — a crafted `image_path` containing `../` or a path separator could resolve outside `storage/images` once `path.join()`'d. `app/api/images/[filename]/route.ts` already guards against exactly this for the *read* path (`filename.includes('/') || includes('\\') || includes('..')` → reject); `isSafeStoredFilename` is the same guard, reused here for the *write/launch* path, which needs it at least as much.
-- **Finding 1 (unauthenticated remote launch):** this app has no auth anywhere, and its own README documents running it behind a VPN/tunnel for remote access — meaning an unauthenticated caller could `PUT` an arbitrary path via Task 2's settings route, then `POST` this route to launch it. Building real access control is out of scope here (every other route in this app is equally unauthenticated today; retrofitting auth onto one route is inconsistent and not what this feature is for). `looksLikeAsepriteExecutable` is a narrower, proportionate mitigation: it restricts what CAN be configured and launched to something whose filename actually looks like Aseprite, closing off the sharper edge of that finding — "launch any already-present executable on the machine" — down to "only ever launches something named aseprite*.exe". It does not eliminate the underlying risk (this app's total lack of auth is a pre-existing, whole-system property, not something this plan is scoped to fix), and the spec's Security section is updated to say so plainly.
-
-- [ ] **Step 1: Write the failing test**
-
-```typescript
-// test/editDecision.test.ts
-import { describe, it, expect } from 'vitest';
-import {
-  decideEditAction,
-  isSafeStoredFilename,
-  looksLikeAsepriteExecutable,
-} from '@/lib/services/shared/editDecision';
-
-const BASE = {
-  imagePathColumn: 'asset-123.png',
-  imagePathIsSafe: true,
-  asepritePathSetting: 'C:\\Aseprite\\Aseprite.exe',
-  asepritePathLooksLikeAseprite: true,
-  imageAbsolutePath: 'C:\\project\\storage\\images\\asset-123.png',
-  imageExists: true,
-  asepriteExists: true,
-};
-
-describe('decideEditAction', () => {
-  it('rejects when the asset has no image at all', () => {
-    const result = decideEditAction({ ...BASE, imagePathColumn: null });
-    expect(result).toEqual({ ok: false, error: 'This asset has no image.' });
-  });
-
-  it('rejects an unsafe stored image path before checking anything else', () => {
-    const result = decideEditAction({ ...BASE, imagePathIsSafe: false });
-    expect(result).toEqual({ ok: false, error: 'Invalid image path.' });
-  });
-
-  it('rejects when no Aseprite path is configured', () => {
-    const result = decideEditAction({ ...BASE, asepritePathSetting: null });
-    expect(result).toEqual({ ok: false, error: 'Set your Aseprite path in Settings first.' });
-  });
-
-  it('rejects a configured path whose filename does not look like Aseprite', () => {
-    const result = decideEditAction({ ...BASE, asepritePathLooksLikeAseprite: false });
-    expect(result).toEqual({
-      ok: false,
-      error: 'Configured path must point to an Aseprite executable.',
-    });
-  });
-
-  it('rejects when the image file is missing on disk', () => {
-    const result = decideEditAction({ ...BASE, imageExists: false });
-    expect(result).toEqual({ ok: false, error: 'Image file not found on disk.' });
-  });
-
-  it('rejects when Aseprite is not found at the configured path', () => {
-    const result = decideEditAction({ ...BASE, asepriteExists: false });
-    expect(result).toEqual({
-      ok: false,
-      error: 'Aseprite not found at the configured path. Check Settings.',
-    });
-  });
-
-  it('approves when everything checks out, returning the resolved paths', () => {
-    const result = decideEditAction(BASE);
-    expect(result).toEqual({
-      ok: true,
-      asepritePath: 'C:\\Aseprite\\Aseprite.exe',
-      imagePath: 'C:\\project\\storage\\images\\asset-123.png',
-    });
-  });
-});
-
-describe('isSafeStoredFilename', () => {
-  it('accepts a bare filename', () => {
-    expect(isSafeStoredFilename('asset-123.png')).toBe(true);
-  });
-
-  it('rejects a path containing a forward slash', () => {
-    expect(isSafeStoredFilename('../secrets.png')).toBe(false);
-  });
-
-  it('rejects a path containing a backslash', () => {
-    expect(isSafeStoredFilename('..\\secrets.png')).toBe(false);
-  });
-
-  it('rejects a path containing ..', () => {
-    expect(isSafeStoredFilename('foo..png')).toBe(false);
-  });
-});
-
-describe('looksLikeAsepriteExecutable', () => {
-  it('accepts Aseprite.exe (any casing)', () => {
-    expect(looksLikeAsepriteExecutable('C:\\Program Files\\Aseprite\\Aseprite.exe')).toBe(true);
-    expect(looksLikeAsepriteExecutable('C:\\tools\\aseprite.exe')).toBe(true);
-  });
-
-  it('accepts a self-built binary with a version suffix', () => {
-    expect(looksLikeAsepriteExecutable('C:\\aseprite-src\\build\\bin\\aseprite-1.3.7.exe')).toBe(true);
-  });
-
-  it('rejects an unrelated executable', () => {
-    expect(looksLikeAsepriteExecutable('C:\\Windows\\System32\\cmd.exe')).toBe(false);
-    expect(looksLikeAsepriteExecutable('C:\\Windows\\System32\\powershell.exe')).toBe(false);
-  });
-
-  it('rejects a non-.exe file even if named aseprite', () => {
-    expect(looksLikeAsepriteExecutable('C:\\notes\\aseprite.txt')).toBe(false);
-  });
-
-  it('rejects a UNC path even with a matching filename — round 3 review finding: a network-only attacker (no local file access) could host a payload on a share they control and point the setting at it, since the basename alone would otherwise pass', () => {
-    expect(looksLikeAsepriteExecutable('\\\\attacker-server\\share\\aseprite-evil.exe')).toBe(false);
-  });
-
-  it('rejects a Windows device/extended-length path even with a matching filename', () => {
-    expect(looksLikeAsepriteExecutable('\\\\.\\aseprite.exe')).toBe(false);
-    expect(looksLikeAsepriteExecutable('\\\\?\\C:\\aseprite.exe')).toBe(false);
-  });
-
-  it('rejects a relative path even with a matching filename', () => {
-    expect(looksLikeAsepriteExecutable('aseprite.exe')).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npx vitest run test/editDecision.test.ts`
-Expected: FAIL — `Cannot find module '@/lib/services/shared/editDecision'`.
-
-- [ ] **Step 3: Write the implementation**
-
-```typescript
-// lib/services/shared/editDecision.ts
-import path from 'path';
-
-export type EditDecision =
-  | { ok: true; asepritePath: string; imagePath: string }
-  | { ok: false; error: string };
-
-// Same guard app/api/images/[filename]/route.ts already uses for the read
-// path — reused here because a stored image_path reaches this route
-// without going through that route's own check, and can arrive via
-// git-imported JSON that AssetSchema doesn't format-validate.
-export function isSafeStoredFilename(filename: string): boolean {
-  return !filename.includes('/') && !filename.includes('\\') && !filename.includes('..');
-}
-
-// A genuine local drive path (C:\...), not a UNC share (\\server\share\...)
-// or a Windows device/extended-length path (\\.\..., \\?\...). Round 3 of
-// this plan's adversarial review found that path.isAbsolute() alone
-// accepts UNC paths — a network-only attacker (no local file-write access
-// needed) could host a maliciously-named payload on a share they control
-// and point the setting at it, since the filename check below would
-// otherwise pass on its basename alone. This closes that: only a path
-// that's actually rooted on a local drive letter is ever considered.
-export function isLocalDrivePath(candidate: string): boolean {
-  return /^[A-Za-z]:[\\/]/.test(candidate);
-}
-
-// Proportionate mitigation for this app having no auth anywhere (see this
-// task's own Interfaces section above for the full reasoning): restricts
-// what can be launched to something whose filename actually looks like
-// Aseprite AND that lives on a local drive, rather than any already-present
-// executable on the machine or anything reachable over the network.
-export function looksLikeAsepriteExecutable(asepritePath: string): boolean {
-  return isLocalDrivePath(asepritePath) && /^aseprite.*\.exe$/i.test(path.basename(asepritePath));
-}
-
-export function decideEditAction(params: {
-  imagePathColumn: string | null;
-  imagePathIsSafe: boolean;
-  asepritePathSetting: string | null;
-  asepritePathLooksLikeAseprite: boolean;
-  imageAbsolutePath: string;
-  imageExists: boolean;
-  asepriteExists: boolean;
-}): EditDecision {
-  if (!params.imagePathColumn) {
-    return { ok: false, error: 'This asset has no image.' };
-  }
-  if (!params.imagePathIsSafe) {
-    return { ok: false, error: 'Invalid image path.' };
-  }
-  if (!params.asepritePathSetting) {
-    return { ok: false, error: 'Set your Aseprite path in Settings first.' };
-  }
-  if (!params.asepritePathLooksLikeAseprite) {
-    return { ok: false, error: 'Configured path must point to an Aseprite executable.' };
-  }
-  if (!params.imageExists) {
-    return { ok: false, error: 'Image file not found on disk.' };
-  }
-  if (!params.asepriteExists) {
-    return { ok: false, error: 'Aseprite not found at the configured path. Check Settings.' };
-  }
-  return { ok: true, asepritePath: params.asepritePathSetting, imagePath: params.imageAbsolutePath };
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npx vitest run test/editDecision.test.ts`
-Expected: PASS (18 tests: 7 for `decideEditAction`, 4 for `isSafeStoredFilename`, 7 for `looksLikeAsepriteExecutable`).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add lib/services/shared/editDecision.ts test/editDecision.test.ts
-git commit -m "Add pure decision function for the Edit-in-Aseprite action"
-```
-
----
-
 ### Task 4: Edit API route and asset page button
 
 **Files:**
@@ -964,7 +985,7 @@ git commit -m "Add pure decision function for the Edit-in-Aseprite action"
 - Test: `test/assetEdit.test.ts`
 
 **Interfaces:**
-- Consumes: `assetService.getById(id: string): Promise<Asset | null>` (existing, `@/lib/services/AssetService`), `settingsService.get` + `ASEPRITE_PATH_SETTING_KEY` (Task 1), `decideEditAction` + `isSafeStoredFilename` + `looksLikeAsepriteExecutable` (Task 3).
+- Consumes: `assetService.getById(id: string): Promise<Asset | null>` (existing, `@/lib/services/AssetService`), `settingsService.get` + `ASEPRITE_PATH_SETTING_KEY` (Task 1), `decideEditAction` + `isSafeStoredFilename` + `looksLikeAsepriteExecutable` (Task 2).
 - Produces: `POST /api/assets/[id]/edit` → `{success:true,data:{launched:true}}` on success, or `{success:false,error:string}` with status 404 (asset not found), 400 (any `decideEditAction` rejection), or 500 (spawn threw synchronously, or emitted an async `'error'` within `SPAWN_ERROR_WAIT_MS`).
 
 - [ ] **Step 1: Write the failing test**

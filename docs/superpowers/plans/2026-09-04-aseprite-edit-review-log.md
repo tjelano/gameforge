@@ -78,3 +78,19 @@ Accepted #4 in full: reworded the test's own comment to claim only what it actua
 Accepted #5 in full: added the missing synchronous-throw test to `test/assetEdit.test.ts` (`spawnMock.mockImplementationOnce(() => { throw ... })`, asserting a 500 without crashing) — the spec's claim is now actually true rather than aspirational.
 
 No pushback this round — all 3 substantive findings (1, 4, 5) were correct and are fixed; 2 and 3 were confirmations, not findings.
+
+## Round 4 — Codex
+
+VERDICT: REVISE
+
+1. `/^[A-Za-z]:[\\/]/` correctly rejects UNC, device, extended-length, relative, and drive-relative paths while accepting `C:\Aseprite\Aseprite.exe`. Does NOT prove the drive is actually local: `Z:\` can be a mapped network drive, and drive-rooted paths can traverse existing reparse points. Suggested renaming to `isDriveLetterRootedPath` for accuracy; "treating mapped drives as an accepted residual is reasonable for V1."
+2. Duplicating the drive-path check across Task 2 (settings route) and Task 3 (decision logic) is "not justified" — it's safety-critical logic, and `AGENTS.md` explicitly requires extracting shared helpers for safety-critical logic on sight. Task ordering is documentation, not a technical dependency constraint. Fix: reorder the decision-logic task before the settings-route task, then import.
+3. Confirmed correct: the synchronous-spawn test exercises the route's catch path properly; the lock-contention test is correctly scoped (proves contention + busy_timeout, not the full race — that rests on the in-lock re-check plus code inspection, matching what its own reworded comment now says).
+
+### Claude's response
+
+Finding 2 is correct and I was wrong to treat task-ordering as a hard constraint rather than something I could just fix by reordering — accepted in full: swapped Task 2 and Task 3 (decision logic now runs first; the settings route now genuinely imports `isDriveLetterRootedPath` from it, no duplication). This required updating every cross-reference to both tasks throughout the plan (Task 1's Interfaces block, both tasks' own Interfaces/reasoning text, Task 4's Interfaces block) — done as one coordinated edit rather than piecemeal, specifically to avoid leaving a stale reference behind.
+
+Accepted finding 1 in full: renamed `isLocalDrivePath` → `isDriveLetterRootedPath` everywhere (implementation, both call sites, all tests), and documented the mapped-drive/reparse-point residual explicitly in both the function's own comment and the spec's Security note — matching this feature's established "narrows, does not eliminate" honesty pattern rather than either silently accepting the imprecise name or over-building real drive-type detection for a residual Codex itself called reasonable to accept.
+
+Added a dedicated `isDriveLetterRootedPath` test suite (4 tests) to match the pattern already established for `isSafeStoredFilename` and `looksLikeAsepriteExecutable`, since Task 3 now imports and uses it directly, not just indirectly through `looksLikeAsepriteExecutable`.

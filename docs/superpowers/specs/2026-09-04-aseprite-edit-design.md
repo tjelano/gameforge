@@ -236,9 +236,17 @@ configured Aseprite path.
   access required, defeating the mitigation entirely, and risking NTLM
   credential exposure during the `fs.statSync` call itself. Both
   `looksLikeAsepriteExecutable` and the settings route's own validation
-  now additionally require the path be rooted on a genuine local drive
-  letter (`/^[A-Za-z]:[\\/]/`), rejecting UNC and device/extended-length
-  paths (`\\.\...`, `\\?\...`) outright.
+  now additionally require the path be rooted on a genuine drive letter
+  (`isDriveLetterRootedPath`, `/^[A-Za-z]:[\\/]/`), rejecting UNC and
+  device/extended-length paths (`\\.\...`, `\\?\...`) outright. Named for
+  exactly what it checks: a drive letter can still be a Windows *mapped
+  network drive* (`Z:\` pointing at a UNC target), and a drive-rooted path
+  can still traverse an NTFS reparse point/junction elsewhere — round 4 of
+  the review flagged this precisely, and confirmed accepting it as a
+  residual gap is reasonable for V1 (detecting either would need real
+  OS-level drive-type/reparse-point queries, out of proportion for this
+  feature). Consistent with every other mitigation in this note: narrows
+  the risk, does not claim to eliminate it.
 
   **This app's total lack of authentication is accepted, pre-existing,
   whole-system risk, not something this feature changes.** Whether that's
