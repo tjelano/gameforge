@@ -145,6 +145,62 @@ class AssetServiceImpl {
 
     return removed;
   }
+
+  /**
+   * Removes physical files in storage/themes/ that are no longer needed.
+   * Same protection rule as cleanupOrphanedImages() (see its own comment
+   * for the full reasoning) — deliberately not filtered by output_kind,
+   * since a theme filename never appears in an image row's image_path
+   * or vice versa; the two storage directories never share filenames.
+   */
+  async cleanupOrphanedThemes(): Promise<number> {
+    const db = DatabaseConnection.getInstance();
+    const themesDir = path.join(getProjectRoot(), 'storage', 'themes');
+
+    let filenames: string[];
+    try {
+      filenames = (await fsPromises.readdir(themesDir, { withFileTypes: true }))
+        .filter(entry => entry.isFile() && entry.name !== '.gitkeep')
+        .map(entry => entry.name);
+    } catch (e) {
+      console.error('Failed to read storage/themes for cleanup:', e);
+      return 0;
+    }
+
+    const assetPaths = new Set(
+      (db.prepare('SELECT image_path FROM assets WHERE image_path IS NOT NULL').all() as { image_path: string }[])
+        .map(row => row.image_path)
+    );
+
+    const activeJobPaths = new Set(
+      (db.prepare(`
+        SELECT result_path FROM jobs
+        WHERE result_path IS NOT NULL
+        AND status IN ('pending', 'processing', 'complete')
+      `).all() as { result_path: string }[])
+        .map(row => row.result_path)
+    );
+
+    const orphans = filenames.filter(f => !assetPaths.has(f) && !activeJobPaths.has(f));
+
+    let removed = 0;
+    for (let i = 0; i < orphans.length; i += IO_WRITE_BATCH_SIZE) {
+      const chunk = orphans.slice(i, i + IO_WRITE_BATCH_SIZE);
+      const results = await Promise.all(chunk.map(async (filename) => {
+        const filePath = path.join(themesDir, filename);
+        try {
+          await fsPromises.unlink(filePath);
+          return true;
+        } catch (e: any) {
+          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned theme ${filename}:`, e);
+          return false;
+        }
+      }));
+      removed += results.filter(Boolean).length;
+    }
+
+    return removed;
+  }
 }
 
 export const assetService = new AssetServiceImpl();
