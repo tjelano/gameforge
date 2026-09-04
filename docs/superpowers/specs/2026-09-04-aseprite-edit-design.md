@@ -260,3 +260,15 @@ configured Aseprite path.
 Using the array-args spawn form for both invocations means neither value
 is ever interpreted as shell syntax regardless of its content, independent
 of the above.
+
+**One more accepted residual, noted during the final whole-branch review:**
+`POST /api/assets/[id]/edit` takes no body and no custom headers, so it's a
+CORS-simple request — any page the user has open in the same browser could
+fire an unauthenticated `fetch(url, { method: 'POST', mode: 'no-cors' })`
+at `localhost:3000` and trigger the launch despite never seeing the
+response. Impact is low (the attacker page would first need a real asset
+UUID, which it has no way to obtain cross-origin) and the ceiling is the
+same as everywhere else in this note — "Aseprite opens," not arbitrary
+execution — but it's a genuine consequence of this app's no-auth posture
+that the earlier passes through this note didn't call out explicitly.
+Filed here rather than fixed, matching every other item on this list.
