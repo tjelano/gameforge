@@ -39,7 +39,16 @@ export function isDriveLetterRootedPath(candidate: string): boolean {
 // Aseprite AND that lives on a local drive, rather than any already-present
 // executable on the machine or anything reachable over the network.
 export function looksLikeAsepriteExecutable(asepritePath: string): boolean {
-  return isDriveLetterRootedPath(asepritePath) && /^aseprite.*\.exe$/i.test(path.basename(asepritePath));
+  // path.win32.basename, not the platform-default path.basename: this
+  // feature's target is always a Windows path (see isDriveLetterRootedPath
+  // above), but path.basename is platform-dependent — on Linux CI it would
+  // be path.posix.basename, which doesn't treat '\' as a separator and
+  // leaves a genuine Windows path like C:\Aseprite\Aseprite.exe unchanged,
+  // never matching the pattern below. path.win32.basename behaves exactly
+  // like path.basename on an actual Windows host, so this is a no-op there.
+  return (
+    isDriveLetterRootedPath(asepritePath) && /^aseprite.*\.exe$/i.test(path.win32.basename(asepritePath))
+  );
 }
 
 export function decideEditAction(params: {

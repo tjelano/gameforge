@@ -7,6 +7,22 @@ import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 
+// This feature's path validation is deliberately Windows-only
+// (isDriveLetterRootedPath requires a genuine C:\ drive letter — see
+// lib/services/shared/editDecision.ts). Tests below that build their
+// "real, existing Aseprite/image path" from a real OS temp dir
+// (os.tmpdir() via tempRoot) can only satisfy that check when this test
+// runner's own filesystem produces drive-letter-rooted absolute paths —
+// i.e. on a Windows CI runner or a Windows dev machine, not on
+// ubuntu-latest, where os.tmpdir() is something like /tmp/... and
+// structurally can never be drive-letter-rooted. That's not a gap to
+// "fix" here; loosening isDriveLetterRootedPath to also accept POSIX
+// paths would silently widen what this launcher accepts. Each test below
+// is gated individually, only when ITS OWN assertion actually depends on
+// that drive-letter shape (not just because it happens to live in this
+// file).
+const WINDOWS_ONLY = process.platform !== 'win32';
+
 // A fake ChildProcess: a real EventEmitter (so .once('error', ...) works
 // exactly like the real thing) plus a stubbed unref(). Individual tests
 // can grab the returned emitter via spawnMock.mock.results to fire a
@@ -126,7 +142,10 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('400s when the configured Aseprite path does not exist on disk', async () => {
+  // Needs asepritePathLooksLikeAseprite to be TRUE (to reach the
+  // existence check at all) — only possible when tempRoot is genuinely
+  // drive-letter-rooted.
+  it.skipIf(WINDOWS_ONLY)('400s when the configured Aseprite path does not exist on disk', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
     // Filename must still match looksLikeAsepriteExecutable's naming
     // pattern (starts with "aseprite") so this test actually isolates the
@@ -143,7 +162,10 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('400s when the image file is missing on disk even though the DB row has a path', async () => {
+  // Needs asepritePathLooksLikeAseprite to be TRUE to reach the
+  // (unrelated) imageExists check at all — otherwise decideEditAction
+  // rejects earlier with a different message.
+  it.skipIf(WINDOWS_ONLY)('400s when the image file is missing on disk even though the DB row has a path', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
     const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
     await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
@@ -158,7 +180,10 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('launches Aseprite with the resolved absolute image path when everything checks out', async () => {
+  // Needs a full ok:true decision, which needs asepritePathLooksLikeAseprite
+  // to be TRUE — only possible with a genuinely drive-letter-rooted
+  // tempRoot.
+  it.skipIf(WINDOWS_ONLY)('launches Aseprite with the resolved absolute image path when everything checks out', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
     const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
     await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
@@ -179,7 +204,9 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(calledOpts).toMatchObject({ detached: true, stdio: 'ignore' });
   });
 
-  it('reports a launch failure instead of crashing when spawn emits an async error', async () => {
+  // Needs a full ok:true decision (to actually reach the spawn call) —
+  // only possible with a genuinely drive-letter-rooted tempRoot.
+  it.skipIf(WINDOWS_ONLY)('reports a launch failure instead of crashing when spawn emits an async error', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
     const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
     await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
@@ -203,7 +230,9 @@ describe('POST /api/assets/[id]/edit', () => {
     expect(body.success).toBe(false);
   });
 
-  it('reports a launch failure instead of crashing when spawn throws synchronously', async () => {
+  // Needs a full ok:true decision (to actually reach the spawn call) —
+  // only possible with a genuinely drive-letter-rooted tempRoot.
+  it.skipIf(WINDOWS_ONLY)('reports a launch failure instead of crashing when spawn throws synchronously', async () => {
     const { settingsService } = await import('@/lib/services/SettingsService');
     const fakeAsepritePath = path.join(tempRoot, 'aseprite.exe');
     await fsPromises.writeFile(fakeAsepritePath, 'fake-exe-bytes');
