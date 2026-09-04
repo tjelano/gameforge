@@ -6,7 +6,8 @@ import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { MockThemeGenerator, ThemeTokensSchema, buildThemePrompt } from '@/lib/services/ThemeGenerator';
-import { AnthropicThemeGenerator } from '@/lib/services/AnthropicThemeGenerator';
+import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
+import { ANTHROPIC_PROVIDER } from '@/lib/services/claudeApiProviders';
 
 let tempRoot: string;
 const STYLE_ID = '66666666-6666-6666-6666-666666666666';
@@ -125,7 +126,7 @@ describe('MockThemeGenerator', () => {
   });
 });
 
-describe('AnthropicThemeGenerator', () => {
+describe('ClaudeApiThemeGenerator', () => {
   it('includes the Style Bible parameters in the Anthropic request body', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(JSON.stringify({
@@ -142,7 +143,7 @@ describe('AnthropicThemeGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     await gen.generate('more parchment texture', STYLE_ID);
 
     const [, requestInit] = fetchMock.mock.calls[0];
@@ -168,7 +169,7 @@ describe('AnthropicThemeGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     const result = await gen.generate('dark fantasy, parchment and iron', STYLE_ID);
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -195,7 +196,7 @@ describe('AnthropicThemeGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     await expect(gen.generate('x', STYLE_ID)).rejects.toThrow(/tool_use/i);
   });
 
@@ -209,7 +210,7 @@ describe('AnthropicThemeGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     await expect(gen.generate('x', STYLE_ID)).rejects.toThrow();
   });
 
@@ -223,7 +224,7 @@ describe('AnthropicThemeGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     await expect(gen.generate('x', STYLE_ID)).rejects.toThrow(/max_tokens/i);
   });
 
@@ -231,7 +232,7 @@ describe('AnthropicThemeGenerator', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response('rate limited', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     await expect(gen.generate('x', STYLE_ID)).rejects.toThrow(/429/);
   });
 
@@ -251,7 +252,7 @@ describe('AnthropicThemeGenerator', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const gen = new AnthropicThemeGenerator('fake-key');
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     const NONEXISTENT_STYLE_ID = '77777777-7777-7777-7777-777777777777';
     await expect(gen.generate('x', NONEXISTENT_STYLE_ID)).resolves.toBeDefined();
   });
