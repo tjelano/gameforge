@@ -91,33 +91,10 @@ describe('getThemeGenerator() provider selection', () => {
     expect(sentBody.model).toBe('claude-sonnet-5');
   });
 
-  it('routes to kie.ai when THEME_API_PROVIDER=kieai and its key is set', async () => {
-    vi.stubEnv('THEME_API_PROVIDER', 'kieai');
-    vi.stubEnv('KIEAI_API_KEY', 'fake-kieai-key');
-    const fetchMock = mockFetchOnce();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { getThemeGenerator } = await import('@/lib/services/ThemeGenerator');
-    await getThemeGenerator().generate('x', STYLE_ID);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.kie.ai/claude/v1/messages',
-      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fake-kieai-key' }) })
-    );
-    const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    expect(sentBody.model).toBe('claude-sonnet-5');
-  });
-
   it('throws a clear error when THEME_API_PROVIDER=cheaperinference but CHEAPERINFERENCE_API_KEY is missing', async () => {
     vi.stubEnv('THEME_API_PROVIDER', 'cheaperinference');
     const { getThemeGenerator } = await import('@/lib/services/ThemeGenerator');
     expect(() => getThemeGenerator()).toThrow(/CHEAPERINFERENCE_API_KEY/);
-  });
-
-  it('throws a clear error when THEME_API_PROVIDER=kieai but KIEAI_API_KEY is missing', async () => {
-    vi.stubEnv('THEME_API_PROVIDER', 'kieai');
-    const { getThemeGenerator } = await import('@/lib/services/ThemeGenerator');
-    expect(() => getThemeGenerator()).toThrow(/KIEAI_API_KEY/);
   });
 
   it('throws a clear error for an unrecognized THEME_API_PROVIDER value', async () => {

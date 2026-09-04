@@ -5,7 +5,7 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { z } from 'zod';
 import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
-import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER, KIEAI_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 
 // Deliberately an allowlist grammar per token type, not a full CSS value
 // parser — these values are interpolated directly into a real CSS file
@@ -108,14 +108,8 @@ export function getThemeGenerator(): ThemeGenerator {
         throw new Error('THEME_API_PROVIDER is set to "cheaperinference" but CHEAPERINFERENCE_API_KEY is not configured.');
       }
       cachedThemeGenerator = new ClaudeApiThemeGenerator(apiKey, CHEAPERINFERENCE_PROVIDER);
-    } else if (providerName === 'kieai') {
-      const apiKey = process.env.KIEAI_API_KEY;
-      if (!apiKey) {
-        throw new Error('THEME_API_PROVIDER is set to "kieai" but KIEAI_API_KEY is not configured.');
-      }
-      cachedThemeGenerator = new ClaudeApiThemeGenerator(apiKey, KIEAI_PROVIDER);
     } else {
-      throw new Error(`Unknown THEME_API_PROVIDER "${providerName}" — expected "anthropic", "cheaperinference", or "kieai".`);
+      throw new Error(`Unknown THEME_API_PROVIDER "${providerName}" — expected "anthropic" or "cheaperinference".`);
     }
   }
   return cachedThemeGenerator;

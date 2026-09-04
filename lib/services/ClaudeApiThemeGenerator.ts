@@ -51,11 +51,11 @@ interface AnthropicMessageResponse {
  *
  * Parameterized by a ClaudeApiProvider profile (see
  * lib/services/claudeApiProviders.ts) rather than hardcoding Anthropic's
- * own host — cheaperinference.com and kie.ai both proxy the same
- * underlying Messages API shape, so everything below this line (request
- * body, forced tool_choice, response parsing, ThemeTokensSchema
- * validation, CSS writing, error diagnosis) is genuinely shared across
- * all three, not just the official API.
+ * own host — cheaperinference.com proxies the same underlying Messages
+ * API shape, so everything below this line (request body, forced
+ * tool_choice, response parsing, ThemeTokensSchema validation, CSS
+ * writing, error diagnosis) is genuinely shared across both, not just
+ * the official API.
  */
 export class ClaudeApiThemeGenerator implements ThemeGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}

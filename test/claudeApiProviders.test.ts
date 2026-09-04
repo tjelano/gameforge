@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER, KIEAI_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 
 describe('ANTHROPIC_PROVIDER', () => {
   it('points at the official Anthropic Messages endpoint with an x-api-key header', () => {
@@ -19,19 +19,10 @@ describe('CHEAPERINFERENCE_PROVIDER', () => {
   });
 });
 
-describe('KIEAI_PROVIDER', () => {
-  it('points at kie.ai\'s Claude proxy with a Bearer Authorization header', () => {
-    expect(KIEAI_PROVIDER.name).toBe('kieai');
-    expect(KIEAI_PROVIDER.requestUrl).toBe('https://api.kie.ai/claude/v1/messages');
-    expect(KIEAI_PROVIDER.model).toBe('claude-sonnet-5');
-    expect(KIEAI_PROVIDER.buildAuthHeaders('fake-key')).toEqual({ Authorization: 'Bearer fake-key' });
-  });
-});
-
 describe('every provider', () => {
   it('has a distinct name and requestUrl (no accidental duplication)', () => {
-    const providers = [ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER, KIEAI_PROVIDER];
-    expect(new Set(providers.map(p => p.name)).size).toBe(3);
-    expect(new Set(providers.map(p => p.requestUrl)).size).toBe(3);
+    const providers = [ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER];
+    expect(new Set(providers.map(p => p.name)).size).toBe(2);
+    expect(new Set(providers.map(p => p.requestUrl)).size).toBe(2);
   });
 });
