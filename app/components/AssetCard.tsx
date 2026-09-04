@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Asset } from '@/lib/database/schema';
+import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 
 export function AssetCard({ asset }: { asset: Asset }) {
   const states: string[] = (() => {
@@ -20,9 +21,17 @@ export function AssetCard({ asset }: { asset: Asset }) {
           alignItems: 'center',
           justifyContent: 'center',
           borderBottom: '1px solid var(--border)',
+          overflow: 'hidden',
         }}
       >
-        {asset.image_path ? (
+        {asset.output_kind === 'theme' && asset.image_path ? (
+          <iframe
+            srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
+            title={`Theme preview: ${asset.prompt}`}
+            sandbox=""
+            style={{ width: 320, height: 320, border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left' }}
+          />
+        ) : asset.image_path ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`/api/images/${asset.image_path}`}

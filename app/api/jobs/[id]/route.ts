@@ -39,7 +39,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     }
 
     if (job.result_path) {
-      await deleteFileIfSafe(job.result_path);
+      await deleteFileIfSafe(job.result_path, job.output_kind);
     }
     await jobService.delete(id);
 

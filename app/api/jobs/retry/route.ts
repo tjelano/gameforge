@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     // claims it) before wiping result_path — the shared helper only
     // deletes when nothing else still references the file.
     if (job.result_path) {
-      await deleteFileIfSafe(job.result_path);
+      await deleteFileIfSafe(job.result_path, job.output_kind);
     }
 
     const updated = await jobService.resetForRetry(jobId);

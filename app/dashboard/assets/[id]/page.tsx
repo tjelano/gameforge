@@ -2,6 +2,7 @@
 
 import { useEffect, useState, use as usePromise } from 'react';
 import type { Asset } from '@/lib/database/schema';
+import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 
 export default function AssetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
@@ -94,7 +95,16 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       <h1 className="page-title">{asset.prompt}</h1>
       <p className="page-subtitle">{asset.asset_type}</p>
 
-      {asset.image_path && (
+      {asset.output_kind === 'theme' && asset.image_path && (
+        <iframe
+          srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
+          title={`Theme preview: ${asset.prompt}`}
+          sandbox=""
+          style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 24 }}
+        />
+      )}
+
+      {asset.output_kind !== 'theme' && asset.image_path && (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img

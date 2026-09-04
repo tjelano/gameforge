@@ -6,6 +6,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { assetService } from '@/lib/services/AssetService';
 import { styleService } from '@/lib/services/StyleService';
+import { storageDirFor } from '@/lib/services/shared/assetSafety';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
 import { StyleSchema, AssetSchema } from '@/lib/database/schema';
 
@@ -30,6 +31,7 @@ class GitServiceImpl {
       await fsPromises.mkdir(path.join(getProjectRoot(), dir), { recursive: true });
     }
     await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'images'), { recursive: true });
+    await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'themes'), { recursive: true });
   }
 
   async exportToJson(): Promise<void> {
@@ -89,8 +91,8 @@ class GitServiceImpl {
       // that doesn't happen to have that job locally, aborting the whole
       // import. nine_slice_margins/states are portable and still synced.
       db.prepare(`
-        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, nine_slice_margins, states)
-        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states)
+        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, nine_slice_margins, states, output_kind)
+        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states, @output_kind)
         ON CONFLICT(id) DO UPDATE SET
           style_id = excluded.style_id,
           created_by = excluded.created_by,
@@ -100,7 +102,8 @@ class GitServiceImpl {
           created_at = excluded.created_at,
           is_deleted = excluded.is_deleted,
           nine_slice_margins = excluded.nine_slice_margins,
-          states = excluded.states
+          states = excluded.states,
+          output_kind = excluded.output_kind
       `).run(data);
     }
   }
@@ -127,26 +130,27 @@ class GitServiceImpl {
     await git.add('data/');
 
     const activeAssets = await assetService.getActiveAssets();
-    const validImages: string[] = [];
+    const validPaths: string[] = [];
 
     for (let i = 0; i < activeAssets.length; i += IO_WRITE_BATCH_SIZE) {
       const chunk = activeAssets.slice(i, i + IO_WRITE_BATCH_SIZE);
       const existenceChecks = chunk.map(async (asset) => {
         if (!asset.image_path) return null;
-        const physicalPath = path.join(getProjectRoot(), 'storage', 'images', asset.image_path);
+        const subdir = storageDirFor(asset.output_kind);
+        const physicalPath = path.join(getProjectRoot(), 'storage', subdir, asset.image_path);
         try {
           await fsPromises.access(physicalPath, fs.constants.F_OK);
-          return `storage/images/${asset.image_path}`;
+          return `storage/${subdir}/${asset.image_path}`;
         } catch {
           return null;
         }
       });
       const results = await Promise.all(existenceChecks);
-      validImages.push(...results.filter((r): r is string => r !== null));
+      validPaths.push(...results.filter((r): r is string => r !== null));
     }
 
-    for (let i = 0; i < validImages.length; i += IO_WRITE_BATCH_SIZE) {
-      const chunk = validImages.slice(i, i + IO_WRITE_BATCH_SIZE);
+    for (let i = 0; i < validPaths.length; i += IO_WRITE_BATCH_SIZE) {
+      const chunk = validPaths.slice(i, i + IO_WRITE_BATCH_SIZE);
       await git.add(chunk);
     }
 
@@ -174,8 +178,11 @@ class GitServiceImpl {
     await this.ensureDirectoriesExist();
     await this.exportToJson();
 
-    const removed = await assetService.cleanupOrphanedImages();
-    if (removed > 0) console.log(`🧹 Removed ${removed} orphaned images.`);
+    const removedImages = await assetService.cleanupOrphanedImages();
+    const removedThemes = await assetService.cleanupOrphanedThemes();
+    if (removedImages > 0 || removedThemes > 0) {
+      console.log(`🧹 Removed ${removedImages} orphaned images and ${removedThemes} orphaned themes.`);
+    }
 
     const git = this.git();
     const status = await git.status();
@@ -208,8 +215,11 @@ class GitServiceImpl {
 
       await this.exportToJson();
 
-      const removed = await assetService.cleanupOrphanedImages();
-      if (removed > 0) console.log(`🧹 Removed ${removed} orphaned images.`);
+      const removedImages = await assetService.cleanupOrphanedImages();
+      const removedThemes = await assetService.cleanupOrphanedThemes();
+      if (removedImages > 0 || removedThemes > 0) {
+        console.log(`🧹 Removed ${removedImages} orphaned images and ${removedThemes} orphaned themes.`);
+      }
 
       await this.stageFilesForCommit();
 

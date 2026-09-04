@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url';
 import { DatabaseConnection } from '@/lib/database';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getImageGenerator } from '@/lib/services/ImageGenerator';
+import { getThemeGenerator } from '@/lib/services/ThemeGenerator';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 
@@ -72,9 +73,11 @@ export async function processJob(job: any): Promise<void> {
   }
 
   try {
-    const result = sheetOptions
-      ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
-      : await getImageGenerator().generate(job.prompt, job.style_id);
+    const result = job.output_kind === 'theme'
+      ? await getThemeGenerator().generate(job.prompt, job.style_id)
+      : sheetOptions
+        ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
+        : await getImageGenerator().generate(job.prompt, job.style_id);
 
     db.prepare(`UPDATE jobs SET status = 'complete', result_path = ?, updated_at = ? WHERE id = ?`)
       .run(result.path, Date.now(), job.id);

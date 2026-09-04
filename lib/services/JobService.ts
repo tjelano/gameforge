@@ -41,14 +41,15 @@ class JobServiceImpl {
     assetType: string;
     prompt: string;
     options?: Record<string, unknown>;
+    outputKind?: 'image' | 'theme';
   }): Promise<Job> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();
     const now = Date.now();
     db.prepare(`
-      INSERT INTO jobs (id, style_id, created_by, asset_type, prompt, status, result_path, created_at, updated_at, options)
-      VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?)
-    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, now, now, JSON.stringify(input.options ?? {}));
+      INSERT INTO jobs (id, style_id, created_by, asset_type, prompt, status, result_path, created_at, updated_at, options, output_kind)
+      VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?, ?, ?, ?)
+    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, now, now, JSON.stringify(input.options ?? {}), input.outputKind ?? 'image');
     return (await this.getById(id))!;
   }
 
