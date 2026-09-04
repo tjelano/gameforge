@@ -51,41 +51,49 @@ export class DatabaseConnection {
     const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
     if (files.length === 0) return;
 
-    const tableCheck = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'"
-    ).get();
-
-    if (!tableCheck) {
-      db.exec(`
-        CREATE TABLE migrations (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          applied_at INTEGER NOT NULL
-        )
-      `);
-    }
-
-    const applied = db.prepare('SELECT name FROM migrations').all() as { name: string }[];
-    const appliedNames = new Set(applied.map(m => m.name));
+    // IF NOT EXISTS makes this safe to run from multiple processes without
+    // a pre-check — SQLite serializes writers at the file level, so two
+    // concurrent CREATE TABLE IF NOT EXISTS calls are safe in either order.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        applied_at INTEGER NOT NULL
+      )
+    `);
 
     for (const file of files) {
-      if (!appliedNames.has(file)) {
-        console.log(`📦 Running migration: ${file}`);
-        const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-
-        const applyMigration = db.transaction(() => {
+      try {
+        // BEGIN IMMEDIATE acquires SQLite's write lock right away instead
+        // of lazily on first write. This closes the race where two
+        // processes (the Next.js server and the separate worker process,
+        // both calling DatabaseConnection.getInstance() independently on
+        // startup) both read "not yet applied" before either commits — the
+        // second process to reach BEGIN IMMEDIATE blocks (up to
+        // busy_timeout) until the first finishes, then re-checks applied
+        // status before deciding. It's inside this try (not before it) so
+        // a failure acquiring the lock itself — e.g. busy_timeout
+        // exceeded waiting on the other process — is handled by the same
+        // path as every other failure below, rather than propagating
+        // uncaught from outside the try/catch.
+        db.exec('BEGIN IMMEDIATE');
+        const alreadyApplied = db.prepare('SELECT 1 FROM migrations WHERE name = ?').get(file);
+        if (!alreadyApplied) {
+          console.log(`📦 Running migration: ${file}`);
+          const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
           db.exec(sql);
-          db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)')
-            .run(file, Date.now());
-        });
-
-        try {
-          applyMigration();
+          db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(file, Date.now());
           console.log(`✅ Migration complete: ${file}`);
-        } catch (error) {
-          console.error(`❌ Migration failed: ${file}`, error);
-          throw error;
         }
+        db.exec('COMMIT');
+      } catch (error) {
+        // Only roll back if a transaction is actually open — if BEGIN
+        // IMMEDIATE itself is what failed (e.g. lock-wait timeout), there
+        // is nothing to roll back, and calling ROLLBACK anyway would throw
+        // its own "no transaction is active" error, masking the real one.
+        if (db.inTransaction) db.exec('ROLLBACK');
+        console.error(`❌ Migration failed: ${file}`, error);
+        throw error;
       }
     }
   }
