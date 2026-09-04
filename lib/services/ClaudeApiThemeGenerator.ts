@@ -1,9 +1,10 @@
-// lib/services/AnthropicThemeGenerator.ts
+// lib/services/ClaudeApiThemeGenerator.ts
 import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { styleService } from '@/lib/services/StyleService';
+import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import {
   ThemeTokensSchema,
   tokensToCss,
@@ -12,9 +13,7 @@ import {
   type GeneratedTheme,
 } from '@/lib/services/ThemeGenerator';
 
-const API_BASE = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
-const MODEL = 'claude-sonnet-5';
 const REQUEST_TIMEOUT_MS = 60_000;
 
 const TOOL_INPUT_SCHEMA = {
@@ -45,27 +44,35 @@ interface AnthropicMessageResponse {
 }
 
 /**
- * Real Anthropic Messages API, called directly via fetch (no
+ * Real Claude Messages API, called directly via fetch (no
  * @anthropic-ai/sdk dependency — matches PixellabGenerator's own
  * direct-fetch convention). Forces a single tool call so the response
  * is reliably structured, rather than asking for JSON in prose.
+ *
+ * Parameterized by a ClaudeApiProvider profile (see
+ * lib/services/claudeApiProviders.ts) rather than hardcoding Anthropic's
+ * own host — cheaperinference.com proxies the same underlying Messages
+ * API shape, so everything below this line (request body, forced
+ * tool_choice, response parsing, ThemeTokensSchema validation, CSS
+ * writing, error diagnosis) is genuinely shared across both, not just
+ * the official API.
  */
-export class AnthropicThemeGenerator implements ThemeGenerator {
-  constructor(private apiKey: string) {}
+export class ClaudeApiThemeGenerator implements ThemeGenerator {
+  constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
   async generate(prompt: string, styleId: string): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
     const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt);
 
-    const res = await fetch(API_BASE, {
+    const res = await fetch(this.provider.requestUrl, {
       method: 'POST',
       headers: {
-        'x-api-key': this.apiKey,
+        ...this.provider.buildAuthHeaders(this.apiKey),
         'anthropic-version': ANTHROPIC_VERSION,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: this.provider.model,
         max_tokens: 4096,
         tools: [
           {
@@ -82,18 +89,18 @@ export class AnthropicThemeGenerator implements ThemeGenerator {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`Anthropic theme generation failed (${res.status}): ${body || res.statusText}`);
+      throw new Error(`Anthropic theme generation failed via ${this.provider.name} (${res.status}): ${body || res.statusText}`);
     }
 
     const data = (await res.json()) as AnthropicMessageResponse;
     if (data.stop_reason === 'max_tokens') {
       throw new Error(
-        'Anthropic response was truncated (stop_reason: max_tokens) before completing the tool call — the theme could not be generated.'
+        `Anthropic response (via ${this.provider.name}) was truncated (stop_reason: max_tokens) before completing the tool call — the theme could not be generated.`
       );
     }
     const toolUse = data.content.find((block): block is ToolUseBlock => block.type === 'tool_use');
     if (!toolUse) {
-      throw new Error('Anthropic response contained no tool_use block for emit_theme.');
+      throw new Error(`Anthropic response (via ${this.provider.name}) contained no tool_use block for emit_theme.`);
     }
 
     const tokens = ThemeTokensSchema.parse(toolUse.input);
