@@ -14,13 +14,14 @@ class AssetServiceImpl {
     prompt: string;
     imagePath: string | null;
     sourceJobId?: string | null;
+    outputKind?: 'image' | 'theme';
   }): Promise<Asset> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();
     db.prepare(`
-      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now(), input.sourceJobId ?? null);
+      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id, output_kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, input.styleId, input.createdBy, input.assetType, input.prompt, input.imagePath, Date.now(), input.sourceJobId ?? null, input.outputKind ?? 'image');
     return (await this.getById(id))!;
   }
 
@@ -82,31 +83,36 @@ class AssetServiceImpl {
   }
 
   /**
-   * Removes physical files in storage/images/ that are no longer needed.
+   * Removes physical files in storage/<subdir>/ that are no longer needed.
+   * Shared by cleanupOrphanedImages() and cleanupOrphanedThemes() — the
+   * protection rule below must stay identical for both, so change it
+   * here, not in either public wrapper.
    *
-   * An image is PROTECTED (never deleted) if it is referenced by:
+   * A file is PROTECTED (never deleted) if it is referenced by:
    *  - any asset row, active OR soft-deleted — soft-deleted assets must
-   *    stay recoverable, image included, until permanently pruned by
+   *    stay recoverable, file included, until permanently pruned by
    *    some future explicit "empty trash" action (not this function).
    *  - any job with status IN ('pending', 'processing', 'complete') —
    *    i.e. anything the user hasn't yet promoted or discarded. A
    *    'complete' job the user simply hasn't looked at yet is not
    *    orphaned; it's awaiting a decision.
    *
-   * Everything else in storage/images/ is deleted. Returns the count
-   * of files actually removed.
+   * Everything else in storage/<subdir>/ is deleted. Returns the count
+   * of files actually removed. Not filtered by output_kind — a theme
+   * filename never appears in an image row's image_path or vice versa,
+   * so the two storage directories never share filenames.
    */
-  async cleanupOrphanedImages(): Promise<number> {
+  private async cleanupOrphanedIn(subdir: 'images' | 'themes'): Promise<number> {
     const db = DatabaseConnection.getInstance();
-    const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
+    const dir = path.join(getProjectRoot(), 'storage', subdir);
 
     let filenames: string[];
     try {
-      filenames = (await fsPromises.readdir(imagesDir, { withFileTypes: true }))
+      filenames = (await fsPromises.readdir(dir, { withFileTypes: true }))
         .filter(entry => entry.isFile() && entry.name !== '.gitkeep')
         .map(entry => entry.name);
     } catch (e) {
-      console.error('Failed to read storage/images for cleanup:', e);
+      console.error(`Failed to read storage/${subdir} for cleanup:`, e);
       return 0;
     }
 
@@ -130,12 +136,12 @@ class AssetServiceImpl {
     for (let i = 0; i < orphans.length; i += IO_WRITE_BATCH_SIZE) {
       const chunk = orphans.slice(i, i + IO_WRITE_BATCH_SIZE);
       const results = await Promise.all(chunk.map(async (filename) => {
-        const filePath = path.join(imagesDir, filename);
+        const filePath = path.join(dir, filename);
         try {
           await fsPromises.unlink(filePath);
           return true;
         } catch (e: any) {
-          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned image ${filename}:`, e);
+          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned file ${filename}:`, e);
           return false;
         }
       }));
@@ -143,6 +149,16 @@ class AssetServiceImpl {
     }
 
     return removed;
+  }
+
+  /** Removes physical files in storage/images/ that are no longer needed. See cleanupOrphanedIn(). */
+  async cleanupOrphanedImages(): Promise<number> {
+    return this.cleanupOrphanedIn('images');
+  }
+
+  /** Removes physical files in storage/themes/ that are no longer needed. See cleanupOrphanedIn(). */
+  async cleanupOrphanedThemes(): Promise<number> {
+    return this.cleanupOrphanedIn('themes');
   }
 }
 

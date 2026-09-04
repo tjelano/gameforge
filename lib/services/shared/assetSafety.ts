@@ -5,6 +5,10 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 
 export function isImageReferencedByAsset(imagePath: string): boolean {
+  // image_path values never collide across output_kind — an image
+  // filename and a theme filename always differ by extension (.png/.jpg
+  // vs .css) — so a plain lookup by path alone stays correct regardless
+  // of which kind is being checked.
   const db = DatabaseConnection.getInstance();
   const result = db.prepare(
     'SELECT COUNT(*) as count FROM assets WHERE image_path = ?'
@@ -12,13 +16,17 @@ export function isImageReferencedByAsset(imagePath: string): boolean {
   return result.count > 0;
 }
 
+export function storageDirFor(outputKind: 'image' | 'theme'): string {
+  return outputKind === 'theme' ? 'themes' : 'images';
+}
+
 // Sync version — works inside db.transaction() callbacks, which must
 // be synchronous. Uses the plain `fs` module, not `fsPromises`.
-export function deleteFileIfSafeSync(filePath: string): void {
+export function deleteFileIfSafeSync(filePath: string, outputKind: 'image' | 'theme'): void {
   try {
     if (!filePath) return;
     if (isImageReferencedByAsset(filePath)) return;
-    const physicalPath = path.join(getProjectRoot(), 'storage', 'images', filePath);
+    const physicalPath = path.join(getProjectRoot(), 'storage', storageDirFor(outputKind), filePath);
     if (fs.existsSync(physicalPath)) {
       fs.unlinkSync(physicalPath);
     }
@@ -28,11 +36,11 @@ export function deleteFileIfSafeSync(filePath: string): void {
 }
 
 // Async version — for use in normal async route handlers.
-export async function deleteFileIfSafe(filePath: string): Promise<void> {
+export async function deleteFileIfSafe(filePath: string, outputKind: 'image' | 'theme'): Promise<void> {
   try {
     if (!filePath) return;
     if (isImageReferencedByAsset(filePath)) return;
-    const physicalPath = path.join(getProjectRoot(), 'storage', 'images', filePath);
+    const physicalPath = path.join(getProjectRoot(), 'storage', storageDirFor(outputKind), filePath);
     try {
       await fsPromises.unlink(physicalPath);
     } catch (e: any) {
