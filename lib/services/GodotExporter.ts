@@ -21,7 +21,7 @@ class GodotExporterImpl {
     const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
     await fsPromises.mkdir(targetDir, { recursive: true });
 
-    const assets = await assetService.getActiveAssets();
+    const assets = (await assetService.getActiveAssets()).filter(asset => asset.output_kind === 'image');
 
     let exported = 0;
     let skipped = 0;
