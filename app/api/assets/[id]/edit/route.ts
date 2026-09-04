@@ -62,7 +62,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     let asepriteExists = false;
     try {
       imageExists = !!imageAbsolutePath && isRegularFile(imageAbsolutePath);
-      asepriteExists = !!asepritePathSetting && isRegularFile(asepritePathSetting);
+      asepriteExists = asepritePathLooksLikeAseprite && isRegularFile(asepritePathSetting!);
     } catch (e) {
       console.error('Failed checking file existence for edit action:', e);
     }
