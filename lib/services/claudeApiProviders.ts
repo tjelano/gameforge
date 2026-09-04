@@ -12,7 +12,6 @@ export interface ClaudeApiProvider {
   requestUrl: string;
   model: string;
   buildAuthHeaders(apiKey: string): Record<string, string>;
-  apiKeyEnvVar: string;
 }
 
 export const ANTHROPIC_PROVIDER: ClaudeApiProvider = {
@@ -20,7 +19,6 @@ export const ANTHROPIC_PROVIDER: ClaudeApiProvider = {
   requestUrl: 'https://api.anthropic.com/v1/messages',
   model: 'claude-sonnet-5',
   buildAuthHeaders: (apiKey) => ({ 'x-api-key': apiKey }),
-  apiKeyEnvVar: 'ANTHROPIC_API_KEY',
 };
 
 export const CHEAPERINFERENCE_PROVIDER: ClaudeApiProvider = {
@@ -28,7 +26,6 @@ export const CHEAPERINFERENCE_PROVIDER: ClaudeApiProvider = {
   requestUrl: 'https://api.cheaperinference.com/v1/messages',
   model: 'claude-sonnet-5',
   buildAuthHeaders: (apiKey) => ({ 'X-Api-Key': apiKey }),
-  apiKeyEnvVar: 'CHEAPERINFERENCE_API_KEY',
 };
 
 export const KIEAI_PROVIDER: ClaudeApiProvider = {
@@ -39,6 +36,9 @@ export const KIEAI_PROVIDER: ClaudeApiProvider = {
   // fails cleanly (a real, diagnosable API error), not silently.
   model: 'claude-sonnet-5',
   requestUrl: 'https://api.kie.ai/claude/v1/messages',
-  buildAuthHeaders: (apiKey) => ({ ANTHROPIC_AUTH_TOKEN: apiKey }),
-  apiKeyEnvVar: 'KIEAI_API_KEY',
+  // kie.ai proxies the real Anthropic Messages API wire format, so this
+  // is a normal HTTP Authorization header — NOT the ANTHROPIC_AUTH_TOKEN
+  // env var name their docs use to configure the official Claude Code
+  // client (that client translates it into this same header internally).
+  buildAuthHeaders: (apiKey) => ({ Authorization: `Bearer ${apiKey}` }),
 };

@@ -89,8 +89,9 @@ export class MockThemeGenerator implements ThemeGenerator {
 }
 
 // Lazy, mock-vs-real singleton — same reasoning as getImageGenerator():
-// ESM import hoisting would otherwise evaluate process.env.ANTHROPIC_API_KEY
-// before worker.ts's own env-loading flag has landed it in process.env.
+// ESM import hoisting would otherwise evaluate process.env.THEME_API_PROVIDER
+// and the various *_API_KEY vars before worker.ts's own env-loading flag has
+// landed them in process.env.
 let cachedThemeGenerator: ThemeGenerator | undefined;
 
 export function getThemeGenerator(): ThemeGenerator {

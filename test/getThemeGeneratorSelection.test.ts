@@ -87,6 +87,8 @@ describe('getThemeGenerator() provider selection', () => {
       'https://api.cheaperinference.com/v1/messages',
       expect.objectContaining({ headers: expect.objectContaining({ 'X-Api-Key': 'fake-ci-key' }) })
     );
+    const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody.model).toBe('claude-sonnet-5');
   });
 
   it('routes to kie.ai when THEME_API_PROVIDER=kieai and its key is set', async () => {
@@ -100,8 +102,10 @@ describe('getThemeGenerator() provider selection', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.kie.ai/claude/v1/messages',
-      expect.objectContaining({ headers: expect.objectContaining({ ANTHROPIC_AUTH_TOKEN: 'fake-kieai-key' }) })
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fake-kieai-key' }) })
     );
+    const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody.model).toBe('claude-sonnet-5');
   });
 
   it('throws a clear error when THEME_API_PROVIDER=cheaperinference but CHEAPERINFERENCE_API_KEY is missing', async () => {

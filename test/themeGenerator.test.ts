@@ -180,6 +180,8 @@ describe('ClaudeApiThemeGenerator', () => {
         signal: expect.any(AbortSignal),
       })
     );
+    const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sentBody.model).toBe('claude-sonnet-5');
 
     const filePath = path.join(tempRoot, 'storage', 'themes', result.path);
     const content = await fsPromises.readFile(filePath, 'utf-8');
