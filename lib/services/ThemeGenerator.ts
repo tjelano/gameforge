@@ -4,7 +4,8 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { z } from 'zod';
-import { AnthropicThemeGenerator } from '@/lib/services/AnthropicThemeGenerator';
+import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
+import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER, KIEAI_PROVIDER } from '@/lib/services/claudeApiProviders';
 
 // Deliberately an allowlist grammar per token type, not a full CSS value
 // parser — these values are interpolated directly into a real CSS file
@@ -94,9 +95,27 @@ let cachedThemeGenerator: ThemeGenerator | undefined;
 
 export function getThemeGenerator(): ThemeGenerator {
   if (!cachedThemeGenerator) {
-    cachedThemeGenerator = process.env.ANTHROPIC_API_KEY
-      ? new AnthropicThemeGenerator(process.env.ANTHROPIC_API_KEY)
-      : new MockThemeGenerator();
+    const providerName = process.env.THEME_API_PROVIDER;
+
+    if (!providerName || providerName === 'anthropic') {
+      cachedThemeGenerator = process.env.ANTHROPIC_API_KEY
+        ? new ClaudeApiThemeGenerator(process.env.ANTHROPIC_API_KEY, ANTHROPIC_PROVIDER)
+        : new MockThemeGenerator();
+    } else if (providerName === 'cheaperinference') {
+      const apiKey = process.env.CHEAPERINFERENCE_API_KEY;
+      if (!apiKey) {
+        throw new Error('THEME_API_PROVIDER is set to "cheaperinference" but CHEAPERINFERENCE_API_KEY is not configured.');
+      }
+      cachedThemeGenerator = new ClaudeApiThemeGenerator(apiKey, CHEAPERINFERENCE_PROVIDER);
+    } else if (providerName === 'kieai') {
+      const apiKey = process.env.KIEAI_API_KEY;
+      if (!apiKey) {
+        throw new Error('THEME_API_PROVIDER is set to "kieai" but KIEAI_API_KEY is not configured.');
+      }
+      cachedThemeGenerator = new ClaudeApiThemeGenerator(apiKey, KIEAI_PROVIDER);
+    } else {
+      throw new Error(`Unknown THEME_API_PROVIDER "${providerName}" — expected "anthropic", "cheaperinference", or "kieai".`);
+    }
   }
   return cachedThemeGenerator;
 }

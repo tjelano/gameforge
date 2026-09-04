@@ -40,6 +40,12 @@ Set `ANTHROPIC_API_KEY` in `.env.local` to enable real website theme generation.
 falls back to `MockThemeGenerator`, which writes a fixed token set so the rest of the pipeline stays
 exercisable.
 
+Instead of the official Anthropic API, theme generation can also run through cheaperinference.com or
+kie.ai — set `THEME_API_PROVIDER` to `cheaperinference` or `kieai` and provide the matching
+`CHEAPERINFERENCE_API_KEY` or `KIEAI_API_KEY`. Leaving `THEME_API_PROVIDER` unset keeps the
+`ANTHROPIC_API_KEY`-or-mock behavior above unchanged. An explicitly-selected provider whose key is missing
+fails with a clear error rather than silently falling back to the mock.
+
 **If you're running the worker separately** (`npm run dev:worker`, not through `next dev`), env vars only
 reach it because that script explicitly passes `--env-file-if-exists=.env.local` — a bare `tsx worker.ts`
 does not load `.env.local` on its own the way `next dev` does. If you ever invoke the worker a different
