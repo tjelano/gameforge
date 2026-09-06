@@ -16,13 +16,20 @@ export function isImageReferencedByAsset(imagePath: string): boolean {
   return result.count > 0;
 }
 
-export function storageDirFor(outputKind: 'image' | 'theme'): string {
-  return outputKind === 'theme' ? 'themes' : 'images';
+export function storageDirFor(outputKind: 'image' | 'theme' | 'component'): string {
+  switch (outputKind) {
+    case 'image':
+      return 'images';
+    case 'theme':
+      return 'themes';
+    case 'component':
+      return 'components';
+  }
 }
 
 // Sync version — works inside db.transaction() callbacks, which must
 // be synchronous. Uses the plain `fs` module, not `fsPromises`.
-export function deleteFileIfSafeSync(filePath: string, outputKind: 'image' | 'theme'): void {
+export function deleteFileIfSafeSync(filePath: string, outputKind: 'image' | 'theme' | 'component'): void {
   try {
     if (!filePath) return;
     if (isImageReferencedByAsset(filePath)) return;
@@ -36,7 +43,7 @@ export function deleteFileIfSafeSync(filePath: string, outputKind: 'image' | 'th
 }
 
 // Async version — for use in normal async route handlers.
-export async function deleteFileIfSafe(filePath: string, outputKind: 'image' | 'theme'): Promise<void> {
+export async function deleteFileIfSafe(filePath: string, outputKind: 'image' | 'theme' | 'component'): Promise<void> {
   try {
     if (!filePath) return;
     if (isImageReferencedByAsset(filePath)) return;
