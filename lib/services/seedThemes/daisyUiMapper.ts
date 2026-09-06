@@ -1,9 +1,11 @@
 import { ThemeTokensSchema } from '@/lib/services/ThemeGenerator';
 import { oklchToHex, parseOklchTriple } from '@/lib/services/seedThemes/oklch';
 import { getFontPairing } from '@/lib/services/seedThemes/fontPairings';
+import { normalizeCssLength } from '@/lib/services/seedThemes/normalizeCssLength';
 import type { SeedTheme } from '@/lib/services/seedThemes/types';
 
 const DAISYUI_THEMES_URL = 'https://unpkg.com/daisyui@4.9.0/dist/themes.css';
+const REQUEST_TIMEOUT_MS = 30_000;
 
 function extractThemeBlocks(css: string): Map<string, string> {
   const blocks = new Map<string, string>();
@@ -42,13 +44,14 @@ export function parseDaisyUiThemes(css: string): SeedTheme[] {
       const colorForeground = oklchPropertyToHex(block, '--bc');
       const colorAccent = oklchPropertyToHex(block, '--a');
       const colorBorder = oklchPropertyToHex(block, '--n');
-      const radiusBase = extractCustomProperty(block, '--rounded-btn');
+      const rawRadiusBase = extractCustomProperty(block, '--rounded-btn');
 
-      if (!colorBackground || !colorForeground || !colorAccent || !colorBorder || !radiusBase) {
+      if (!colorBackground || !colorForeground || !colorAccent || !colorBorder || !rawRadiusBase) {
         console.error(`Skipping DaisyUI theme "${name}": missing one or more required custom properties (--b1/--bc/--a/--n/--rounded-btn).`);
         continue;
       }
 
+      const radiusBase = normalizeCssLength(rawRadiusBase);
       const { fontHeading, fontBody } = getFontPairing(name);
       const parsed = ThemeTokensSchema.safeParse({
         colorBackground, colorForeground, colorAccent, colorBorder,
@@ -70,7 +73,7 @@ export function parseDaisyUiThemes(css: string): SeedTheme[] {
 }
 
 export async function fetchDaisyUiThemes(): Promise<SeedTheme[]> {
-  const res = await fetch(DAISYUI_THEMES_URL);
+  const res = await fetch(DAISYUI_THEMES_URL, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Failed to fetch DaisyUI themes.css (${res.status}): ${res.statusText}`);
   }

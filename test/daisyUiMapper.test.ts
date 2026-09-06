@@ -23,6 +23,10 @@ const FIXTURE_WITH_MISSING_PROPERTY = FIXTURE_CSS + `\n[data-theme=broken]{color
 
 const FIXTURE_WITH_MALFORMED_OKLCH = FIXTURE_CSS + `\n[data-theme=malformed]{color-scheme:light;--a:not-a-valid-triple;--n:32% 0.02 255;--b1:100% 0 0;--bc:27% 0.02 256;--rounded-btn:0.5rem}`;
 
+// Real DaisyUI themes (cyberpunk, black, etc.) use bare unitless `0` for
+// --rounded-btn, which the shared CSS_LENGTH_RE regex doesn't accept as-is.
+const FIXTURE_WITH_ZERO_RADIUS = FIXTURE_CSS + `\n[data-theme=cyberpunk]{color-scheme:dark;${REAL_SYNTHWAVE_BLOCK.replace('--rounded-btn:0.5rem', '--rounded-btn:0')}}`;
+
 describe('parseDaisyUiThemes', () => {
   it('extracts exactly the two real named themes, excluding :root, @media, and :has() duplicates', () => {
     const themes = parseDaisyUiThemes(FIXTURE_CSS);
@@ -63,6 +67,13 @@ describe('parseDaisyUiThemes', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('malformed'));
     consoleErrorSpy.mockRestore();
   });
+
+  it('imports a theme with a bare unitless --rounded-btn:0 instead of skipping it', () => {
+    const themes = parseDaisyUiThemes(FIXTURE_WITH_ZERO_RADIUS);
+    const cyberpunk = themes.find(t => t.name === 'cyberpunk');
+    expect(cyberpunk).toBeDefined();
+    expect(cyberpunk!.tokens.radiusBase).toBe('0px');
+  });
 });
 
 describe('fetchDaisyUiThemes', () => {
@@ -76,7 +87,7 @@ describe('fetchDaisyUiThemes', () => {
 
     const themes = await fetchDaisyUiThemes();
 
-    expect(fetchMock).toHaveBeenCalledWith('https://unpkg.com/daisyui@4.9.0/dist/themes.css');
+    expect(fetchMock).toHaveBeenCalledWith('https://unpkg.com/daisyui@4.9.0/dist/themes.css', expect.anything());
     expect(themes.map(t => t.name).sort()).toEqual(['light', 'synthwave']);
   });
 

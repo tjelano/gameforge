@@ -1,12 +1,15 @@
+import { z } from 'zod';
 import { ThemeTokensSchema } from '@/lib/services/ThemeGenerator';
 import { getFontPairing } from '@/lib/services/seedThemes/fontPairings';
+import { normalizeCssLength } from '@/lib/services/seedThemes/normalizeCssLength';
 import type { SeedTheme } from '@/lib/services/seedThemes/types';
 
 const BOOTSWATCH_API_URL = 'https://bootswatch.com/api/5.json';
+const REQUEST_TIMEOUT_MS = 30_000;
 
-interface BootswatchApiResponse {
-  themes: Array<{ name: string; cssMin: string }>;
-}
+const BootswatchApiResponseSchema = z.object({
+  themes: z.array(z.object({ name: z.string(), cssMin: z.string().url() })),
+});
 
 function extractRootCustomProperty(css: string, propName: string): string | null {
   // Match all :root blocks (including :root,[data-bs-theme=light] variants), collect their bodies
@@ -26,13 +29,14 @@ export function parseBootswatchTheme(name: string, compiledCss: string): SeedThe
     const colorForeground = extractRootCustomProperty(compiledCss, '--bs-body-color');
     const colorAccent = extractRootCustomProperty(compiledCss, '--bs-primary');
     const colorBorder = extractRootCustomProperty(compiledCss, '--bs-border-color');
-    const radiusBase = extractRootCustomProperty(compiledCss, '--bs-border-radius');
+    const rawRadiusBase = extractRootCustomProperty(compiledCss, '--bs-border-radius');
 
-    if (!colorBackground || !colorForeground || !colorAccent || !colorBorder || !radiusBase) {
+    if (!colorBackground || !colorForeground || !colorAccent || !colorBorder || !rawRadiusBase) {
       console.error(`Skipping Bootswatch theme "${name}": missing one or more required custom properties (--bs-body-bg/--bs-body-color/--bs-primary/--bs-border-color/--bs-border-radius).`);
       return null;
     }
 
+    const radiusBase = normalizeCssLength(rawRadiusBase);
     const { fontHeading, fontBody } = getFontPairing(name);
     const parsed = ThemeTokensSchema.safeParse({
       colorBackground, colorForeground, colorAccent, colorBorder,
@@ -51,15 +55,19 @@ export function parseBootswatchTheme(name: string, compiledCss: string): SeedThe
 }
 
 export async function fetchBootswatchThemes(): Promise<SeedTheme[]> {
-  const apiRes = await fetch(BOOTSWATCH_API_URL);
+  const apiRes = await fetch(BOOTSWATCH_API_URL, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!apiRes.ok) {
     throw new Error(`Failed to fetch Bootswatch theme list (${apiRes.status}): ${apiRes.statusText}`);
   }
-  const apiData = (await apiRes.json()) as BootswatchApiResponse;
+  const apiData = BootswatchApiResponseSchema.parse(await apiRes.json());
 
   const themes: SeedTheme[] = [];
   for (const { name, cssMin } of apiData.themes) {
-    const cssRes = await fetch(cssMin);
+    if (!cssMin.startsWith('https://bootswatch.com/')) {
+      console.error(`Skipping Bootswatch theme "${name}": cssMin URL is not from bootswatch.com: ${cssMin}`);
+      continue;
+    }
+    const cssRes = await fetch(cssMin, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!cssRes.ok) {
       console.error(`Skipping Bootswatch theme "${name}": failed to fetch compiled CSS (${cssRes.status}).`);
       continue;

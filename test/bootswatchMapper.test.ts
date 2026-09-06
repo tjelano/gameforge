@@ -4,9 +4,14 @@ import { getFontPairing } from '@/lib/services/seedThemes/fontPairings';
 
 // Real, confirmed compiled-CSS values for Bootswatch's Flatly theme (confirmed
 // by direct fetch of its cssMin URL during planning), condensed to only the
-// custom properties this mapper reads. Includes multiple :root blocks as per real
-// compiled Bootswatch 5.3 CSS structure (trivial scroll-behavior block + properties block).
-const FLATLY_ROOT_CSS = ':root{scroll-behavior:smooth}:root{--bs-blue:#0d6efd;--bs-body-bg:#fff;--bs-body-color:#212529;--bs-primary:#2c3e50;--bs-border-color:#dee2e6;--bs-border-radius:0.375rem}';
+// custom properties this mapper reads. Real Bootstrap 5.3 CSS uses a
+// comma-separated compound selector (`:root,[data-bs-theme=light]{...}`) for
+// the properties block, not a second plain `:root{...}` block.
+const FLATLY_ROOT_CSS = ':root{scroll-behavior:smooth}:root,[data-bs-theme=light]{--bs-blue:#0d6efd;--bs-body-bg:#fff;--bs-body-color:#212529;--bs-primary:#2c3e50;--bs-border-color:#dee2e6;--bs-border-radius:0.375rem}';
+
+// Proves dark-mode override blocks (scoped to [data-bs-theme=dark], not :root)
+// don't leak into the extracted values.
+const FLATLY_ROOT_CSS_WITH_DARK_OVERRIDE = FLATLY_ROOT_CSS + '[data-bs-theme=dark]{--bs-body-bg:#000;--bs-body-color:#fff}';
 
 describe('parseBootswatchTheme', () => {
   it('maps the real Bootswatch custom properties directly (no color conversion needed)', () => {
@@ -40,6 +45,20 @@ describe('parseBootswatchTheme', () => {
     expect(theme).toBeNull();
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('NotARealBootswatchTheme'));
     consoleErrorSpy.mockRestore();
+  });
+
+  it('does not pick up a [data-bs-theme=dark] override block for the light theme values', () => {
+    const theme = parseBootswatchTheme('Flatly', FLATLY_ROOT_CSS_WITH_DARK_OVERRIDE);
+    expect(theme).not.toBeNull();
+    expect(theme!.tokens.colorBackground).toBe('#fff');
+    expect(theme!.tokens.colorForeground).toBe('#212529');
+  });
+
+  it('imports a theme with --bs-border-radius:0 instead of skipping it', () => {
+    const css = FLATLY_ROOT_CSS.replace('--bs-border-radius:0.375rem', '--bs-border-radius:0');
+    const theme = parseBootswatchTheme('Flatly', css);
+    expect(theme).not.toBeNull();
+    expect(theme!.tokens.radiusBase).toBe('0px');
   });
 });
 
@@ -99,6 +118,36 @@ describe('fetchBootswatchThemes', () => {
 
     expect(themes.map(t => t.name)).toEqual(['Flatly']);
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('BrokenTheme'));
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('rejects when the API response is malformed (themes missing)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ notThemes: [] }), { status: 200 })));
+    await expect(fetchBootswatchThemes()).rejects.toThrow();
+  });
+
+  it('rejects when the API response has themes that is not an array', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ themes: 'nope' }), { status: 200 })));
+    await expect(fetchBootswatchThemes()).rejects.toThrow();
+  });
+
+  it('skips a theme whose cssMin URL is not on bootswatch.com, without fetching it', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'https://bootswatch.com/api/5.json') {
+        return new Response(JSON.stringify({
+          themes: [{ name: 'Evil', cssMin: 'https://evil.example.com/bootstrap.min.css' }],
+        }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch to ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const themes = await fetchBootswatchThemes();
+
+    expect(themes).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // only the API list, never the off-host cssMin
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('evil.example.com'));
     consoleErrorSpy.mockRestore();
   });
 });

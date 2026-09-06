@@ -18,12 +18,6 @@ export interface SeedImportResult {
 }
 
 async function createSeedTheme(styleName: string, theme: SeedTheme): Promise<void> {
-  const style = await styleService.create({
-    name: styleName,
-    createdBy: SEED_CREATED_BY,
-    parameters: JSON.stringify(theme.tokens),
-  });
-
   const filename = `seed-${crypto.randomUUID()}.css`;
   const themesDir = path.join(getProjectRoot(), 'storage', 'themes');
   try {
@@ -33,6 +27,16 @@ async function createSeedTheme(styleName: string, theme: SeedTheme): Promise<voi
     console.error(`Failed to write seed theme file ${filename}:`, e);
     throw e;
   }
+
+  // Write the file before creating any DB rows: if the write fails, nothing
+  // has been created yet, so there's no orphaned style row left behind. If a
+  // later step (style/asset create) fails instead, cleanupOrphanedThemes()
+  // already reclaims the now-unreferenced file on its next run.
+  const style = await styleService.create({
+    name: styleName,
+    createdBy: SEED_CREATED_BY,
+    parameters: JSON.stringify(theme.tokens),
+  });
 
   await assetService.create({
     styleId: style.id,
@@ -53,8 +57,8 @@ async function importFromSource(
   let themes: SeedTheme[];
   try {
     themes = await fetchThemes();
-  } catch (e: any) {
-    errors.push(`${attributionPrefix}: ${e.message}`);
+  } catch (e) {
+    errors.push(`${attributionPrefix}: ${e instanceof Error ? e.message : String(e)}`);
     return { imported: 0, skipped: 0 };
   }
 
@@ -68,8 +72,8 @@ async function importFromSource(
     }
     try {
       await createSeedTheme(styleName, theme);
-    } catch (e: any) {
-      errors.push(`${attributionPrefix}: ${theme.name}: ${e.message}`);
+    } catch (e) {
+      errors.push(`${attributionPrefix}: ${theme.name}: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
     existingNames.add(styleName);
@@ -79,6 +83,8 @@ async function importFromSource(
 }
 
 export async function importSeedThemes(): Promise<SeedImportResult> {
+  // getAll() includes soft-deleted styles — a user-deleted seed theme should
+  // not be resurrected by a later import.
   const existingStyles = await styleService.getAll();
   const existingNames = new Set(existingStyles.map(s => s.name));
   const errors: string[] = [];

@@ -44,10 +44,10 @@ export default function SeedThemesSettingsPage() {
           Fetches both sources and creates a Style Bible + theme asset for each one that isn&apos;t already
           in your library.
         </p>
-        <button className="btn btn-primary" onClick={handleImport} disabled={running}>
+        <button className="btn btn-primary" onClick={handleImport} disabled={running} aria-busy={running}>
           {running ? 'Importing…' : 'Import Seed Themes'}
         </button>
-        {result && <p style={{ marginTop: 14, fontSize: 13, color: 'var(--ink-dim)' }}>{result}</p>}
+        {result && <p aria-live="polite" style={{ marginTop: 14, fontSize: 13, color: 'var(--ink-dim)' }}>{result}</p>}
       </div>
     </>
   );
