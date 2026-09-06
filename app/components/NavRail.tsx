@@ -13,6 +13,7 @@ const LINKS = [
   { href: '/dashboard/export', label: 'Export' },
   { href: '/dashboard/settings/storage', label: 'Storage' },
   { href: '/dashboard/settings/aseprite', label: 'Aseprite' },
+  { href: '/dashboard/settings/seed-themes', label: 'Seed Themes' },
 ];
 
 export function NavRail() {
