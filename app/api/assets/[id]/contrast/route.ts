@@ -43,6 +43,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ success: false, error: 'Could not parse the theme file' }, { status: 500 });
   }
 
-  const ratio = getContrastRatio(tokens.colorBackground, tokens.colorForeground);
+  let ratio: number;
+  try {
+    ratio = getContrastRatio(tokens.colorBackground, tokens.colorForeground);
+  } catch (e: any) {
+    console.error(`Failed to compute contrast ratio for asset ${id}:`, e);
+    return NextResponse.json({ success: false, error: e.message }, { status: 422 });
+  }
   return NextResponse.json({ success: true, data: { ratio, meetsAA: meetsWcagAA(ratio) } });
 }

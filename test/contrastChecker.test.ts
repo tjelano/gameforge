@@ -38,6 +38,18 @@ describe('getContrastRatio', () => {
     expect(ratio).toBeGreaterThan(10);
     expect(ratio).toBeLessThan(18);
   });
+
+  it('throws a clear error for a non-hex color', () => {
+    // ThemeTokensSchema's CSS_COLOR_RE also allows rgb()/rgba()/hsl()/hsla()
+    // and bare named colors — none of which this function can turn into a
+    // luminance value, so it must throw rather than silently return NaN.
+    expect(() => getContrastRatio('rgb(255, 0, 0)', '#ffffff')).toThrow(/rgb\(255, 0, 0\)/);
+  });
+
+  it('throws a clear error for a hex length that is not 3 or 6', () => {
+    expect(() => getContrastRatio('#ffff', '#ffffff')).toThrow(/#ffff/);
+    expect(() => getContrastRatio('#ffffffff', '#ffffff')).toThrow(/#ffffffff/);
+  });
 });
 
 describe('meetsWcagAA', () => {

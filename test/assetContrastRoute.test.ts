@@ -30,6 +30,15 @@ const LOW_CONTRAST_TOKENS: ThemeTokens = {
   colorForeground: '#999999',
 };
 
+// rgb(...) passes ThemeTokensSchema's CSS_COLOR_RE (lib/services/ThemeGenerator.ts
+// allows hex of any length 3-8, rgb()/rgba()/hsl()/hsla(), and named colors) but
+// getContrastRatio only understands hex — a realistic theme that would previously
+// crash the route via an uncaught throw.
+const RGB_COLOR_TOKENS: ThemeTokens = {
+  ...HIGH_CONTRAST_TOKENS,
+  colorBackground: 'rgb(255, 0, 0)',
+};
+
 async function makeThemeAsset(tokens: ThemeTokens): Promise<{ assetId: string }> {
   const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
   const filename = `theme-${style.id}.css`;
@@ -115,6 +124,16 @@ describe('GET /api/assets/[id]/contrast', () => {
     const req = new NextRequest(`http://localhost/api/assets/${assetId}/contrast`);
     const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
     expect(res.status).toBe(400);
+  });
+
+  it('returns 422 for a theme whose color tokens are not hex (e.g. rgb())', async () => {
+    const { assetId } = await makeThemeAsset(RGB_COLOR_TOKENS);
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/contrast`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toMatch(/rgb\(255, 0, 0\)/);
   });
 
   it('returns 500 when the theme CSS file is missing on disk', async () => {
