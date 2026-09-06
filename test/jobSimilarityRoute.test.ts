@@ -129,4 +129,40 @@ describe('GET /api/jobs/[id]/similarity', () => {
     expect(res.status).toBe(200);
     expect(body.data.flagged).toBe(false);
   });
+
+  it('returns flagged:false (not a 500) instead of reading a path-traversal-looking result_path', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const job = await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', outputKind: 'theme' });
+    const db = DatabaseConnection.getInstance();
+    db.prepare("UPDATE jobs SET status = 'complete', result_path = ? WHERE id = ?").run('../../etc/passwd', job.id);
+
+    const req = new NextRequest(`http://localhost/api/jobs/${job.id}/similarity`);
+    const res = await GET(req, { params: Promise.resolve({ id: job.id }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.flagged).toBe(false);
+  });
+
+  it('degrades to flagged:false (not a 500) when a compared theme uses a color getThemeDistance cannot parse', async () => {
+    // A non-hex color (rgb()/hsl()/named) is allowed by ThemeTokensSchema's
+    // CSS_COLOR_RE but hexToOklab can only handle hex — getThemeDistance
+    // throws, and the whole route must still degrade gracefully rather than
+    // surfacing an unhandled 500.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const promotedFilename = 'promoted.css';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', promotedFilename), tokensToCss(MOCK));
+    await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', imagePath: promotedFilename, outputKind: 'theme' });
+
+    const unparseable: ThemeTokens = { ...MOCK, colorAccent: 'rgb(232, 163, 61)' };
+    const jobId = await makeThemeJob(style.id, unparseable, null);
+    const req = new NextRequest(`http://localhost/api/jobs/${jobId}/similarity`);
+    const res = await GET(req, { params: Promise.resolve({ id: jobId }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.flagged).toBe(false);
+  });
 });
