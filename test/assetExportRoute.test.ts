@@ -1,5 +1,6 @@
 // test/assetExportRoute.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -24,10 +25,10 @@ const TOKENS: ThemeTokens = {
   radiusBase: '4px',
 };
 
-async function makeThemeAsset(styleName: string): Promise<{ assetId: string }> {
+async function makeThemeAsset(styleName: string, tokens: ThemeTokens = TOKENS): Promise<{ assetId: string }> {
   const style = await styleService.create({ name: styleName, createdBy: 'user-1', parameters: '{}' });
   const filename = `theme-${style.id}.css`;
-  await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', filename), tokensToCss(TOKENS));
+  await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', filename), tokensToCss(tokens));
   const asset = await assetService.create({
     styleId: style.id,
     createdBy: 'user-1',
@@ -118,5 +119,40 @@ describe('GET /api/assets/[id]/export', () => {
     const req = new NextRequest(`http://localhost/api/assets/${asset.id}/export?format=tailwind`);
     const res = await GET(req, { params: Promise.resolve({ id: asset.id }) });
     expect(res.status).toBe(500);
+  });
+
+  it('returns 422 (not 500) when a theme value is valid CSS but unrepresentable in the requested export format', async () => {
+    // spaceUnit '1em' passes ThemeTokensSchema (CSS_LENGTH_RE still allows em
+    // for backward compatibility) but the W3C exporter's dimensionToken()
+    // only accepts px/rem, per the real Design Tokens spec.
+    const { assetId } = await makeThemeAsset('x', { ...TOKENS, spaceUnit: '1em' });
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=w3c`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 400 when asset.image_path contains a path-traversal sequence', async () => {
+    // Inserted directly, bypassing assetService.create's normal flow — this
+    // shape can only arise from a corrupted/hostile git-synced import, not
+    // from anything the app itself would write.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const db = DatabaseConnection.getInstance();
+    const assetId = crypto.randomUUID();
+    db.prepare(`
+      INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id, output_kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(assetId, style.id, 'user-1', 'theme', 'x', '../../../secrets.css', Date.now(), null, 'theme');
+
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=tailwind`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('falls back to "theme" for the filename when the style name slugifies to an empty string', async () => {
+    const { assetId } = await makeThemeAsset('🎨');
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=tailwind`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="theme.css"');
   });
 });

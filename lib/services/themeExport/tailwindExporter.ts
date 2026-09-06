@@ -5,7 +5,9 @@ import type { ThemeTokens } from '@/lib/services/ThemeGenerator';
 // utilities, --spacing is a single base multiplier for the whole numeric
 // spacing scale, --radius-* generates rounded-*, --font-* generates font-*.
 export function tokensToTailwindTheme(tokens: ThemeTokens): string {
-  return `@theme {
+  return `/* Requires: @import "tailwindcss"; above this file (or in your main CSS entry point). */
+/* Note: --spacing below replaces Tailwind's default base spacing unit project-wide. */
+@theme {
   --color-background: ${tokens.colorBackground};
   --color-foreground: ${tokens.colorForeground};
   --color-accent: ${tokens.colorAccent};

@@ -17,7 +17,9 @@ const TOKENS: ThemeTokens = {
 describe('tokensToTailwindTheme', () => {
   it('produces an @theme block with the verified Tailwind v4 variable names', () => {
     const css = tokensToTailwindTheme(TOKENS);
-    expect(css).toBe(`@theme {
+    expect(css).toBe(`/* Requires: @import "tailwindcss"; above this file (or in your main CSS entry point). */
+/* Note: --spacing below replaces Tailwind's default base spacing unit project-wide. */
+@theme {
   --color-background: #1a1420;
   --color-foreground: #f0e6d2;
   --color-accent: #e8a33d;

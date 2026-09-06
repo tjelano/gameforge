@@ -26,6 +26,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (asset.output_kind !== 'theme' || !asset.image_path) {
     return NextResponse.json({ success: false, error: 'Only theme assets can be exported this way' }, { status: 400 });
   }
+  // Same guard as app/api/themes/[filename]/route.ts — image_path comes
+  // from the database, never user-typed paths, but is defense-in-depth
+  // against a corrupted/hostile git-synced import setting it to something
+  // unexpected.
+  if (asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
+    return NextResponse.json({ success: false, error: 'Invalid image path' }, { status: 400 });
+  }
   if (format !== 'tailwind' && format !== 'w3c') {
     return NextResponse.json({ success: false, error: 'format must be "tailwind" or "w3c"' }, { status: 400 });
   }
@@ -47,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const style = await styleService.getById(asset.style_id);
-  const baseName = slugify(style?.name ?? 'theme');
+  const baseName = slugify(style?.name ?? '') || 'theme';
 
   let body: string;
   let contentType: string;
@@ -63,7 +70,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       extension = 'json';
     }
   } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+    console.error(`Failed to convert theme tokens for export (asset ${id}):`, e);
+    return NextResponse.json({ success: false, error: e.message }, { status: 422 });
   }
 
   return new NextResponse(body, {
