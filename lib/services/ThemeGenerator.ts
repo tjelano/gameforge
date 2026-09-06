@@ -3,31 +3,15 @@ import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
-import { z } from 'zod';
 import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { ThemeTokensSchema, tokensToCss, type ThemeTokens } from '@/lib/services/themeTokens';
 
-// Deliberately an allowlist grammar per token type, not a full CSS value
-// parser — these values are interpolated directly into a real CSS file
-// that renders in a browser (see tokensToCss below), so ".min(1)" alone
-// would let a value close the custom-property declaration early and
-// inject arbitrary rules (e.g. a url(...) background making a network
-// request). Common, real CSS values for each type all still match.
-const CSS_COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(0|1|0?\.\d+)\s*\)|hsl\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*\)|hsla\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*,\s*(0|1|0?\.\d+)\s*\)|[a-zA-Z]{3,20})$/;
-const CSS_FONT_RE = /^[a-zA-Z0-9\s,'"-]{1,120}$/;
-const CSS_LENGTH_RE = /^\d{1,3}(\.\d+)?(px|rem|em)$/;
-
-export const ThemeTokensSchema = z.object({
-  colorBackground: z.string().regex(CSS_COLOR_RE, 'must be a plain CSS color (hex, rgb(a), hsl(a), or a named color)'),
-  colorForeground: z.string().regex(CSS_COLOR_RE, 'must be a plain CSS color (hex, rgb(a), hsl(a), or a named color)'),
-  colorAccent: z.string().regex(CSS_COLOR_RE, 'must be a plain CSS color (hex, rgb(a), hsl(a), or a named color)'),
-  colorBorder: z.string().regex(CSS_COLOR_RE, 'must be a plain CSS color (hex, rgb(a), hsl(a), or a named color)'),
-  fontHeading: z.string().regex(CSS_FONT_RE, 'must be a plain font-family value'),
-  fontBody: z.string().regex(CSS_FONT_RE, 'must be a plain font-family value'),
-  spaceUnit: z.string().regex(CSS_LENGTH_RE, 'must be a CSS length in px, rem, or em'),
-  radiusBase: z.string().regex(CSS_LENGTH_RE, 'must be a CSS length in px, rem, or em'),
-});
-export type ThemeTokens = z.infer<typeof ThemeTokensSchema>;
+// Re-exported so every existing server-side caller of this module keeps
+// working unchanged — the pure schema/serialization logic itself now
+// lives in themeTokens.ts (see that file for why: a 'use client'
+// component needs it without pulling in this file's Node-only imports).
+export { ThemeTokensSchema, tokensToCss, parseThemeCss, type ThemeTokens } from '@/lib/services/themeTokens';
 
 export interface GeneratedTheme {
   path: string; // filename only, under storage/themes/
@@ -36,41 +20,6 @@ export interface GeneratedTheme {
 
 export interface ThemeGenerator {
   generate(prompt: string, styleId: string): Promise<GeneratedTheme>;
-}
-
-export function tokensToCss(tokens: ThemeTokens): string {
-  return `:root {
-  --color-bg: ${tokens.colorBackground};
-  --color-fg: ${tokens.colorForeground};
-  --color-accent: ${tokens.colorAccent};
-  --color-border: ${tokens.colorBorder};
-  --font-heading: ${tokens.fontHeading};
-  --font-body: ${tokens.fontBody};
-  --space-unit: ${tokens.spaceUnit};
-  --radius-base: ${tokens.radiusBase};
-}
-`;
-}
-
-export function parseThemeCss(css: string): ThemeTokens {
-  function extract(varName: string): string {
-    const match = css.match(new RegExp(`--${varName}:\\s*([^;]+);`));
-    if (!match) {
-      throw new Error(`Theme CSS is missing required custom property --${varName}`);
-    }
-    return match[1].trim();
-  }
-
-  return ThemeTokensSchema.parse({
-    colorBackground: extract('color-bg'),
-    colorForeground: extract('color-fg'),
-    colorAccent: extract('color-accent'),
-    colorBorder: extract('color-border'),
-    fontHeading: extract('font-heading'),
-    fontBody: extract('font-body'),
-    spaceUnit: extract('space-unit'),
-    radiusBase: extract('radius-base'),
-  });
 }
 
 export function buildThemePrompt(styleParameters: string, jobPrompt: string, avoidColors: string[] = []): string {
