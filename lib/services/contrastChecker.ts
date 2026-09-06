@@ -2,10 +2,11 @@
 // (w3.org/WAI/WCAG21/Understanding/contrast-minimum.html) during planning.
 // Only handles 3-digit and 6-digit hex. ThemeTokensSchema's CSS_COLOR_RE
 // (lib/services/ThemeGenerator.ts) actually permits hex of any length 3-8,
-// rgb()/rgba()/hsl()/hsla(), and bare named colors — none of those are hex
-// luminance can be computed from here, so relativeLuminance throws for
-// anything outside 3-digit/6-digit hex rather than silently returning NaN
-// (NaN would JSON-serialize as null and crash the client on `.toFixed()`).
+// rgb()/rgba()/hsl()/hsla(), and bare named colors — none of which this
+// function can compute a luminance from, so anything other than 3-digit or
+// 6-digit hex throws a clear error instead of silently producing a wrong or
+// NaN result (NaN would JSON-serialize as null and crash the client on
+// `.toFixed()`).
 // Callers (see app/api/assets/[id]/contrast/route.ts) must catch this.
 
 function linearizeChannel(normalized: number): number {
@@ -17,6 +18,13 @@ function relativeLuminance(hex: string): number {
   if (clean.length === 3) {
     clean = clean.split('').map(c => c + c).join('');
   }
+  // Deliberately stricter than themeExport/w3cExporter.ts's hex handling: that
+  // exporter drops the alpha byte from 4/8-digit hex and treats the color as
+  // opaque, which is fine for recording a token's base RGB value. For contrast
+  // computation specifically, silently ignoring alpha would compute a ratio
+  // against the wrong effective color (the real rendered result depends on
+  // what's behind a semi-transparent color) — so 4/8-digit hex is rejected
+  // here rather than silently mishandled.
   if (!/^[0-9a-fA-F]{6}$/.test(clean)) {
     throw new Error(`Cannot compute contrast for color "${hex}" — only 3-digit or 6-digit hex colors are supported.`);
   }

@@ -76,7 +76,11 @@ export function AssetCard({ asset }: { asset: Asset }) {
           {asset.nine_slice_margins && <span className="badge">9-sliced</span>}
           {states.length > 0 && <span className="badge">{states.length} state{states.length === 1 ? '' : 's'}</span>}
           {contrast && (
-            <span className="badge" style={{ color: contrast.meetsAA ? 'var(--keeper)' : 'var(--reject)' }}>
+            <span
+              className="badge"
+              title={contrast.meetsAA ? 'Passes WCAG AA' : 'Fails WCAG AA'}
+              style={{ color: contrast.meetsAA ? 'var(--keeper)' : 'var(--reject)' }}
+            >
               {contrast.meetsAA ? 'AA ✓' : 'AA ✗'}
             </span>
           )}

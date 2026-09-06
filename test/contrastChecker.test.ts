@@ -24,19 +24,17 @@ describe('getContrastRatio', () => {
   });
 
   it("computes a real theme's contrast ratio correctly", () => {
-    // GameForge's own FIXED_MOCK_TOKENS (lib/services/ThemeGenerator.ts):
-    // a dark background (#1c1a17) against light cream text (#ede7dc).
-    // Hand-derived during planning: approximately 14.1:1 — cross-check
-    // this against an independent tool (e.g. https://webaim.org/resources/contrastchecker/,
-    // entering #1c1a17 as background and #ede7dc as foreground) before
-    // finalizing this test. If your independent check gives a precise
-    // value, you may tighten this to `toBeCloseTo(<real value>, 1)`
-    // instead of the range check below — either is acceptable as long
-    // as the value has been independently verified, not just trusted
-    // from this plan's hand derivation.
-    const ratio = getContrastRatio('#1c1a17', '#ede7dc');
-    expect(ratio).toBeGreaterThan(10);
-    expect(ratio).toBeLessThan(18);
+    // GameForge's own FIXED_MOCK_TOKENS (lib/services/ThemeGenerator.ts): a dark
+    // background (#1c1a17) against light cream text (#ede7dc). Verified via three
+    // independent methods (hand-derivation, an independent script, and WebAIM's
+    // published reference values): 14.108851070354959.
+    expect(getContrastRatio('#1c1a17', '#ede7dc')).toBeCloseTo(14.11, 2);
+  });
+
+  it('correctly fails a real borderline case without rounding up', () => {
+    const ratio = getContrastRatio('#fff', '#777');
+    expect(ratio).toBeCloseTo(4.478, 3);
+    expect(meetsWcagAA(ratio)).toBe(false);
   });
 
   it('throws a clear error for a non-hex color', () => {
@@ -44,6 +42,14 @@ describe('getContrastRatio', () => {
     // and bare named colors — none of which this function can turn into a
     // luminance value, so it must throw rather than silently return NaN.
     expect(() => getContrastRatio('rgb(255, 0, 0)', '#ffffff')).toThrow(/rgb\(255, 0, 0\)/);
+  });
+
+  it('throws a clear error for a named color, even one that goes through the shorthand-expansion branch first', () => {
+    // 'red' has length 3, so it goes through the same shorthand-expansion
+    // branch as '#fff' -> '#ffffff' ('red' -> 'rreedd') before failing the
+    // final hex-format check — a different path than a non-hex value whose
+    // length isn't 3, like 'rgb(255, 0, 0)'.
+    expect(() => getContrastRatio('red', '#ffffff')).toThrow(/red/);
   });
 
   it('throws a clear error for a hex length that is not 3 or 6', () => {
