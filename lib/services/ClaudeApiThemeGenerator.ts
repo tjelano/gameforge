@@ -4,11 +4,13 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { styleService } from '@/lib/services/StyleService';
+import { assetService } from '@/lib/services/AssetService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import {
   ThemeTokensSchema,
   tokensToCss,
   buildThemePrompt,
+  parseThemeCss,
   type ThemeGenerator,
   type GeneratedTheme,
 } from '@/lib/services/ThemeGenerator';
@@ -62,7 +64,19 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
 
   async generate(prompt: string, styleId: string): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
-    const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt);
+    const existingThemes = await assetService.getActiveThemeAssetsForStyle(styleId);
+    const avoidColors: string[] = [];
+    for (const asset of existingThemes.slice(0, 10)) {
+      if (!asset.image_path) continue;
+      try {
+        const css = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'themes', asset.image_path), 'utf-8');
+        const tokens = parseThemeCss(css);
+        avoidColors.push(tokens.colorBackground, tokens.colorAccent);
+      } catch {
+        // A single unreadable/unparseable existing theme shouldn't block generation — steering is best-effort.
+      }
+    }
+    const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt, avoidColors);
 
     const res = await fetch(this.provider.requestUrl, {
       method: 'POST',

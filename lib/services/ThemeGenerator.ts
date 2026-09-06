@@ -73,12 +73,15 @@ export function parseThemeCss(css: string): ThemeTokens {
   });
 }
 
-export function buildThemePrompt(styleParameters: string, jobPrompt: string): string {
+export function buildThemePrompt(styleParameters: string, jobPrompt: string, avoidColors: string[] = []): string {
+  const steering = avoidColors.length > 0
+    ? `\n\nAvoid producing a palette close to these existing colors already used by this Style Bible: ${avoidColors.join(', ')}. Aim for a genuinely different combination.`
+    : '';
   return `You are generating a website design token set (CSS custom properties only — colors, fonts, a base spacing unit, a base border radius). Match this aesthetic:
 
 Style Bible parameters (JSON): ${styleParameters}
 
-Additional direction for this generation: ${jobPrompt}
+Additional direction for this generation: ${jobPrompt}${steering}
 
 Respond by calling the emit_theme tool with concrete token values.`;
 }
