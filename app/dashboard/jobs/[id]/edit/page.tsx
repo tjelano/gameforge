@@ -26,6 +26,12 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
   const [tokens, setTokens] = useState<ThemeTokens | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  // Bumped on every successful PATCH/reset so the preview iframe's srcDoc
+  // string changes even though job.result_path (the filename) never does —
+  // otherwise React reuses the same iframe DOM node and the browser never
+  // re-fetches the linked CSS, so edits/resets would only ever show up in
+  // the preview after a full page reload.
+  const [previewVersion, setPreviewVersion] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -64,6 +70,7 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
       });
       const body = await res.json();
       if (!body.success) setError(body.error ?? 'Could not save that change.');
+      else setPreviewVersion(v => v + 1);
     } catch {
       setError('Could not reach the server.');
     }
@@ -80,6 +87,7 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
         setError(body.error ?? 'Could not reset this theme.');
       } else {
         setTokens(body.data);
+        setPreviewVersion(v => v + 1);
       }
     } catch {
       setError('Could not reach the server.');
@@ -99,7 +107,7 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
 
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
         <iframe
-          srcDoc={buildThemePreviewHtml(`/api/themes/${job.result_path}`)}
+          srcDoc={buildThemePreviewHtml(`/api/themes/${job.result_path}?v=${previewVersion}`)}
           title={`Theme preview: ${job.prompt}`}
           sandbox=""
           style={{ width: 480, height: 340, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}
