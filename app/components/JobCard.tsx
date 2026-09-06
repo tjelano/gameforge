@@ -119,6 +119,11 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
                 Split into elements
               </Link>
             )}
+            {job.output_kind === 'theme' && job.status === 'complete' && (
+              <Link href={`/dashboard/jobs/${job.id}/edit`} className="btn">
+                Edit
+              </Link>
+            )}
             {onPromote && (
               <button
                 className="btn btn-keeper"
