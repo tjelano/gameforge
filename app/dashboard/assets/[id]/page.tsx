@@ -96,12 +96,22 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       <p className="page-subtitle">{asset.asset_type}</p>
 
       {asset.output_kind === 'theme' && asset.image_path && (
-        <iframe
-          srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
-          title={`Theme preview: ${asset.prompt}`}
-          sandbox=""
-          style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 24 }}
-        />
+        <>
+          <iframe
+            srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
+            title={`Theme preview: ${asset.prompt}`}
+            sandbox=""
+            style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+            <a className="btn" href={`/api/assets/${id}/export?format=tailwind`} download>
+              Export as Tailwind CSS
+            </a>
+            <a className="btn" href={`/api/assets/${id}/export?format=w3c`} download>
+              Export as W3C Tokens
+            </a>
+          </div>
+        </>
       )}
 
       {asset.output_kind !== 'theme' && asset.image_path && (
