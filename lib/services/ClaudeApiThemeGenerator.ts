@@ -25,8 +25,8 @@ const TOOL_INPUT_SCHEMA = {
     colorBorder: { type: 'string', description: 'Border/divider color as a hex code.' },
     fontHeading: { type: 'string', description: 'A CSS font-family value for headings, e.g. "\'Cinzel\', serif".' },
     fontBody: { type: 'string', description: 'A CSS font-family value for body text.' },
-    spaceUnit: { type: 'string', description: 'Base spacing unit as a CSS length in px, rem, or em, e.g. "8px".' },
-    radiusBase: { type: 'string', description: 'Base border-radius as a CSS length in px, rem, or em, e.g. "4px".' },
+    spaceUnit: { type: 'string', description: 'Base spacing unit as a CSS length in px or rem, e.g. "8px".' },
+    radiusBase: { type: 'string', description: 'Base border-radius as a CSS length in px or rem, e.g. "4px".' },
   },
   required: ['colorBackground', 'colorForeground', 'colorAccent', 'colorBorder', 'fontHeading', 'fontBody', 'spaceUnit', 'radiusBase'],
 };

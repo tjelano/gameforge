@@ -52,6 +52,27 @@ export function tokensToCss(tokens: ThemeTokens): string {
 `;
 }
 
+export function parseThemeCss(css: string): ThemeTokens {
+  function extract(varName: string): string {
+    const match = css.match(new RegExp(`--${varName}:\\s*([^;]+);`));
+    if (!match) {
+      throw new Error(`Theme CSS is missing required custom property --${varName}`);
+    }
+    return match[1].trim();
+  }
+
+  return ThemeTokensSchema.parse({
+    colorBackground: extract('color-bg'),
+    colorForeground: extract('color-fg'),
+    colorAccent: extract('color-accent'),
+    colorBorder: extract('color-border'),
+    fontHeading: extract('font-heading'),
+    fontBody: extract('font-body'),
+    spaceUnit: extract('space-unit'),
+    radiusBase: extract('radius-base'),
+  });
+}
+
 export function buildThemePrompt(styleParameters: string, jobPrompt: string): string {
   return `You are generating a website design token set (CSS custom properties only — colors, fonts, a base spacing unit, a base border radius). Match this aesthetic:
 
