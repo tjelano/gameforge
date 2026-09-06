@@ -31,4 +31,23 @@ describe('hexToOklab', () => {
     const lab = hexToOklab(hex);
     expect(lab.L).toBeCloseTo(0.7676, 1);
   });
+
+  it('matches independently-computed reference values for chromatic (non-gray) colors', () => {
+    // The gray-color test above can't catch a coefficient swap within the a/b
+    // rows (l'=m'=s' for gray, so which term multiplies which coefficient
+    // doesn't matter). These reference values come from an independent
+    // source (the culori npm library's rgb->oklab conversion) and were
+    // additionally hand-verified against this file's own matrix coefficients
+    // by direct arithmetic, so this pins the actual per-term wiring, not
+    // just the overall gray-axis identity.
+    const red = hexToOklab('#ff0000');
+    expect(red.L).toBeCloseTo(0.627955, 2);
+    expect(red.a).toBeCloseTo(0.224863, 2);
+    expect(red.b).toBeCloseTo(0.125846, 2);
+
+    const blue = hexToOklab('#0000ff');
+    expect(blue.L).toBeCloseTo(0.452014, 2);
+    expect(blue.a).toBeCloseTo(-0.032457, 2);
+    expect(blue.b).toBeCloseTo(-0.311528, 2);
+  });
 });
