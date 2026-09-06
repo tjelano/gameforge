@@ -16,6 +16,13 @@ describe('getContrastRatio', () => {
     expect(a).toBeCloseTo(b, 10);
   });
 
+  it('expands 3-digit hex shorthand to the same result as its 6-digit form', () => {
+    // Real-world regression: Bootswatch seed themes use shorthand hex
+    // (e.g. #fff, #222) for --color-bg/--color-fg. Without expansion,
+    // relativeLuminance slices past the end of the string and returns NaN.
+    expect(getContrastRatio('#fff', '#222')).toBeCloseTo(getContrastRatio('#ffffff', '#222222'), 10);
+  });
+
   it("computes a real theme's contrast ratio correctly", () => {
     // GameForge's own FIXED_MOCK_TOKENS (lib/services/ThemeGenerator.ts):
     // a dark background (#1c1a17) against light cream text (#ede7dc).
