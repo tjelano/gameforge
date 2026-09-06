@@ -66,7 +66,12 @@ async function importFromSource(
       skipped++;
       continue;
     }
-    await createSeedTheme(styleName, theme);
+    try {
+      await createSeedTheme(styleName, theme);
+    } catch (e: any) {
+      errors.push(`${attributionPrefix}: ${theme.name}: ${e.message}`);
+      continue;
+    }
     existingNames.add(styleName);
     imported++;
   }

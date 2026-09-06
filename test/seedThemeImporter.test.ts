@@ -11,6 +11,7 @@ import { importSeedThemes } from '@/lib/services/SeedThemeImporter';
 let tempRoot: string;
 
 const DAISYUI_CSS = '[data-theme=light]{color-scheme:light;--a:76.76% 0.184 183.61;--n:32.1785% 0.02476 255.701624;--b1:100% 0 0;--bc:27.8078% 0.029596 256.847952;--rounded-btn:0.5rem}';
+const DAISYUI_CSS_TWO_THEMES = DAISYUI_CSS + '[data-theme=dark]{color-scheme:dark;--a:76.76% 0.184 183.61;--n:32.1785% 0.02476 255.701624;--b1:100% 0 0;--bc:27.8078% 0.029596 256.847952;--rounded-btn:0.5rem}';
 const BOOTSWATCH_API_JSON = JSON.stringify({
   themes: [{ name: 'Flatly', cssMin: 'https://bootswatch.com/5/flatly/bootstrap.min.css' }],
 });
@@ -45,6 +46,7 @@ afterEach(async () => {
   DatabaseConnection.resetForTests();
   setProjectRootForTests(undefined);
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
@@ -99,5 +101,30 @@ describe('importSeedThemes', () => {
     expect(result.errors[0]).toMatch(/DaisyUI/);
     const styles = await styleService.getAll();
     expect(styles.map(s => s.name)).toEqual(['Bootswatch: Flatly']);
+  });
+
+  it('isolates a per-theme creation failure — the rest of that source and the other source still import', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === 'https://unpkg.com/daisyui@4.9.0/dist/themes.css') return new Response(DAISYUI_CSS_TWO_THEMES, { status: 200 });
+      if (url === 'https://bootswatch.com/api/5.json') return new Response(BOOTSWATCH_API_JSON, { status: 200 });
+      if (url === 'https://bootswatch.com/5/flatly/bootstrap.min.css') return new Response(FLATLY_CSS, { status: 200 });
+      throw new Error(`Unexpected fetch to ${url}`);
+    }));
+
+    const originalCreate = styleService.create.bind(styleService);
+    vi.spyOn(styleService, 'create').mockImplementation(async (input) => {
+      if (input.name === 'DaisyUI: dark') throw new Error('disk full');
+      return originalCreate(input);
+    });
+
+    const result = await importSeedThemes();
+
+    expect(result.imported).toBe(2); // DaisyUI: light + Bootswatch: Flatly
+    expect(result.skipped).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/DaisyUI: dark/);
+
+    const styles = await styleService.getAll();
+    expect(styles.map(s => s.name).sort()).toEqual(['Bootswatch: Flatly', 'DaisyUI: light']);
   });
 });
