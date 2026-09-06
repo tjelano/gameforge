@@ -37,28 +37,33 @@ export function parseDaisyUiThemes(css: string): SeedTheme[] {
   const themes: SeedTheme[] = [];
 
   for (const [name, block] of blocks) {
-    const colorBackground = oklchPropertyToHex(block, '--b1');
-    const colorForeground = oklchPropertyToHex(block, '--bc');
-    const colorAccent = oklchPropertyToHex(block, '--a');
-    const colorBorder = oklchPropertyToHex(block, '--n');
-    const radiusBase = extractCustomProperty(block, '--rounded-btn');
+    try {
+      const colorBackground = oklchPropertyToHex(block, '--b1');
+      const colorForeground = oklchPropertyToHex(block, '--bc');
+      const colorAccent = oklchPropertyToHex(block, '--a');
+      const colorBorder = oklchPropertyToHex(block, '--n');
+      const radiusBase = extractCustomProperty(block, '--rounded-btn');
 
-    if (!colorBackground || !colorForeground || !colorAccent || !colorBorder || !radiusBase) {
-      console.error(`Skipping DaisyUI theme "${name}": missing one or more required custom properties (--b1/--bc/--a/--n/--rounded-btn).`);
+      if (!colorBackground || !colorForeground || !colorAccent || !colorBorder || !radiusBase) {
+        console.error(`Skipping DaisyUI theme "${name}": missing one or more required custom properties (--b1/--bc/--a/--n/--rounded-btn).`);
+        continue;
+      }
+
+      const { fontHeading, fontBody } = getFontPairing(name);
+      const parsed = ThemeTokensSchema.safeParse({
+        colorBackground, colorForeground, colorAccent, colorBorder,
+        fontHeading, fontBody, spaceUnit: '8px', radiusBase,
+      });
+      if (!parsed.success) {
+        console.error(`Skipping DaisyUI theme "${name}": failed ThemeTokensSchema validation — ${parsed.error.message}`);
+        continue;
+      }
+
+      themes.push({ name, tokens: parsed.data });
+    } catch (e: any) {
+      console.error(`Skipping DaisyUI theme "${name}": ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
-
-    const { fontHeading, fontBody } = getFontPairing(name);
-    const parsed = ThemeTokensSchema.safeParse({
-      colorBackground, colorForeground, colorAccent, colorBorder,
-      fontHeading, fontBody, spaceUnit: '8px', radiusBase,
-    });
-    if (!parsed.success) {
-      console.error(`Skipping DaisyUI theme "${name}": failed ThemeTokensSchema validation — ${parsed.error.message}`);
-      continue;
-    }
-
-    themes.push({ name, tokens: parsed.data });
   }
 
   return themes;

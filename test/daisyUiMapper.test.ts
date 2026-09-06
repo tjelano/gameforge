@@ -21,6 +21,8 @@ const FIXTURE_CSS = [
 
 const FIXTURE_WITH_MISSING_PROPERTY = FIXTURE_CSS + `\n[data-theme=broken]{color-scheme:light;--a:50% 0.1 0;--rounded-btn:0.5rem}`;
 
+const FIXTURE_WITH_MALFORMED_OKLCH = FIXTURE_CSS + `\n[data-theme=malformed]{color-scheme:light;--a:not-a-valid-triple;--n:32% 0.02 255;--b1:100% 0 0;--bc:27% 0.02 256;--rounded-btn:0.5rem}`;
+
 describe('parseDaisyUiThemes', () => {
   it('extracts exactly the two real named themes, excluding :root, @media, and :has() duplicates', () => {
     const themes = parseDaisyUiThemes(FIXTURE_CSS);
@@ -51,6 +53,14 @@ describe('parseDaisyUiThemes', () => {
     const themes = parseDaisyUiThemes(FIXTURE_WITH_MISSING_PROPERTY);
     expect(themes.map(t => t.name).sort()).toEqual(['light', 'synthwave']);
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('broken'));
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('skips a theme block with malformed OKLCH values, without dropping the others', () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const themes = parseDaisyUiThemes(FIXTURE_WITH_MALFORMED_OKLCH);
+    expect(themes.map(t => t.name).sort()).toEqual(['light', 'synthwave']);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('malformed'));
     consoleErrorSpy.mockRestore();
   });
 });
