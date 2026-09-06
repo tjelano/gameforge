@@ -33,9 +33,8 @@ describe('oklchToHex', () => {
 
   it('converts a real DaisyUI OKLCH value (light theme accent) to a plausible cyan-teal hex', () => {
     // L=76.76%, C=0.184, H=183.61 — DaisyUI v4.9.0 light theme's --a (accent).
-    // Hand-derived expected value; cross-checked against https://oklch.com during
-    // implementation (entering oklch(76.76% 0.184 183.61)) — replace this literal
-    // if that check disagrees. Out-of-gamut clamping (negative linear R) is expected here.
+    // Hand-derived expected value #00d7c0, independently verified against the
+    // culori color library. Out-of-gamut clamping (negative linear R) is expected here.
     const hex = oklchToHex(76.76, 0.184, 183.61);
     const [r, g, b] = hexToRgb(hex);
     expect(r).toBe(0); // clamped — out of sRGB gamut on the red channel
