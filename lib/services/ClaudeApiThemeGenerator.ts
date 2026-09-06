@@ -64,14 +64,32 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
 
   async generate(prompt: string, styleId: string): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
-    const existingThemes = await assetService.getActiveThemeAssetsForStyle(styleId);
+    let existingThemes: Awaited<ReturnType<typeof assetService.getActiveThemeAssetsForStyle>> = [];
+    try {
+      existingThemes = await assetService.getActiveThemeAssetsForStyle(styleId);
+    } catch (e) {
+      // A DB-level failure here (e.g. a malformed asset row failing Zod
+      // validation) shouldn't block generation either — steering is
+      // best-effort, same reasoning as the per-file read/parse loop below.
+      console.error(`Failed to load existing theme assets for style ${styleId}, generating without dedup steering:`, e);
+    }
     const avoidColors: string[] = [];
     for (const asset of existingThemes.slice(0, 10)) {
       if (!asset.image_path) continue;
       try {
         const css = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'themes', asset.image_path), 'utf-8');
         const tokens = parseThemeCss(css);
-        avoidColors.push(tokens.colorBackground, tokens.colorAccent);
+        // Skip any color that's already part of this style's own declared
+        // aesthetic (style.parameters) — for a seed-imported Style Bible,
+        // parameters IS that theme's own token JSON, so its promoted asset's
+        // colors and its own "match this aesthetic" colors are the same
+        // values. Telling the model to both match and avoid the same color
+        // is contradictory steering, not useful dedup pressure.
+        for (const color of [tokens.colorBackground, tokens.colorAccent]) {
+          if (!style?.parameters?.includes(color)) {
+            avoidColors.push(color);
+          }
+        }
       } catch {
         // A single unreadable/unparseable existing theme shouldn't block generation — steering is best-effort.
       }
