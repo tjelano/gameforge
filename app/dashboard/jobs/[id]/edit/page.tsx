@@ -39,7 +39,11 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
     (async () => {
       const res = await fetch(`/api/jobs/${id}`);
       const body = await res.json();
-      if (ignore || !body.success) return;
+      if (ignore) return;
+      if (!body.success) {
+        setError(body.error ?? 'Could not load this job.');
+        return;
+      }
       setJob(body.data);
       try {
         const css = await (await fetch(`/api/themes/${body.data.result_path}`)).text();
@@ -78,6 +82,7 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
 
   async function handleReset() {
     if (resetting) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setResetting(true);
     setError(null);
     try {
@@ -96,6 +101,13 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
     }
   }
 
+  // tokens is the last thing the load effect sets on success, so any load-time
+  // failure (job fetch failing, or the theme file being missing/unparseable
+  // after job is already set) leaves tokens null with error set — check that
+  // before falling into the loading state, or the error is dead code forever.
+  if (error && !tokens) {
+    return <p style={{ color: 'var(--reject)', fontSize: 13 }}>{error}</p>;
+  }
   if (!job || !tokens) return <p className="page-subtitle">Loading…</p>;
 
   return (
