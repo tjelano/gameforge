@@ -14,6 +14,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (!job) {
       return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
     }
+    if (job.status !== 'complete') {
+      return NextResponse.json({ success: false, error: 'Only a completed job can be reset' }, { status: 409 });
+    }
 
     if (job.output_kind !== 'theme') {
       return NextResponse.json({ success: false, error: 'Only theme jobs can be reset with this route' }, { status: 400 });

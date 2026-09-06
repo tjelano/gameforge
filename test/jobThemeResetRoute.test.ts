@@ -83,4 +83,16 @@ describe('POST /api/jobs/[id]/theme/reset', () => {
     const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: '00000000-0000-0000-0000-000000000000' }) });
     expect(res.status).toBe(404);
   });
+
+  it('rejects with 409 once the job has been promoted, and does not touch the file', async () => {
+    const { jobId, filename } = await makeCompleteThemeJob();
+    await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
+    DatabaseConnection.getInstance().prepare("UPDATE jobs SET status = 'promoted' WHERE id = ?").run(jobId);
+
+    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    expect(res.status).toBe(409);
+
+    const css = await fsPromises.readFile(path.join(tempRoot, 'storage', 'themes', filename), 'utf-8');
+    expect(parseThemeCss(css)).toEqual(EDITED);
+  });
 });
