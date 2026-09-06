@@ -61,5 +61,6 @@ export const JobSchema = z.object({
   updated_at: z.number().int(),
   options: z.string(), // JSON-serialized options blob
   output_kind: OutputKindSchema.default('image'),
+  batch_id: z.string().uuid().nullable().default(null),
 });
 export type Job = z.infer<typeof JobSchema>;

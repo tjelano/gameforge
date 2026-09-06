@@ -35,6 +35,13 @@ class JobServiceImpl {
     return rows.map(row => JobSchema.parse(row));
   }
 
+  /** Jobs sharing one multi-candidate batch — used for dedup comparison between sibling candidates. */
+  async getByBatchId(batchId: string): Promise<Job[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare('SELECT * FROM jobs WHERE batch_id = ? ORDER BY created_at ASC').all(batchId);
+    return rows.map(row => JobSchema.parse(row));
+  }
+
   async create(input: {
     styleId: string;
     createdBy: string;

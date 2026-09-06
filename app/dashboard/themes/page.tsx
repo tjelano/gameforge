@@ -16,6 +16,7 @@ export default function ThemesPage() {
 
   const [styleId, setStyleId] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [candidateCount, setCandidateCount] = useState<1 | 3 | 5>(3);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export default function ThemesPage() {
           assetType: 'theme',
           prompt: prompt.trim(),
           outputKind: 'theme',
+          candidateCount,
         }),
       });
       const body = await res.json();
@@ -77,6 +79,19 @@ export default function ThemesPage() {
               onChange={e => setPrompt(e.target.value)}
               placeholder="warm, editorial, generous whitespace"
             />
+          </div>
+
+          <div className="field">
+            <label htmlFor="candidateCount">Candidates</label>
+            <select
+              id="candidateCount"
+              value={candidateCount}
+              onChange={e => setCandidateCount(Number(e.target.value) as 1 | 3 | 5)}
+            >
+              <option value={1}>1</option>
+              <option value={3}>3 (recommended)</option>
+              <option value={5}>5</option>
+            </select>
           </div>
 
           {error && (

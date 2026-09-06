@@ -4,30 +4,23 @@
 // (lib/services/ThemeGenerator.ts) actually permits hex of any length 3-8,
 // rgb()/rgba()/hsl()/hsla(), and bare named colors — none of which this
 // function can compute a luminance from, so anything other than 3-digit or
-// 6-digit hex throws a clear error instead of silently producing a wrong or
-// NaN result (NaN would JSON-serialize as null and crash the client on
-// `.toFixed()`).
+// 6-digit hex throws a clear error (see lib/services/hexColor.ts) instead of
+// silently producing a wrong or NaN result (NaN would JSON-serialize as null
+// and crash the client on `.toFixed()`).
 // Callers (see app/api/assets/[id]/contrast/route.ts) must catch this.
+//
+// Deliberately stricter than themeExport/w3cExporter.ts's hex handling: that
+// exporter drops the alpha byte from 4/8-digit hex and treats the color as
+// opaque, which is fine for recording a token's base RGB value. For contrast
+// computation specifically, silently ignoring alpha would compute a ratio
+// against the wrong effective color (the real rendered result depends on
+// what's behind a semi-transparent color) — so 4/8-digit hex is rejected
+// here (via normalizeHex6) rather than silently mishandled.
 
-function linearizeChannel(normalized: number): number {
-  return normalized <= 0.04045 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
-}
+import { linearizeChannel, normalizeHex6 } from '@/lib/services/hexColor';
 
 function relativeLuminance(hex: string): number {
-  let clean = hex.replace('#', '');
-  if (clean.length === 3) {
-    clean = clean.split('').map(c => c + c).join('');
-  }
-  // Deliberately stricter than themeExport/w3cExporter.ts's hex handling: that
-  // exporter drops the alpha byte from 4/8-digit hex and treats the color as
-  // opaque, which is fine for recording a token's base RGB value. For contrast
-  // computation specifically, silently ignoring alpha would compute a ratio
-  // against the wrong effective color (the real rendered result depends on
-  // what's behind a semi-transparent color) — so 4/8-digit hex is rejected
-  // here rather than silently mishandled.
-  if (!/^[0-9a-fA-F]{6}$/.test(clean)) {
-    throw new Error(`Cannot compute contrast for color "${hex}" — only 3-digit or 6-digit hex colors are supported.`);
-  }
+  const clean = normalizeHex6(hex, 'Cannot compute contrast for color');
   const r = parseInt(clean.slice(0, 2), 16) / 255;
   const g = parseInt(clean.slice(2, 4), 16) / 255;
   const b = parseInt(clean.slice(4, 6), 16) / 255;

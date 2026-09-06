@@ -1,0 +1,1 @@
+ALTER TABLE jobs ADD COLUMN batch_id TEXT;

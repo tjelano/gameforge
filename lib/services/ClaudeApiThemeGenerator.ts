@@ -4,11 +4,13 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { styleService } from '@/lib/services/StyleService';
+import { assetService } from '@/lib/services/AssetService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import {
   ThemeTokensSchema,
   tokensToCss,
   buildThemePrompt,
+  parseThemeCss,
   type ThemeGenerator,
   type GeneratedTheme,
 } from '@/lib/services/ThemeGenerator';
@@ -62,7 +64,45 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
 
   async generate(prompt: string, styleId: string): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
-    const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt);
+    let existingThemes: Awaited<ReturnType<typeof assetService.getActiveThemeAssetsForStyle>> = [];
+    try {
+      existingThemes = await assetService.getActiveThemeAssetsForStyle(styleId);
+    } catch (e) {
+      // A DB-level failure here (e.g. a malformed asset row failing Zod
+      // validation) shouldn't block generation either — steering is
+      // best-effort, same reasoning as the per-file read/parse loop below.
+      console.error(`Failed to load existing theme assets for style ${styleId}, generating without dedup steering:`, e);
+    }
+    const avoidColors: string[] = [];
+    for (const asset of existingThemes.slice(0, 10)) {
+      if (!asset.image_path) continue;
+      // Same guard as app/api/jobs/[id]/similarity/route.ts's readThemeTokens
+      // and app/api/assets/[id]/contrast|export/route.ts — image_path comes
+      // from the database, never user-typed paths, but is defense-in-depth
+      // against a corrupted/hostile git-synced import setting it to something
+      // unexpected.
+      if (asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
+        continue;
+      }
+      try {
+        const css = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'themes', asset.image_path), 'utf-8');
+        const tokens = parseThemeCss(css);
+        // Skip any color that's already part of this style's own declared
+        // aesthetic (style.parameters) — for a seed-imported Style Bible,
+        // parameters IS that theme's own token JSON, so its promoted asset's
+        // colors and its own "match this aesthetic" colors are the same
+        // values. Telling the model to both match and avoid the same color
+        // is contradictory steering, not useful dedup pressure.
+        for (const color of [tokens.colorBackground, tokens.colorAccent]) {
+          if (!style?.parameters?.includes(color)) {
+            avoidColors.push(color);
+          }
+        }
+      } catch {
+        // A single unreadable/unparseable existing theme shouldn't block generation — steering is best-effort.
+      }
+    }
+    const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt, avoidColors);
 
     const res = await fetch(this.provider.requestUrl, {
       method: 'POST',

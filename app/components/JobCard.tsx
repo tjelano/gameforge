@@ -1,6 +1,10 @@
+'use client';
+
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
+import { usePolling } from '@/lib/hooks/usePolling';
 
 interface JobCardProps {
   job: Job;
@@ -21,6 +25,41 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
       return false;
     }
   })();
+
+  const [similarity, setSimilarity] = useState<{ flagged: boolean; similarTo?: string } | null>(null);
+
+  // The worker runs a batch's jobs concurrently, so the first candidate to
+  // finish can be checked before its still-running siblings have a
+  // result_path yet — a one-shot check would miss a sibling that completes
+  // later. Poll on the same 2000ms cadence as the rest of the dashboard
+  // (usePolling) instead, but only while re-checking could still find
+  // something new: once flagged, or once there's no batch for a
+  // late-arriving sibling to come from (and this job's own one check
+  // against existing promoted assets has already run), there's nothing
+  // left to discover.
+  // usePolling doesn't wait for one call's promise to settle before firing
+  // the next — a slow response from an earlier tick can resolve after a
+  // faster, later tick's response and clobber it. latestRequestIdRef lets a
+  // response only apply if it's still the most recently issued request,
+  // discarding stale ones regardless of resolution order.
+  const latestRequestIdRef = useRef(0);
+
+  usePolling(async () => {
+    const shouldCheck =
+      job.output_kind === 'theme' &&
+      job.status === 'complete' &&
+      !similarity?.flagged &&
+      (job.batch_id != null || similarity === null);
+    if (!shouldCheck) return;
+    const requestId = ++latestRequestIdRef.current;
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/similarity`);
+      const body = await res.json();
+      if (requestId === latestRequestIdRef.current && body.success) setSimilarity(body.data);
+    } catch {
+      // Purely informational — a failed fetch just means no badge shows.
+    }
+  }, 2000);
 
   return (
     <div className="card" style={{ display: 'flex', gap: 14 }}>
@@ -63,6 +102,11 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
             {job.status}
           </span>
           <span className="frame-label">{job.asset_type}</span>
+          {similarity?.flagged && (
+            <span className="badge" title={similarity.similarTo} style={{ color: 'var(--reject)' }}>
+              Similar to {similarity.similarTo}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 14, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.prompt}
