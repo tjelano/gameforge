@@ -43,7 +43,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       options = {};
     }
 
-    if (options.originalTokens === undefined) {
+    const isFirstEdit = options.originalTokens === undefined;
+    if (isFirstEdit) {
       let currentCss: string;
       try {
         currentCss = await fsPromises.readFile(filePath, 'utf-8');
@@ -63,6 +64,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     } catch (e) {
       console.error(`Failed to write theme file on edit (job ${id}):`, e);
       return NextResponse.json({ success: false, error: 'Could not write the theme file' }, { status: 500 });
+    }
+
+    // The first-edit branch above already bumped updated_at along with
+    // capturing originalTokens. Every later edit only wrote the file, so
+    // without this the job's updated_at would freeze at the first edit and
+    // JobService.getActive()'s 5-minute window would drop it from the list
+    // mid-edit even though the save succeeded.
+    if (!isFirstEdit) {
+      DatabaseConnection.getInstance()
+        .prepare('UPDATE jobs SET updated_at = ? WHERE id = ?')
+        .run(Date.now(), id);
     }
 
     return NextResponse.json({ success: true, data: tokens });

@@ -84,6 +84,23 @@ describe('PATCH /api/jobs/[id]/theme', () => {
     expect(JSON.parse(jobAfterSecond!.options).originalTokens).toEqual(ORIGINAL);
   });
 
+  it('bumps updated_at on a second edit, not just the first', async () => {
+    const { jobId } = await makeCompleteThemeJob();
+    await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
+    const afterFirst = await jobService.getById(jobId);
+
+    // Force updated_at backwards so a second bump is unambiguously detectable
+    // regardless of how fast the two PATCH calls run.
+    const past = afterFirst!.updated_at - 10_000;
+    DatabaseConnection.getInstance().prepare('UPDATE jobs SET updated_at = ? WHERE id = ?').run(past, jobId);
+
+    const SECOND_EDIT = { ...EDITED, colorBackground: '#000000' };
+    await PATCH(patchRequest(SECOND_EDIT), { params: Promise.resolve({ id: jobId }) });
+    const afterSecond = await jobService.getById(jobId);
+
+    expect(afterSecond!.updated_at).toBeGreaterThan(past);
+  });
+
   it('rejects an invalid token value with 400 and does not touch the file', async () => {
     const { jobId, filename } = await makeCompleteThemeJob();
     const invalid = { ...EDITED, colorAccent: 'javascript:alert(1)' };
