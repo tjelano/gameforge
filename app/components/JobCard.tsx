@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
@@ -21,6 +24,25 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
       return false;
     }
   })();
+
+  const [similarity, setSimilarity] = useState<{ flagged: boolean; similarTo?: string } | null>(null);
+
+  useEffect(() => {
+    if (job.output_kind !== 'theme' || job.status !== 'complete') return;
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/jobs/${job.id}/similarity`);
+        const body = await res.json();
+        if (!ignore && body.success) setSimilarity(body.data);
+      } catch {
+        // Purely informational — a failed fetch just means no badge shows.
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [job.id, job.output_kind, job.status]);
 
   return (
     <div className="card" style={{ display: 'flex', gap: 14 }}>
@@ -63,6 +85,11 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
             {job.status}
           </span>
           <span className="frame-label">{job.asset_type}</span>
+          {similarity?.flagged && (
+            <span className="badge" title={similarity.similarTo} style={{ color: 'var(--reject)' }}>
+              Similar to {similarity.similarTo}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 14, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.prompt}
