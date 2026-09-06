@@ -16,6 +16,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [editing, setEditing] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
   const [editFailed, setEditFailed] = useState(false);
+  const [contrast, setContrast] = useState<{ ratio: number; meetsAA: boolean } | null>(null);
 
   useEffect(() => {
     // Same ignore-flag shape as useStyles.ts / the split page's mount effect:
@@ -38,6 +39,23 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       ignore = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (asset?.output_kind !== 'theme') return;
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/assets/${id}/contrast`);
+        const body = await res.json();
+        if (!ignore && body.success) setContrast(body.data);
+      } catch {
+        // Purely informational — a failed fetch just means nothing shows.
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [id, asset?.output_kind]);
 
   async function handleSave() {
     setSaving(true);
@@ -103,6 +121,11 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
             sandbox=""
             style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}
           />
+          {contrast && (
+            <p style={{ fontSize: 13, color: contrast.meetsAA ? 'var(--keeper)' : 'var(--reject)', marginBottom: 12 }}>
+              Contrast: {contrast.ratio.toFixed(2)}:1 — {contrast.meetsAA ? 'passes' : 'fails'} WCAG AA
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
             <a className="btn" href={`/api/assets/${id}/export?format=tailwind`} download>
               Export as Tailwind CSS
