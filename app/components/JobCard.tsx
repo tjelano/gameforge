@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
@@ -37,6 +37,13 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
   // late-arriving sibling to come from (and this job's own one check
   // against existing promoted assets has already run), there's nothing
   // left to discover.
+  // usePolling doesn't wait for one call's promise to settle before firing
+  // the next — a slow response from an earlier tick can resolve after a
+  // faster, later tick's response and clobber it. latestRequestIdRef lets a
+  // response only apply if it's still the most recently issued request,
+  // discarding stale ones regardless of resolution order.
+  const latestRequestIdRef = useRef(0);
+
   usePolling(async () => {
     const shouldCheck =
       job.output_kind === 'theme' &&
@@ -44,10 +51,11 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
       !similarity?.flagged &&
       (job.batch_id != null || similarity === null);
     if (!shouldCheck) return;
+    const requestId = ++latestRequestIdRef.current;
     try {
       const res = await fetch(`/api/jobs/${job.id}/similarity`);
       const body = await res.json();
-      if (body.success) setSimilarity(body.data);
+      if (requestId === latestRequestIdRef.current && body.success) setSimilarity(body.data);
     } catch {
       // Purely informational — a failed fetch just means no badge shows.
     }

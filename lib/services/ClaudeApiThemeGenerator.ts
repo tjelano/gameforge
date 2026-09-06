@@ -76,6 +76,14 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
     const avoidColors: string[] = [];
     for (const asset of existingThemes.slice(0, 10)) {
       if (!asset.image_path) continue;
+      // Same guard as app/api/jobs/[id]/similarity/route.ts's readThemeTokens
+      // and app/api/assets/[id]/contrast|export/route.ts — image_path comes
+      // from the database, never user-typed paths, but is defense-in-depth
+      // against a corrupted/hostile git-synced import setting it to something
+      // unexpected.
+      if (asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
+        continue;
+      }
       try {
         const css = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'themes', asset.image_path), 'utf-8');
         const tokens = parseThemeCss(css);
