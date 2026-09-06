@@ -138,25 +138,37 @@ source and get a fixed default for every seed theme:
 - `--b1` → `colorBackground`
 - `--a` → `colorAccent`
 - `--n` → `colorBorder`
-- Foreground and radius mappings (DaisyUI's base-content-equivalent
-  variable and its `--rounded-box`/`--rounded-btn` radius variables)
-  are confirmed against the real fetched CSS file during
-  implementation planning, not guessed here — the exact variable names
-  weren't fully visible in the portion of the file already fetched
-  during brainstorming.
-- Every DaisyUI color value passes through a new OKLch→hex conversion
-  function before being handed to `ThemeTokensSchema` — this is the one
-  genuinely new piece of correctness-critical logic in this feature (see
-  Testing below for how it gets verified).
+- `--bc` → `colorForeground` (confirmed by fetching the real `light`
+  theme block — this is DaisyUI's base-content/text variable).
+- `--rounded-btn` → `radiusBase`. Confirmed already a plain CSS length
+  (`0.5rem` for the `light` theme) — **not** OKLch, so radius needs no
+  color conversion at all, only the four color fields do.
+- Every DaisyUI color value (background, foreground, accent, border)
+  passes through a new OKLch→hex conversion function before being handed
+  to `ThemeTokensSchema` — this is the one genuinely new piece of
+  correctness-critical logic in this feature (see Testing below for how
+  it gets verified).
 
-**Bootswatch mapping**: Bootstrap's own theme variables (`$body-bg`,
-`$body-color`, `$primary`, a border-color equivalent, `$border-radius`)
-map onto the same four color fields and `radiusBase` directly, already
-in hex — the exact variable names and the real shape of Bootswatch's API
-response are confirmed against the live API during implementation
-planning (the brainstorming research confirmed the API exists and
-returns JSON with per-theme CSS references; the exact JSON shape wasn't
-fully inspected).
+**Bootswatch mapping** — confirmed by fetching a real theme end to end,
+which surfaced a genuine complication the initial research missed:
+Bootswatch's `_variables.scss` (linked from its own API response) only
+contains **theme-specific overrides**, some of them SCSS aliases (e.g.
+`$primary: $blue`, not a raw hex value) — `$body-bg`/`$body-color`/
+`$border-radius` aren't declared there at all, since they inherit
+Bootstrap's own core defaults unless a theme explicitly overrides them.
+Actually resolving a theme's *effective* values from the SCSS source
+would require a real Sass compilation step.
+
+The working alternative, confirmed against a real fetch: Bootstrap
+5.3+'s **compiled** CSS output (the API response's `cssMin` /
+`cssCdn` link, e.g. `bootstrap.min.css`) exposes the final, resolved
+values as plain native CSS custom properties in its own `:root` block:
+`--bs-body-bg` → `colorBackground`, `--bs-body-color` →
+`colorForeground`, `--bs-primary` → `colorAccent`, `--bs-border-color`
+→ `colorBorder`, `--bs-border-radius` → `radiusBase`. All confirmed
+already hex/rem in the real fetched file — no SCSS compilation, no
+color-space conversion, just parsing a `:root { ... }` block out of a
+plain CSS file fetched from the URL the API response already provides.
 
 Both mappers produce `ThemeTokens` objects that go through the
 **existing, unmodified** `ThemeTokensSchema.parse()` — the same
