@@ -83,6 +83,15 @@ async function importFromSource(
 }
 
 export async function importSeedThemes(): Promise<SeedImportResult> {
+  // existingNames is a one-time snapshot with no DB-level uniqueness behind
+  // it (styles.name has no UNIQUE index) — two concurrent invocations (two
+  // browser tabs, a client retry) could both see the same snapshot and each
+  // create the same theme, producing duplicates. Not fixed here: it would
+  // need either a schema change (the plan disallows new columns/constraints)
+  // or a locking scheme this codebase doesn't otherwise use, for a race that
+  // requires a genuinely concurrent double-trigger of an admin-only,
+  // occasional-use action.
+  //
   // getAll() includes soft-deleted styles — a user-deleted seed theme should
   // not be resurrected by a later import.
   const existingStyles = await styleService.getAll();
