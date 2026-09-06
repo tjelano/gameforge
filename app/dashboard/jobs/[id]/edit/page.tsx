@@ -47,9 +47,10 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
       setJob(body.data);
       try {
         const css = await (await fetch(`/api/themes/${body.data.result_path}`)).text();
+        if (ignore) return;
         setTokens(parseThemeCss(css));
       } catch {
-        setError('Could not read this theme\'s current values.');
+        if (!ignore) setError('Could not read this theme\'s current values.');
       }
     })();
     return () => { ignore = true; };
