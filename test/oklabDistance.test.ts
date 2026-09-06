@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { hexToOklab } from '@/lib/services/oklabDistance';
+import { hexToOklab, getThemeDistance, SIMILARITY_THRESHOLD } from '@/lib/services/oklabDistance';
 import { oklchToHex } from '@/lib/services/seedThemes/oklch';
+import type { ThemeTokens } from '@/lib/services/ThemeGenerator';
 
 describe('hexToOklab', () => {
   it('produces a≈0 and b≈0 for any gray color, regardless of lightness', () => {
@@ -49,5 +50,31 @@ describe('hexToOklab', () => {
     expect(blue.L).toBeCloseTo(0.452014, 2);
     expect(blue.a).toBeCloseTo(-0.032457, 2);
     expect(blue.b).toBeCloseTo(-0.311528, 2);
+  });
+});
+
+const MOCK: Pick<ThemeTokens, 'colorBackground' | 'colorForeground' | 'colorAccent' | 'colorBorder'> = {
+  colorBackground: '#1c1a17', colorForeground: '#ede7dc', colorAccent: '#e8a33d', colorBorder: '#3c352a',
+};
+const FLATLY: Pick<ThemeTokens, 'colorBackground' | 'colorForeground' | 'colorAccent' | 'colorBorder'> = {
+  colorBackground: '#fff', colorForeground: '#212529', colorAccent: '#2c3e50', colorBorder: '#dee2e6',
+};
+
+describe('getThemeDistance', () => {
+  it('returns exactly 0 for a theme compared against itself', () => {
+    expect(getThemeDistance(MOCK as ThemeTokens, MOCK as ThemeTokens)).toBeCloseTo(0, 8);
+  });
+
+  it('returns a large distance for two genuinely different, real, designer-made themes', () => {
+    // MOCK (dark, warm, editorial) vs FLATLY (light, cool, corporate) —
+    // two real, fully-confirmed, deliberately distinct palettes.
+    const distance = getThemeDistance(MOCK as ThemeTokens, FLATLY as ThemeTokens);
+    expect(distance).toBeGreaterThan(SIMILARITY_THRESHOLD);
+  });
+
+  it('flags a near-identical theme (one channel shifted by a tiny amount) as too similar', () => {
+    const almostMock = { ...MOCK, colorAccent: '#e8a340' }; // #e8a33d shifted by 3 in the blue channel
+    const distance = getThemeDistance(MOCK as ThemeTokens, almostMock as ThemeTokens);
+    expect(distance).toBeLessThan(SIMILARITY_THRESHOLD);
   });
 });
