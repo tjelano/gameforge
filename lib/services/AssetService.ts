@@ -56,6 +56,15 @@ class AssetServiceImpl {
     return rows.map(row => AssetSchema.parse(row));
   }
 
+  /** Active theme assets for one style — used for dedup comparison, scoped to that style's own aesthetic. */
+  async getActiveThemeAssetsForStyle(styleId: string): Promise<Asset[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare(
+      `SELECT * FROM assets WHERE style_id = ? AND output_kind = 'theme' AND is_deleted = 0 ORDER BY created_at DESC`
+    ).all(styleId);
+    return rows.map(row => AssetSchema.parse(row));
+  }
+
   /** Every asset row, active and soft-deleted alike. Used for Git export. */
   async getAll(): Promise<Asset[]> {
     const db = DatabaseConnection.getInstance();
