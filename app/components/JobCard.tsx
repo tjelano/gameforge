@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
+import { usePolling } from '@/lib/hooks/usePolling';
 
 interface JobCardProps {
   job: Job;
@@ -27,22 +28,30 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
 
   const [similarity, setSimilarity] = useState<{ flagged: boolean; similarTo?: string } | null>(null);
 
-  useEffect(() => {
-    if (job.output_kind !== 'theme' || job.status !== 'complete') return;
-    let ignore = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/jobs/${job.id}/similarity`);
-        const body = await res.json();
-        if (!ignore && body.success) setSimilarity(body.data);
-      } catch {
-        // Purely informational — a failed fetch just means no badge shows.
-      }
-    })();
-    return () => {
-      ignore = true;
-    };
-  }, [job.id, job.output_kind, job.status]);
+  // The worker runs a batch's jobs concurrently, so the first candidate to
+  // finish can be checked before its still-running siblings have a
+  // result_path yet — a one-shot check would miss a sibling that completes
+  // later. Poll on the same 2000ms cadence as the rest of the dashboard
+  // (usePolling) instead, but only while re-checking could still find
+  // something new: once flagged, or once there's no batch for a
+  // late-arriving sibling to come from (and this job's own one check
+  // against existing promoted assets has already run), there's nothing
+  // left to discover.
+  usePolling(async () => {
+    const shouldCheck =
+      job.output_kind === 'theme' &&
+      job.status === 'complete' &&
+      !similarity?.flagged &&
+      (job.batch_id != null || similarity === null);
+    if (!shouldCheck) return;
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/similarity`);
+      const body = await res.json();
+      if (body.success) setSimilarity(body.data);
+    } catch {
+      // Purely informational — a failed fetch just means no badge shows.
+    }
+  }, 2000);
 
   return (
     <div className="card" style={{ display: 'flex', gap: 14 }}>
