@@ -9,11 +9,15 @@ interface BootswatchApiResponse {
 }
 
 function extractRootCustomProperty(css: string, propName: string): string | null {
-  const rootMatch = css.match(/:root\s*\{([^}]*)\}/);
-  if (!rootMatch) return null;
-  const re = new RegExp(`${propName}:\\s*([^;]+);?`);
-  const propMatch = rootMatch[1].match(re);
-  return propMatch ? propMatch[1].trim() : null;
+  // Match all :root blocks (including :root,[data-bs-theme=light] variants), collect their bodies
+  const rootBlocks = [...css.matchAll(/:root[^{]*\{([^}]*)\}/g)].map(m => m[1]);
+  const combined = rootBlocks.join(';');
+
+  // Search for the property in the combined text, preferring the last occurrence (CSS cascade)
+  const re = new RegExp(`${propName}:\\s*([^;]+);?`, 'g');
+  const matches = [...combined.matchAll(re)];
+  if (matches.length === 0) return null;
+  return matches[matches.length - 1][1].trim();
 }
 
 export function parseBootswatchTheme(name: string, compiledCss: string): SeedTheme | null {

@@ -4,8 +4,9 @@ import { getFontPairing } from '@/lib/services/seedThemes/fontPairings';
 
 // Real, confirmed compiled-CSS values for Bootswatch's Flatly theme (confirmed
 // by direct fetch of its cssMin URL during planning), condensed to only the
-// custom properties this mapper reads.
-const FLATLY_ROOT_CSS = ':root{--bs-blue:#0d6efd;--bs-body-bg:#fff;--bs-body-color:#212529;--bs-primary:#2c3e50;--bs-border-color:#dee2e6;--bs-border-radius:0.375rem}';
+// custom properties this mapper reads. Includes multiple :root blocks as per real
+// compiled Bootswatch 5.3 CSS structure (trivial scroll-behavior block + properties block).
+const FLATLY_ROOT_CSS = ':root{scroll-behavior:smooth}:root{--bs-blue:#0d6efd;--bs-body-bg:#fff;--bs-body-color:#212529;--bs-primary:#2c3e50;--bs-border-color:#dee2e6;--bs-border-radius:0.375rem}';
 
 describe('parseBootswatchTheme', () => {
   it('maps the real Bootswatch custom properties directly (no color conversion needed)', () => {
