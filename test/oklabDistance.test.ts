@@ -51,6 +51,18 @@ describe('hexToOklab', () => {
     expect(blue.a).toBeCloseTo(-0.032457, 2);
     expect(blue.b).toBeCloseTo(-0.311528, 2);
   });
+
+  it('throws a clear error for a non-hex color instead of silently producing NaN', () => {
+    // ThemeTokensSchema's CSS_COLOR_RE also allows rgb()/rgba()/hsl()/hsla()
+    // and bare named colors — none of which this function can turn into RGB
+    // channels, so it must throw rather than silently return NaN (mirrors
+    // contrastChecker.ts's relativeLuminance, same underlying helper).
+    expect(() => hexToOklab('rgb(255, 0, 0)')).toThrow(/rgb\(255, 0, 0\)/);
+  });
+
+  it('throws a clear error for a hex length that is not 3 or 6', () => {
+    expect(() => hexToOklab('#ffff')).toThrow(/#ffff/);
+  });
 });
 
 const MOCK: Pick<ThemeTokens, 'colorBackground' | 'colorForeground' | 'colorAccent' | 'colorBorder'> = {
@@ -76,5 +88,45 @@ describe('getThemeDistance', () => {
     const almostMock = { ...MOCK, colorAccent: '#e8a340' }; // #e8a33d shifted by 3 in the blue channel
     const distance = getThemeDistance(MOCK as ThemeTokens, almostMock as ThemeTokens);
     expect(distance).toBeLessThan(SIMILARITY_THRESHOLD);
+  });
+
+  it('flags a single-field shift that is clearly visible to a human as too similar', () => {
+    // This is the exact case the pre-recalibration 0.01 threshold missed:
+    // a +16/255 shift on one channel is obviously different to a human eye,
+    // but is still the kind of drift two generations of "the same idea"
+    // would plausibly produce, not a genuinely different design.
+    const almostMock = { ...MOCK, colorAccent: '#f8b34d' }; // #e8a33d shifted +16/255 per RGB channel
+    const distance = getThemeDistance(MOCK as ThemeTokens, almostMock as ThemeTokens);
+    expect(distance).toBeLessThan(SIMILARITY_THRESHOLD);
+  });
+
+  it('flags a moderate, independent, multi-field color drift as too similar', () => {
+    // Represents the realistic "two independent LLM completions of the same
+    // prompt" case: all four fields shifted by a different, moderate
+    // (5-20/255) amount each rather than one tiny single-channel nudge.
+    // One concrete sample from that distribution (recorded during
+    // recalibration, distance ~0.048), used here as a fixed regression case.
+    const drifted = {
+      ...MOCK,
+      colorBackground: '#172808',
+      colorForeground: '#dad9d3',
+      colorAccent: '#f99c48',
+      colorBorder: '#353e19',
+    };
+    const distance = getThemeDistance(MOCK as ThemeTokens, drifted as ThemeTokens);
+    expect(distance).toBeLessThan(SIMILARITY_THRESHOLD);
+  });
+
+  it('does not flag two real, different, professionally-designed themes that happen to share a similar palette family', () => {
+    // Real Bootswatch pair fetched live during recalibration: Flatly vs
+    // Cosmo (0.0905) — both light-background/blue-accent themes, but still
+    // meant to read as genuinely different designs, and the closest
+    // real-different pair observed that the chosen threshold must still
+    // clear.
+    const COSMO: Pick<ThemeTokens, 'colorBackground' | 'colorForeground' | 'colorAccent' | 'colorBorder'> = {
+      colorBackground: '#fff', colorForeground: '#373a3c', colorAccent: '#2780e3', colorBorder: '#dee2e6',
+    };
+    const distance = getThemeDistance(FLATLY as ThemeTokens, COSMO as ThemeTokens);
+    expect(distance).toBeGreaterThan(SIMILARITY_THRESHOLD);
   });
 });

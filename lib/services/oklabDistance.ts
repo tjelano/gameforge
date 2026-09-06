@@ -4,20 +4,19 @@
 // shipped in lib/services/seedThemes/oklch.ts, not a hand-derived matrix inverse.
 
 import type { ThemeTokens } from '@/lib/services/ThemeGenerator';
-
-function linearizeChannel(normalized: number): number {
-  return normalized <= 0.04045 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
-}
+import { linearizeChannel, normalizeHex6 } from '@/lib/services/hexColor';
 
 export function hexToOklab(hex: string): { L: number; a: number; b: number } {
-  // Expand 3-digit shorthand (e.g. Bootswatch Flatly's '#fff') to 6 digits —
-  // same fix already applied for the same reason in contrastChecker.ts, since
-  // ThemeTokensSchema's CSS_COLOR_RE permits 3-digit hex and slicing an
-  // unexpanded 3-char string produces an empty (NaN-parsing) blue channel.
-  let clean = hex.replace('#', '');
-  if (clean.length === 3) {
-    clean = clean.split('').map((c) => c + c).join('');
-  }
+  // Expand 3-digit shorthand (e.g. Bootswatch Flatly's '#fff') to 6 digits
+  // and reject anything else — same fix already applied for the same reason
+  // in contrastChecker.ts (see lib/services/hexColor.ts), since
+  // ThemeTokensSchema's CSS_COLOR_RE permits hex of any length 3-8,
+  // rgb()/rgba()/hsl()/hsla(), and bare named colors, none of which this
+  // function can turn into RGB channels — silently computing NaN here would
+  // never flag as similar/different correctly, it would just misbehave.
+  // Callers (getThemeDistance's own callers, in the similarity route) must
+  // catch this and degrade to "not flagged", per this feature's spec.
+  const clean = normalizeHex6(hex, 'Cannot compute an OKLab distance for color');
   const r = linearizeChannel(parseInt(clean.slice(0, 2), 16) / 255);
   const g = linearizeChannel(parseInt(clean.slice(2, 4), 16) / 255);
   const b = linearizeChannel(parseInt(clean.slice(4, 6), 16) / 255);
@@ -52,16 +51,40 @@ export function getThemeDistance(
   return total / fields.length;
 }
 
-// Calibrated empirically (throwaway scratch script, not committed) against
-// real theme data: GameForge's own MOCK tokens vs. Bootswatch Flatly, plus
-// synthetic near-copies with one or all four color fields shifted by a small
-// amount. Observed getThemeDistance values:
-//   MOCK vs FLATLY (real, deliberately distinct themes):       0.6185
-//   single-field shift, one channel, delta 1/3/5/10 of 255:    0.00041 / 0.00124 / 0.00206 / 0.00414
-//   all-four-fields shift, one channel each, delta 1/3/5/10:   0.0017 / 0.0051 / 0.0086 / 0.0174
-// 0.01 sits well above every near-copy value observed (2.4x the largest
-// single-field shift) and ~60x below the real-distinct-themes distance,
-// erring toward the lower end per this task's guidance: an under-flagged
-// near-duplicate is far less annoying than a false alarm on two themes that
-// are actually meant to be different.
-export const SIMILARITY_THRESHOLD = 0.01;
+// Recalibrated empirically (throwaway scratch script, not committed) after
+// the original 0.01 threshold was found to be calibrated only against
+// near-exact-duplicate synthetic shifts and one maximally-different real
+// pair — it never fired on the realistic "two independently-generated
+// candidates a human would call similar" zone. This pass fetched 5 more
+// real, live Bootswatch v5 themes (Darkly, Cosmo, Superhero, Litera, Yeti —
+// via https://bootswatch.com/api/5.json, same extraction as
+// seedThemes/bootswatchMapper.ts) and computed real getThemeDistance values
+// between every pair, plus more realistic near-duplicate shifts. Observed:
+//
+//   Trivial single-channel shifts (delta 1/3/5/10 of 255):      0.00018 / 0.00054 / 0.00092 / 0.00191
+//   Uniform +3/255 shift, all 4 fields (barely perceptible):    0.0107
+//   Single-field +16/255 shift (clearly visible to a human):    0.0122
+//   All 4 fields independently shifted by a random 5-20/255
+//     each — the drift two independent LLM completions of the
+//     SAME prompt would plausibly produce (20 trials):          0.029 - 0.063
+//   Worst constructed case of the above (full 20/255 on all 4): 0.0714
+//   Real, different, professionally-designed theme pairs —
+//     closest observed (Cosmo vs Litera, both light/blue-accent): 0.0125
+//     next closest (Cosmo vs Yeti / Litera vs Yeti / Flatly vs Yeti): 0.0432 / 0.0506 / 0.0678
+//     next (Flatly vs Cosmo / Flatly vs Litera):                 0.0905 / 0.0985
+//     everything else (different design language — dark vs
+//     light, distinct hue families), MOCK vs Flatly included:   0.11 - 0.62
+//
+// The "independently-generated near-duplicate" zone (up to ~0.07) and the
+// closest real-but-different theme pairs (from ~0.01) genuinely overlap —
+// some different Bootswatch themes are objectively closer to each other by
+// this metric than some synthetic "regenerate the same idea" shifts are to
+// their own origin, because they share the same light-background/dark-text/
+// blue-accent family. No threshold perfectly separates every case. 0.08 sits
+// just above the observed near-duplicate/drift ceiling (0.0714) and just
+// below the closest pair this calibration is confident is meant to read as
+// genuinely different (Flatly vs Cosmo, 0.0905) — erring toward catching
+// realistic near-duplicates (the documented failure of the old threshold),
+// at the cost of occasionally flagging two different-but-visually-similar
+// real themes as similar too.
+export const SIMILARITY_THRESHOLD = 0.08;
