@@ -32,6 +32,7 @@ class GitServiceImpl {
     }
     await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'images'), { recursive: true });
     await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'themes'), { recursive: true });
+    await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'components'), { recursive: true });
   }
 
   async exportToJson(): Promise<void> {
@@ -180,8 +181,9 @@ class GitServiceImpl {
 
     const removedImages = await assetService.cleanupOrphanedImages();
     const removedThemes = await assetService.cleanupOrphanedThemes();
-    if (removedImages > 0 || removedThemes > 0) {
-      console.log(`🧹 Removed ${removedImages} orphaned images and ${removedThemes} orphaned themes.`);
+    const removedComponents = await assetService.cleanupOrphanedComponents();
+    if (removedImages > 0 || removedThemes > 0 || removedComponents > 0) {
+      console.log(`🧹 Removed ${removedImages} orphaned images, ${removedThemes} orphaned themes, and ${removedComponents} orphaned components.`);
     }
 
     const git = this.git();
@@ -217,8 +219,9 @@ class GitServiceImpl {
 
       const removedImages = await assetService.cleanupOrphanedImages();
       const removedThemes = await assetService.cleanupOrphanedThemes();
-      if (removedImages > 0 || removedThemes > 0) {
-        console.log(`🧹 Removed ${removedImages} orphaned images and ${removedThemes} orphaned themes.`);
+      const removedComponents = await assetService.cleanupOrphanedComponents();
+      if (removedImages > 0 || removedThemes > 0 || removedComponents > 0) {
+        console.log(`🧹 Removed ${removedImages} orphaned images, ${removedThemes} orphaned themes, and ${removedComponents} orphaned components.`);
       }
 
       await this.stageFilesForCommit();

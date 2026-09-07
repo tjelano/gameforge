@@ -111,7 +111,7 @@ class AssetServiceImpl {
    * filename never appears in an image row's image_path or vice versa,
    * so the two storage directories never share filenames.
    */
-  private async cleanupOrphanedIn(subdir: 'images' | 'themes'): Promise<number> {
+  private async cleanupOrphanedIn(subdir: 'images' | 'themes' | 'components'): Promise<number> {
     const db = DatabaseConnection.getInstance();
     const dir = path.join(getProjectRoot(), 'storage', subdir);
 
@@ -168,6 +168,11 @@ class AssetServiceImpl {
   /** Removes physical files in storage/themes/ that are no longer needed. See cleanupOrphanedIn(). */
   async cleanupOrphanedThemes(): Promise<number> {
     return this.cleanupOrphanedIn('themes');
+  }
+
+  /** Removes physical files in storage/components/ that are no longer needed. See cleanupOrphanedIn(). */
+  async cleanupOrphanedComponents(): Promise<number> {
+    return this.cleanupOrphanedIn('components');
   }
 }
 
