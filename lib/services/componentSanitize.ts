@@ -68,6 +68,15 @@ export function sanitizeComponentCss(css: string): string {
     throw new Error('Component CSS cannot contain "</style".');
   }
 
+  // Same category of breakout as the </style check above, for the other two
+  // literal markers combineComponentHtml/parseComponentHtml's naive indexOf
+  // extraction depends on — a quoted CSS string value containing <body or
+  // </body is syntactically valid CSS that silently corrupts that extraction
+  // (wrong html/css spliced from the wrong positions) rather than throwing.
+  if (/<body|<\/body/i.test(css)) {
+    throw new Error('Component CSS cannot contain "<body" or "</body".');
+  }
+
   // Real parsing, not substring blocklisting — see ALLOWED_CSS_FUNCTIONS
   // comment above for why. Malformed CSS that fails to parse is rejected
   // too; this function has no need to accept invalid CSS.

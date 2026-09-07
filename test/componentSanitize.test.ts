@@ -144,4 +144,18 @@ describe('sanitizeComponentCss', () => {
     const css = '.btn { font-size: clamp(4px, calc((100vw - 320px) / 100), 24px); }';
     expect(sanitizeComponentCss(css)).toBe(css);
   });
+
+  // combineComponentHtml/parseComponentHtml round-trip components by naive
+  // indexOf on the <body>/</body> markers, same as the <style>/</style>
+  // markers above. A quoted CSS string value containing either literal
+  // marker is syntactically valid CSS (postcss.parse accepts it without
+  // complaint) and silently corrupts parseComponentHtml's extraction —
+  // wrong html/css spliced from the wrong positions, no exception thrown.
+  it('rejects CSS containing a <body breakout sequence', () => {
+    expect(() => sanitizeComponentCss('.a { content: "<body>hijack"; }')).toThrow();
+  });
+
+  it('rejects CSS containing a </body breakout sequence', () => {
+    expect(() => sanitizeComponentCss('.a { content: "</body>hijack"; }')).toThrow();
+  });
 });

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import path from 'path';
+import { z } from 'zod';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { styleService } from '@/lib/services/StyleService';
@@ -128,7 +129,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
       throw new Error(`Anthropic response (via ${this.provider.name}) contained no tool_use block for emit_component.`);
     }
 
-    const raw = toolUse.input as ComponentTokens;
+    const raw = z.object({ html: z.string(), css: z.string() }).parse(toolUse.input);
     const tokens: ComponentTokens = {
       html: sanitizeComponentHtml(raw.html),
       css: sanitizeComponentCss(raw.css),
