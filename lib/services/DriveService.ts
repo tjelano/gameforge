@@ -33,11 +33,16 @@ export interface DriveFile {
 const LIST_FIELDS = 'files(id, name, mimeType, size, modifiedTime, webViewLink, iconLink, parents)';
 const FILE_FIELDS = 'id, name, mimeType, size, modifiedTime, webViewLink, iconLink, parents';
 
-// Escapes a single-quoted string for Drive's `q` query language — the only
-// character that needs escaping inside a single-quoted q-string is the
-// single quote itself, per Drive API's search-query syntax.
+// Module-scoped OAuth client cache — see getAuthedClient() below. Rebuilt
+// only when the stored refresh token actually changes.
+let cachedClient: OAuth2Client | null = null;
+let cachedRefreshToken: string | null = null;
+
+// Escapes a value for Drive's `q` query language (inside a single-quoted
+// string): backslashes must be escaped first, then quotes — otherwise the
+// backslashes just inserted for the quote would get double-escaped.
 function escapeDriveQueryValue(value: string): string {
-  return value.replace(/'/g, "\\'");
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 class DriveServiceImpl {
@@ -70,8 +75,13 @@ class DriveServiceImpl {
     if (!refreshToken) {
       throw new Error('Google Drive is not connected. Visit Settings > Google Drive to connect.');
     }
+    if (cachedClient && cachedRefreshToken === refreshToken) {
+      return cachedClient;
+    }
     const client = newOAuthClient();
     client.setCredentials({ refresh_token: refreshToken });
+    cachedClient = client;
+    cachedRefreshToken = refreshToken;
     return client;
   }
 

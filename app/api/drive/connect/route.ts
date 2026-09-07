@@ -9,5 +9,10 @@ export async function GET(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
   }
-  return NextResponse.redirect(driveService.getAuthUrl());
+  try {
+    return NextResponse.redirect(driveService.getAuthUrl());
+  } catch (e) {
+    console.error('Failed to build Google Drive auth URL:', e);
+    return NextResponse.redirect(new URL('/dashboard/settings/google-drive?error=not_configured', req.url));
+  }
 }

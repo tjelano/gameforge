@@ -104,6 +104,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function handleShareToDrive(parentFolderId: string) {
+    if (sharingToDrive) return;
     setSharingToDrive(true);
     setShareStatus(null);
     try {
@@ -220,7 +221,10 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
         <button className="btn" onClick={() => setShowDrivePicker(true)} disabled={sharingToDrive}>
           {sharingToDrive ? 'Sharing…' : 'Share to Drive'}
         </button>
-        {shareStatus && <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
+        {/* Renders here too so the success confirmation is still visible after the modal below
+            closes (handleShareToDrive sets shareStatus and closes the modal in the same batched
+            update, so a copy that only lived inside the modal would never actually be seen). */}
+        {!showDrivePicker && shareStatus && <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
       </div>
 
       {showDrivePicker && (
@@ -230,7 +234,8 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
               <strong>Choose a destination folder</strong>
               <button className="btn" onClick={() => setShowDrivePicker(false)}>Cancel</button>
             </div>
-            <DriveBrowser selectMode onSelectFolder={handleShareToDrive} />
+            {shareStatus && <p style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
+            <DriveBrowser selectMode onSelectFolder={handleShareToDrive} selectBusy={sharingToDrive} />
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
 import { driveService } from '@/lib/services/DriveService';
 import { getCurrentUser } from '@/lib/utils/session';

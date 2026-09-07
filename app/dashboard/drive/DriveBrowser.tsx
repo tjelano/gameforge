@@ -21,10 +21,14 @@ export function DriveBrowser({
   onFolderChange,
   selectMode,
   onSelectFolder,
+  selectBusy,
+  selectLabel,
 }: {
   onFolderChange?: (folderId: string) => void;
   selectMode?: boolean;
   onSelectFolder?: (folderId: string, folderName: string) => void;
+  selectBusy?: boolean;
+  selectLabel?: string;
 }) {
   const [currentFolderId, setCurrentFolderId] = useState('root');
   const [breadcrumb, setBreadcrumb] = useState<{ id: string; name: string }[]>([{ id: 'root', name: 'My Drive' }]);
@@ -175,6 +179,10 @@ export function DriveBrowser({
 
   async function handleMoveHere(destinationFolderId: string) {
     if (!movingItem || busyItemId) return;
+    if (destinationFolderId === currentFolderId) {
+      setMovingItem(null);
+      return;
+    }
     const item = movingItem;
     setBusyItemId(item.id);
     setError(null);
@@ -219,9 +227,9 @@ export function DriveBrowser({
             className="btn btn-primary"
             style={{ marginLeft: 12 }}
             onClick={() => onSelectFolder?.(currentFolderId, breadcrumb[breadcrumb.length - 1].name)}
-            disabled={busyItemId !== null}
+            disabled={selectBusy ?? false}
           >
-            {busyItemId !== null ? 'Moving…' : 'Move here'}
+            {(selectBusy ?? false) ? 'Working…' : selectLabel ?? 'Move here'}
           </button>
         )}
       </div>
@@ -309,7 +317,7 @@ export function DriveBrowser({
               <strong>Move &quot;{movingItem.name}&quot;</strong>
               <button className="btn" onClick={() => setMovingItem(null)}>Cancel</button>
             </div>
-            <DriveBrowser selectMode onSelectFolder={handleMoveHere} />
+            <DriveBrowser selectMode onSelectFolder={handleMoveHere} selectBusy={busyItemId !== null} />
           </div>
         </div>
       )}

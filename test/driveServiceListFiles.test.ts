@@ -52,4 +52,14 @@ describe('driveService.listFiles', () => {
       q: "'folder123' in parents and trashed = false and name contains 'dungeon'",
     }));
   });
+
+  it('escapes both backslashes and single quotes in a search query, backslashes first', async () => {
+    mockFilesList.mockResolvedValue({ data: { files: [] } });
+    const { driveService } = await import('@/lib/services/DriveService');
+    await driveService.listFiles('folder123', String.raw`a\' or trashed = true and name contains 'b`);
+
+    expect(mockFilesList).toHaveBeenCalledWith(expect.objectContaining({
+      q: String.raw`'folder123' in parents and trashed = false and name contains 'a\\\' or trashed = true and name contains \'b'`,
+    }));
+  });
 });
