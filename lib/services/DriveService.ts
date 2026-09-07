@@ -1,4 +1,5 @@
 import { OAuth2Client } from 'google-auth-library';
+import { drive } from '@googleapis/drive';
 import { settingsService } from '@/lib/services/SettingsService';
 import { GOOGLE_DRIVE_REFRESH_TOKEN_SETTING_KEY } from '@/lib/config';
 
@@ -15,6 +16,26 @@ function newOAuthClient(): OAuth2Client {
     process.env.GOOGLE_CLIENT_SECRET,
     `${baseUrl()}${REDIRECT_PATH}`
   );
+}
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: string;
+  modifiedTime: string;
+  webViewLink?: string;
+  iconLink?: string;
+  parents?: string[];
+}
+
+const LIST_FIELDS = 'files(id, name, mimeType, size, modifiedTime, webViewLink, iconLink, parents)';
+
+// Escapes a single-quoted string for Drive's `q` query language — the only
+// character that needs escaping inside a single-quoted q-string is the
+// single quote itself, per Drive API's search-query syntax.
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/'/g, "\\'");
 }
 
 class DriveServiceImpl {
@@ -50,6 +71,27 @@ class DriveServiceImpl {
     const client = newOAuthClient();
     client.setCredentials({ refresh_token: refreshToken });
     return client;
+  }
+
+  async listFiles(folderId: string = 'root', query?: string): Promise<DriveFile[]> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      let q = `'${escapeDriveQueryValue(folderId)}' in parents and trashed = false`;
+      if (query && query.trim()) {
+        q += ` and name contains '${escapeDriveQueryValue(query.trim())}'`;
+      }
+      const res = await client.files.list({
+        q,
+        fields: LIST_FIELDS,
+        pageSize: 1000,
+        orderBy: 'folder,name',
+      });
+      return (res.data.files ?? []) as DriveFile[];
+    } catch (e) {
+      console.error(`Failed to list Drive files for folder ${folderId}:`, e);
+      throw e;
+    }
   }
 }
 
