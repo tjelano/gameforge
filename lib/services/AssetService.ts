@@ -14,7 +14,7 @@ class AssetServiceImpl {
     prompt: string;
     imagePath: string | null;
     sourceJobId?: string | null;
-    outputKind?: 'image' | 'theme';
+    outputKind?: 'image' | 'theme' | 'component';
   }): Promise<Asset> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();

@@ -9,7 +9,18 @@
 -- the old table, rename the new one into place. jobs is rebuilt before
 -- assets since assets.source_job_id references jobs(id) by name -- as long
 -- as a table named "jobs" exists by the time assets_new is populated, the
--- foreign key resolves fine.
+-- foreign key resolves fine for that INSERT.
+--
+-- That ordering alone is NOT what makes DROP TABLE jobs safe, though: with
+-- foreign_keys=ON, DROP TABLE performs an implicit DELETE FROM first, and
+-- any assets row whose source_job_id still points at a job (a real,
+-- already-shipped shape -- see app/api/assets/from-crop/route.ts) would
+-- make that implicit delete violate the FK, failing the whole migration.
+-- Since PRAGMA foreign_keys is a no-op mid-transaction, this migration's
+-- own SQL can't disable it -- the actual fix lives in
+-- lib/database/index.ts's runMigrations(), which disables foreign_keys for
+-- the duration of running all pending migration files (restoring it after)
+-- and runs PRAGMA foreign_key_check before each COMMIT as a safety net.
 
 CREATE TABLE jobs_new (
   id TEXT PRIMARY KEY,
