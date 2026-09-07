@@ -69,4 +69,21 @@ describe('worker.ts routes theme jobs to ThemeGenerator', () => {
     expect(updated.status).toBe('complete');
     expect(updated.result_path).toMatch(/\.png$/);
   });
+
+  it('a job with output_kind=\'component\' completes via the mock component generator, writing a .html result', async () => {
+    const db = DatabaseConnection.getInstance();
+    const jobId = 'job-component-1';
+    db.prepare(
+      `INSERT INTO jobs (id, style_id, created_by, asset_type, prompt, status, result_path, created_at, updated_at, options, output_kind)
+       VALUES (?, ?, 'user-1', 'component', 'a button component', 'pending', NULL, 1000, 1000, '{}', 'component')`
+    ).run(jobId, STYLE_ID);
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+
+    const { processJob } = await import('@/worker');
+    await processJob(job);
+
+    const updated = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+    expect(updated.status).toBe('complete');
+    expect(updated.result_path).toMatch(/\.html$/);
+  });
 });
