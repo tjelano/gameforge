@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z, ZodError } from 'zod';
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
@@ -29,7 +30,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ success: false, error: 'Invalid result path' }, { status: 400 });
     }
 
-    const rawInput = (await req.json()) as ComponentTokens;
+    const rawInput = z.object({ html: z.string(), css: z.string() }).parse(await req.json());
     let tokens: ComponentTokens;
     try {
       tokens = {
@@ -77,6 +78,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ success: true, data: tokens });
   } catch (error: any) {
+    if (error instanceof ZodError) {
+      return NextResponse.json({
+        success: false,
+        error: error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', '),
+      }, { status: 400 });
+    }
     console.error('Unexpected error in component edit route:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
