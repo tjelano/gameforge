@@ -39,8 +39,11 @@ export function sanitizeComponentCss(css: string): string {
   // (e.g. `\75rl(...)` decodes to `url(...)` per CSS Syntax Level 3, before
   // any real parser sees it) — a backslash has no legitimate use in the
   // simple button/card/nav-bar CSS this feature generates.
-  if (/url\(/i.test(css) || css.includes('\\')) {
-    throw new Error('Component CSS cannot reference external resources or use escape sequences.');
+  // @import check blocks the bare-string form (`@import "https://...";`),
+  // which loads external resources without ever using url( at all — this
+  // codebase's own theme CSS never uses @import either.
+  if (/url\(/i.test(css) || css.includes('\\') || /@import/i.test(css)) {
+    throw new Error('Component CSS cannot reference external resources, use escape sequences, or use @import.');
   }
   return css;
 }

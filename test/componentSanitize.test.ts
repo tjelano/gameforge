@@ -70,4 +70,16 @@ describe('sanitizeComponentCss', () => {
   it('rejects a bypass with escaped parens: \\75rl\\28...\\29', () => {
     expect(() => sanitizeComponentCss('a { background: \\75rl\\28https://evil.example/track.gif\\29; }')).toThrow();
   });
+
+  // @import has two valid syntaxes per the CSS Import Rules spec:
+  // `@import url(...)` and the bare-string form `@import "...";` — the
+  // latter loads external resources without ever containing "url(" or a
+  // backslash, so it bypassed both prior checks entirely.
+  it('rejects the bare-string @import bypass (no url(), no backslash)', () => {
+    expect(() => sanitizeComponentCss('@import "https://evil.example/style.css";')).toThrow();
+  });
+
+  it('rejects @import url(...) explicitly (not just via the generic url() test)', () => {
+    expect(() => sanitizeComponentCss("@import url('https://evil.example/style.css');")).toThrow();
+  });
 });
