@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
 
 export default function StylesPage() {
@@ -73,14 +74,18 @@ export default function StylesPage() {
                     forked from {parent ? parent.name : style.forked_from.slice(0, 8)}
                   </div>
                 )}
-                <button
-                  className="btn"
-                  disabled={forkingId === style.id}
-                  onClick={() => handleFork(style.id)}
-                  style={{ marginTop: style.forked_from ? 0 : 12 }}
-                >
-                  {forkingId === style.id ? 'Forking…' : 'Fork'}
-                </button>
+                <div style={{ display: 'flex', gap: 8, marginTop: style.forked_from ? 0 : 12 }}>
+                  <Link className="btn" href={`/dashboard/styles/${style.id}`}>
+                    View
+                  </Link>
+                  <button
+                    className="btn"
+                    disabled={forkingId === style.id}
+                    onClick={() => handleFork(style.id)}
+                  >
+                    {forkingId === style.id ? 'Forking…' : 'Fork'}
+                  </button>
+                </div>
               </div>
             );
           })}
