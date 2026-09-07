@@ -92,3 +92,15 @@ export const PresetSchema = z.object({
   updated_at: z.number().int(),
 });
 export type Preset = z.infer<typeof PresetSchema>;
+
+export const PageSchema = z.object({
+  id: z.string().uuid(),
+  style_id: z.string().uuid(),
+  name: z.string().min(1),
+  created_by: z.string().min(1),
+  component_asset_ids: z.string(), // JSON-serialized string[]
+  is_deleted: z.union([z.literal(0), z.literal(1)]),
+  created_at: z.number().int(),
+  updated_at: z.number().int(),
+});
+export type Page = z.infer<typeof PageSchema>;
