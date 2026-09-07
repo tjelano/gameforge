@@ -135,11 +135,17 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
       }
       // Component order is set in a second call, since POST only accepts a name.
       if (value.componentAssetIds.length > 0) {
-        await fetch(`/api/pages/${body.data.id}`, {
+        const orderRes = await fetch(`/api/pages/${body.data.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ componentAssetIds: value.componentAssetIds }),
         });
+        const orderBody = await orderRes.json();
+        if (!orderBody.success) {
+          setPageError(orderBody.error ?? 'Page was created, but could not save component order.');
+          await refreshPages();
+          return;
+        }
       }
       setCreatingPage(false);
       await refreshPages();
@@ -291,7 +297,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
         {pageError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{pageError}</p>}
 
         {!creatingPage ? (
-          <button className="btn" style={{ marginBottom: 16 }} onClick={() => setCreatingPage(true)}>
+          <button className="btn" style={{ marginBottom: 16 }} onClick={() => { setEditingPageId(null); setCreatingPage(true); }}>
             New Page
           </button>
         ) : (
@@ -336,7 +342,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
                   <div style={{ padding: '10px 12px' }}>
                     <div style={{ fontWeight: 600, marginBottom: 8 }}>{p.name}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn" onClick={() => setEditingPageId(p.id)}>Edit</button>
+                      <button className="btn" onClick={() => { setCreatingPage(false); setEditingPageId(p.id); }}>Edit</button>
                       <button className="btn" onClick={() => handleDeletePage(p.id)} disabled={deletingPageId === p.id}>
                         {deletingPageId === p.id ? 'Deleting…' : 'Delete'}
                       </button>

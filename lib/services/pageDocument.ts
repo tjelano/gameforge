@@ -14,6 +14,15 @@ export interface PageComponentTokens {
   css: string;
 }
 
+// Known limitation: a component whose own CSS defines `:root { --foo: ... }`
+// custom properties will have that block rewritten to `.page-item-N :root`,
+// which matches nothing (`:root` only ever matches the document root, never
+// a scoped descendant selector) - those declarations are silently dropped
+// inside a composed page even though the same component renders them
+// correctly when served standalone via /api/components/[filename]. The same
+// walkRules-based rewrite likely mangles @keyframes frame selectors (e.g.
+// `0%`/`100%`) the same way, though that's not confirmed - revisit either
+// case only if it ever becomes reachable in practice.
 function scopeComponentCss(css: string, scopeClass: string): string {
   const root = postcss.parse(css);
   root.walkRules((rule) => {

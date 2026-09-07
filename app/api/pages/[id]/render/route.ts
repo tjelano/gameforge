@@ -15,49 +15,54 @@ function slugify(name: string): string {
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  try {
+    const { id } = await params;
 
-  const page = await pageService.getById(id);
-  if (!page) {
-    return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 });
-  }
-
-  const componentAssetIds = JSON.parse(page.component_asset_ids) as string[];
-  const items: PageComponentTokens[] = [];
-  for (const assetId of componentAssetIds) {
-    try {
-      const asset = await assetService.getById(assetId);
-      if (!asset || asset.is_deleted || asset.output_kind !== 'component' || !asset.image_path) {
-        console.error(`Page ${id} references a stale/invalid component asset ${assetId}, skipping`);
-        continue;
-      }
-      const filename = asset.image_path;
-      if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
-        console.error(`Page ${id} references a component asset ${assetId} with an unsafe filename, skipping`);
-        continue;
-      }
-      const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
-      const tokens = parseComponentHtml(document);
-      items.push({
-        html: sanitizeComponentHtml(tokens.html),
-        css: sanitizeComponentCss(tokens.css),
-      });
-    } catch (e) {
-      console.error(`Failed to load component asset ${assetId} for page ${id}, skipping:`, e);
+    const page = await pageService.getById(id);
+    if (!page) {
+      return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 });
     }
+
+    const componentAssetIds = JSON.parse(page.component_asset_ids) as string[];
+    const items: PageComponentTokens[] = [];
+    for (const assetId of componentAssetIds) {
+      try {
+        const asset = await assetService.getById(assetId);
+        if (!asset || asset.is_deleted || asset.output_kind !== 'component' || !asset.image_path) {
+          console.error(`Page ${id} references a stale/invalid component asset ${assetId}, skipping`);
+          continue;
+        }
+        const filename = asset.image_path;
+        if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+          console.error(`Page ${id} references a component asset ${assetId} with an unsafe filename, skipping`);
+          continue;
+        }
+        const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
+        const tokens = parseComponentHtml(document);
+        items.push({
+          html: sanitizeComponentHtml(tokens.html),
+          css: sanitizeComponentCss(tokens.css),
+        });
+      } catch (e) {
+        console.error(`Failed to load component asset ${assetId} for page ${id}, skipping:`, e);
+      }
+    }
+
+    const themeCss = await assetService.loadThemeCssForStyle(page.style_id);
+    const html = composePageHtml(items, themeCss ?? undefined);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/html',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:;",
+    };
+    if (req.nextUrl.searchParams.get('download')) {
+      const baseName = slugify(page.name) || 'page';
+      headers['Content-Disposition'] = `attachment; filename="${baseName}.html"`;
+    }
+
+    return new NextResponse(html, { headers });
+  } catch (error) {
+    console.error('Failed to render page:', error);
+    return NextResponse.json({ success: false, error: 'Failed to render page' }, { status: 500 });
   }
-
-  const themeCss = await assetService.loadThemeCssForStyle(page.style_id);
-  const html = composePageHtml(items, themeCss ?? undefined);
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'text/html',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:;",
-  };
-  if (req.nextUrl.searchParams.get('download')) {
-    const baseName = slugify(page.name) || 'page';
-    headers['Content-Disposition'] = `attachment; filename="${baseName}.html"`;
-  }
-
-  return new NextResponse(html, { headers });
 }
