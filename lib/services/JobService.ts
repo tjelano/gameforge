@@ -48,7 +48,7 @@ class JobServiceImpl {
     assetType: string;
     prompt: string;
     options?: Record<string, unknown>;
-    outputKind?: 'image' | 'theme';
+    outputKind?: 'image' | 'theme' | 'component';
   }): Promise<Job> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();
