@@ -104,11 +104,13 @@ describe('presetService.applyPreset', () => {
     expect(styleCount).toBe(0);
   });
 
-  it('rolls back the whole transaction - a malformed components JSON string leaves zero style/job rows', async () => {
+  it('rejects a preset with malformed components JSON', async () => {
     // Inserted directly, bypassing PresetService.create's normal flow - this
-    // shape can only arise from a corrupted/hostile git-synced import, not
-    // from anything the app itself would write (matches the established
-    // path-traversal test precedent in test/assetExportRoute.test.ts).
+    // shape can only arise from direct DB manipulation (as here) or a future
+    // bug, not from anything the app itself would write. Note: this failure
+    // happens on JSON.parse, the very first statement in the transaction
+    // callback, before any row is written - so it does NOT exercise rollback
+    // behavior (see the next test for that).
     const db = DatabaseConnection.getInstance();
     const now = Date.now();
     const presetId = '33333333-3333-3333-3333-333333333333';
@@ -116,6 +118,38 @@ describe('presetService.applyPreset', () => {
       INSERT INTO presets (id, name, created_by, prompt, tech_stack_tags, theme_prompt, components, is_deleted, created_at, updated_at)
       VALUES (?, 'Corrupt', 'user-1', 'x', '[]', 'a theme prompt', 'not valid json', 0, ?, ?)
     `).run(presetId, now, now);
+
+    await expect(
+      presetService.applyPreset(presetId, { newStyleName: 'Should not survive' }, 'user-1')
+    ).rejects.toThrow();
+
+    const styleCount = (db.prepare('SELECT COUNT(*) as c FROM styles').get() as { c: number }).c;
+    const jobCount = (db.prepare('SELECT COUNT(*) as c FROM jobs').get() as { c: number }).c;
+    expect(styleCount).toBe(0);
+    expect(jobCount).toBe(0);
+  });
+
+  it('rolls back the whole transaction - a mid-loop bind failure after the style and theme job are already inserted leaves zero style/job rows', async () => {
+    // Inserted directly, bypassing PresetService.create's normal flow. Unlike
+    // the malformed-JSON-string case above, `components` here IS valid JSON
+    // (JSON.parse succeeds), so the transaction callback proceeds past the
+    // parse: the style row and the theme job row both get inserted first
+    // (theme_prompt is set, so the theme item is processed before any
+    // component). Only then does the component loop reach an item whose
+    // assetType is an object instead of a string - better-sqlite3's bind()
+    // can only bind numbers, strings, bigints, buffers, and null, so the
+    // component job INSERT throws a real TypeError mid-transaction. This
+    // means the assertions below are only true if db.transaction() actually
+    // rolls back the earlier style/theme-job inserts - without the
+    // transaction wrapper, those two rows would survive.
+    const db = DatabaseConnection.getInstance();
+    const now = Date.now();
+    const presetId = '44444444-4444-4444-4444-444444444444';
+    const badComponents = JSON.stringify([{ assetType: { not: 'a string' }, prompt: 'p' }]);
+    db.prepare(`
+      INSERT INTO presets (id, name, created_by, prompt, tech_stack_tags, theme_prompt, components, is_deleted, created_at, updated_at)
+      VALUES (?, 'Corrupt', 'user-1', 'x', '[]', 'a theme prompt', ?, 0, ?, ?)
+    `).run(presetId, badComponents, now, now);
 
     await expect(
       presetService.applyPreset(presetId, { newStyleName: 'Should not survive' }, 'user-1')

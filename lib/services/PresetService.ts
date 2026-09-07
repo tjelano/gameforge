@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { DatabaseConnection } from '@/lib/database';
-import { PresetSchema, type Preset } from '@/lib/database/schema';
+import { PresetSchema, type Preset, type PresetComponent } from '@/lib/database/schema';
 import { styleService } from '@/lib/services/StyleService';
 
 class PresetServiceImpl {
@@ -99,7 +99,7 @@ class PresetServiceImpl {
     const runApply = db.transaction(():
       | { styleId: string; batchId: string; jobIds: string[] }
       | { error: 'NOTHING_TO_GENERATE' } => {
-      const components = JSON.parse(preset.components) as { assetType: string; prompt: string }[];
+      const components = JSON.parse(preset.components) as PresetComponent[];
       if (!preset.theme_prompt && components.length === 0) {
         return { error: 'NOTHING_TO_GENERATE' };
       }

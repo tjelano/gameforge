@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
 import { presetService } from '@/lib/services/PresetService';
 import { getCurrentUser } from '@/lib/utils/session';
+import { PresetComponentSchema } from '@/lib/database/schema';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ const CreatePresetSchema = z.object({
   prompt: z.string().min(1),
   techStackTags: z.array(z.string()).default([]),
   themePrompt: z.string().nullable().optional(),
-  components: z.array(z.object({ assetType: z.string().min(1), prompt: z.string().min(1) })).default([]),
+  components: z.array(PresetComponentSchema).default([]),
 });
 
 export async function POST(req: NextRequest) {
