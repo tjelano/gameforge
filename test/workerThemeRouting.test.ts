@@ -86,4 +86,27 @@ describe('worker.ts routes theme jobs to ThemeGenerator', () => {
     expect(updated.status).toBe('complete');
     expect(updated.result_path).toMatch(/\.html$/);
   });
+
+  it('a job with an unrecognized output_kind is marked failed, not silently processed as an image', async () => {
+    const db = DatabaseConnection.getInstance();
+    const jobId = 'job-bogus-1';
+    db.prepare(
+      `INSERT INTO jobs (id, style_id, created_by, asset_type, prompt, status, result_path, created_at, updated_at, options, output_kind)
+       VALUES (?, ?, 'user-1', 'sprite', 'a goblin', 'pending', NULL, 1000, 1000, '{}', 'image')`
+    ).run(jobId, STYLE_ID);
+    // The jobs table has a CHECK(output_kind IN (...)) constraint (migration
+    // 010), so a raw SQL UPDATE can't actually persist a corrupted value —
+    // Zod validation is bypassed instead by overriding the field in memory
+    // on the row object handed to processJob(), which only ever sees `job`
+    // as `any` and has no runtime guarantee it went through Zod at all.
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+    job.output_kind = 'bogus';
+
+    const { processJob } = await import('@/worker');
+    await processJob(job);
+
+    const updated = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+    expect(updated.status).toBe('failed');
+    expect(updated.result_path).toBeNull();
+  });
 });
