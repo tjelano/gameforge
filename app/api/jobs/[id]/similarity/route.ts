@@ -64,7 +64,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (job.batch_id) {
       const siblings = await jobService.getByBatchId(job.batch_id);
       for (const sibling of siblings) {
-        if (sibling.id === job.id || !sibling.result_path) continue;
+        if (sibling.id === job.id || !sibling.result_path || sibling.output_kind !== 'theme') continue;
         const tokens = await readThemeTokens(sibling.result_path);
         if (!tokens) continue;
         if (getThemeDistance(candidateTokens, tokens) < SIMILARITY_THRESHOLD) {
