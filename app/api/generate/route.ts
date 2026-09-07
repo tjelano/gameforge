@@ -3,12 +3,12 @@ import { z, ZodError } from 'zod';
 import crypto from 'crypto';
 import { jobService } from '@/lib/services/JobService';
 import { DatabaseConnection } from '@/lib/database';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
 const GenerateSchema = z.object({
   styleId: z.string().uuid(),
-  createdBy: z.string().min(1),
   assetType: z.string().min(1),
   prompt: z.string().min(1).max(2000),
   options: z.record(z.string(), z.unknown()).optional(),
@@ -18,6 +18,11 @@ const GenerateSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const input = GenerateSchema.parse(await req.json());
 
     if (input.outputKind === 'theme') {
@@ -31,16 +36,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Component jobs do not support multi-candidate generation.' }, { status: 400 });
     }
 
+    const jobInput = { ...input, createdBy: user.id };
+
     const count = input.candidateCount ?? 1;
     if (count === 1) {
-      const job = await jobService.create(input);
+      const job = await jobService.create(jobInput);
       return NextResponse.json({ success: true, data: job });
     }
 
     const batchId = crypto.randomUUID();
     const jobs = [];
     for (let i = 0; i < count; i++) {
-      const job = await jobService.create(input);
+      const job = await jobService.create(jobInput);
       DatabaseConnection.getInstance().prepare('UPDATE jobs SET batch_id = ? WHERE id = ?').run(batchId, job.id);
       jobs.push({ ...job, batch_id: batchId });
     }
