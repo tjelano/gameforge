@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 const LINKS = [
   { href: '/dashboard/generate', label: 'Generate' },
@@ -19,6 +20,28 @@ const LINKS = [
 
 export function NavRail() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [me, setMe] = useState<{ name: string; isAdmin: boolean } | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        const body = await res.json();
+        if (!ignore && body.success) setMe(body.data);
+      } catch {
+        // Purely informational — a failed fetch just means no identity shows.
+      }
+    })();
+    return () => { ignore = true; };
+  }, [pathname]);
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
 
   return (
     <nav className="rail">
@@ -35,6 +58,14 @@ export function NavRail() {
           {link.label}
         </Link>
       ))}
+      {me && (
+        <div style={{ marginTop: 'auto', paddingTop: 16, fontSize: 13 }}>
+          <div>Logged in as {me.name}{me.isAdmin ? ' (admin)' : ''}</div>
+          <button className="btn" style={{ marginTop: 8, width: '100%' }} onClick={handleLogout}>
+            Log out
+          </button>
+        </div>
+      )}
     </nav>
   );
 }
