@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import { z, ZodError } from 'zod';
 import { assetService } from '@/lib/services/AssetService';
@@ -35,17 +36,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!asset.image_path) {
       return NextResponse.json({ success: false, error: 'This asset has no stored file to share.' }, { status: 400 });
     }
+    // Same guard as app/api/assets/[id]/export/route.ts and the public
+    // /api/images, /api/themes, /api/components routes — image_path is
+    // DB-sourced, not user-typed, but can still arrive via
+    // GitService.importFromJson() (a git-synced import from another
+    // machine, or a bad merge) with no shape validation, so it gets the
+    // same defense-in-depth treatment as every filename this app serves
+    // off disk.
+    if (asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
+      return NextResponse.json({ success: false, error: 'Invalid image path' }, { status: 400 });
+    }
 
     const { parentFolderId } = ShareSchema.parse(await req.json());
     const physicalPath = path.join(getProjectRoot(), 'storage', storageDirFor(asset.output_kind), asset.image_path);
 
-    let stream: fs.ReadStream;
+    // fs.createReadStream() never throws synchronously for a missing file
+    // — it returns a stream immediately and only emits an async 'error'
+    // event once the underlying open fails. Use an awaitable existence
+    // check first so a stale image_path (file deleted/moved outside this
+    // app) produces a clean, catchable 500 instead of an unhandled stream
+    // error.
     try {
-      stream = fs.createReadStream(physicalPath);
+      await fsPromises.access(physicalPath);
     } catch (e) {
       console.error(`Failed to open asset file for Drive share: ${physicalPath}`, e);
       return NextResponse.json({ success: false, error: 'Could not read this asset\'s file.' }, { status: 500 });
     }
+    const stream = fs.createReadStream(physicalPath);
 
     const extension = path.extname(asset.image_path).toLowerCase();
     const uploaded = await driveService.uploadFile({

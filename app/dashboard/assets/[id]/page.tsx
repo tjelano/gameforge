@@ -113,8 +113,12 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({ parentFolderId }),
       });
       const body = await res.json();
-      setShareStatus(body.success ? `Shared to Drive as "${body.data.name}".` : (body.error ?? 'Could not share to Drive.'));
-      setShowDrivePicker(false);
+      if (body.success) {
+        setShareStatus(`Shared to Drive as "${body.data.name}".`);
+        setShowDrivePicker(false);
+      } else {
+        setShareStatus(body.error ?? 'Could not share to Drive.');
+      }
     } catch {
       setShareStatus('Could not reach the server.');
     } finally {
