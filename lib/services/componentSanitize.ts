@@ -35,8 +35,12 @@ export function sanitizeComponentHtml(html: string): string {
 }
 
 export function sanitizeComponentCss(css: string): string {
-  if (/url\(/i.test(css)) {
-    throw new Error('Component CSS cannot reference external resources (url(...) is not supported).');
+  // Backslash check blocks CSS hex-escape bypasses of the url( check below
+  // (e.g. `\75rl(...)` decodes to `url(...)` per CSS Syntax Level 3, before
+  // any real parser sees it) — a backslash has no legitimate use in the
+  // simple button/card/nav-bar CSS this feature generates.
+  if (/url\(/i.test(css) || css.includes('\\')) {
+    throw new Error('Component CSS cannot reference external resources or use escape sequences.');
   }
   return css;
 }

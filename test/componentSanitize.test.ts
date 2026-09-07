@@ -49,4 +49,25 @@ describe('sanitizeComponentCss', () => {
     const css = '.btn { background: var(--color-accent); color: var(--color-bg); padding: calc(var(--space-unit) * 2); border-radius: var(--radius-base); }';
     expect(sanitizeComponentCss(css)).toBe(css);
   });
+
+  // CSS Syntax Level 3 decodes hex-escape sequences in identifiers before a
+  // real parser decides whether it's looking at the url() function, so
+  // `\75rl(...)` is semantically identical to `url(...)` to every browser
+  // even though the literal substring "url(" never appears. These pin the
+  // exact bypass payloads a reviewer found against the bare /url\(/i regex.
+  it('rejects a hex-escaped "u" bypass: \\75rl(...)', () => {
+    expect(() => sanitizeComponentCss('a { background: \\75rl(https://evil.example/track.gif); }')).toThrow();
+  });
+
+  it('rejects a fully hex-escaped "url" bypass: \\75\\72\\6c(...)', () => {
+    expect(() => sanitizeComponentCss('a { background: \\75\\72\\6c(https://evil.example/track.gif); }')).toThrow();
+  });
+
+  it('rejects a zero-padded hex-escape bypass: \\000075rl(...)', () => {
+    expect(() => sanitizeComponentCss('a { background: \\000075rl(https://evil.example/track.gif); }')).toThrow();
+  });
+
+  it('rejects a bypass with escaped parens: \\75rl\\28...\\29', () => {
+    expect(() => sanitizeComponentCss('a { background: \\75rl\\28https://evil.example/track.gif\\29; }')).toThrow();
+  });
 });
