@@ -39,9 +39,11 @@ describe('userService.create', () => {
     expect(bob.is_admin).toBe(0);
   });
 
-  it('rejects a duplicate name', async () => {
-    await userService.create({ name: 'Alice' });
-    await expect(userService.create({ name: 'Alice' })).rejects.toThrow();
+  it('allows a duplicate name (no cross-machine uniqueness invariant, matching styles/assets)', async () => {
+    const first = await userService.create({ name: 'Alice' });
+    const second = await userService.create({ name: 'Alice' });
+    expect(second.id).not.toBe(first.id);
+    expect((await userService.getAll()).filter(u => u.name === 'Alice')).toHaveLength(2);
   });
 });
 

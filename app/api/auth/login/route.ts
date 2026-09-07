@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
 import { userService } from '@/lib/services/UserService';
 import { sessionService } from '@/lib/services/SessionService';
+import { SESSION_COOKIE_OPTIONS } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,13 +41,7 @@ export async function POST(req: NextRequest) {
       success: true,
       data: { id: user.id, name: user.name, isAdmin: !!user.is_admin },
     });
-    res.cookies.set('session', token, {
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 90,
-      path: '/',
-    });
+    res.cookies.set('session', token, { ...SESSION_COOKIE_OPTIONS, maxAge: 60 * 60 * 24 * 90 });
     return res;
   } catch (error: any) {
     if (error instanceof ZodError) {

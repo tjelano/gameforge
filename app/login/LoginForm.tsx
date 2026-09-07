@@ -47,7 +47,7 @@ export function LoginForm({ users }: { users: UserOption[] }) {
       const res = await fetch('/api/git/pull', { method: 'POST' });
       const body = await res.json();
       if (!body.success) {
-        setPullError(body.message ?? 'Pull failed — no git remote configured yet?');
+        setPullError(body.error ?? body.message ?? 'Pull failed — no git remote configured yet?');
         return;
       }
       setPulled(true);

@@ -2,6 +2,13 @@ import type { NextRequest } from 'next/server';
 import { sessionService } from '@/lib/services/SessionService';
 import type { User } from '@/lib/database/schema';
 
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: false,
+  sameSite: 'lax' as const,
+  path: '/',
+};
+
 // Reads request.cookies (NextRequest's own header-backed accessor), never
 // next/headers's cookies() — see this plan's Global Constraints for why:
 // this codebase's route tests construct a raw NextRequest and call the

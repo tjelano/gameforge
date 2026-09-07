@@ -1,6 +1,8 @@
 import { userService } from '@/lib/services/UserService';
 import { LoginForm } from './LoginForm';
 
+export const dynamic = 'force-dynamic';
+
 export default async function LoginPage() {
   const users = await userService.getActiveUsers();
   return (

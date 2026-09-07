@@ -59,4 +59,23 @@ describe('GitService users sync', () => {
     const entries = await fsPromises.readdir(dataDir);
     expect(entries).not.toContain('sessions');
   });
+
+  it('importFromJson() does not throw on a cross-machine same-name collision, and both users coexist', async () => {
+    // "Machine A": first-run creates 'Alice', export writes her JSON file.
+    const aliceA = await userService.create({ name: 'Alice' });
+    await gitService.exportToJson();
+
+    // "Machine B": a fresh DB (same data/ dir, simulating a git clone) also
+    // took the "create the first account" path with the same display name —
+    // this is the documented, expected first-run collision this fix covers.
+    DatabaseConnection.resetForTests();
+    const aliceB = await userService.create({ name: 'Alice' });
+    expect(aliceB.id).not.toBe(aliceA.id);
+
+    await expect(gitService.importFromJson()).resolves.not.toThrow();
+
+    const allUsers = await userService.getAll();
+    expect(allUsers).toHaveLength(2);
+    expect(allUsers.filter(u => u.name === 'Alice')).toHaveLength(2);
+  });
 });

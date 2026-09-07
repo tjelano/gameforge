@@ -36,14 +36,16 @@ describe('users/sessions tables', () => {
     expect(() => UserSchema.parse(row)).not.toThrow();
   });
 
-  it('enforces a unique name constraint', () => {
+  it('allows duplicate names (no cross-machine uniqueness invariant, matching styles/assets)', () => {
     const db = DatabaseConnection.getInstance();
     db.prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
       .run('11111111-1111-1111-1111-111111111111', 'Alice', 1, Date.now());
     expect(() =>
       db.prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
         .run('22222222-2222-2222-2222-222222222222', 'Alice', 0, Date.now())
-    ).toThrow();
+    ).not.toThrow();
+    const rows = db.prepare('SELECT * FROM users WHERE name = ?').all('Alice');
+    expect(rows).toHaveLength(2);
   });
 
   it('creates a session row referencing a user', () => {

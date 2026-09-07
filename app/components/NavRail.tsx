@@ -22,6 +22,7 @@ export function NavRail() {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<{ name: string; isAdmin: boolean } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -38,9 +39,15 @@ export function NavRail() {
   }, [pathname]);
 
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+      router.refresh();
+    } finally {
+      setLoggingOut(false);
+    }
   }
 
   return (
@@ -61,8 +68,8 @@ export function NavRail() {
       {me && (
         <div style={{ marginTop: 'auto', paddingTop: 16, fontSize: 13 }}>
           <div>Logged in as {me.name}{me.isAdmin ? ' (admin)' : ''}</div>
-          <button className="btn" style={{ marginTop: 8, width: '100%' }} onClick={handleLogout}>
-            Log out
+          <button className="btn" style={{ marginTop: 8, width: '100%' }} onClick={handleLogout} disabled={loggingOut}>
+            {loggingOut ? 'Logging out…' : 'Log out'}
           </button>
         </div>
       )}
