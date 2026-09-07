@@ -30,6 +30,15 @@ describe('sanitizeComponentHtml', () => {
     expect(result).toContain('class="btn-primary"');
     expect(result).toContain('Buy now');
   });
+
+  // img is deliberately not in ALLOWED_TAGS: a perfect CSS check alone
+  // can't deliver "no external resources, ever" if <img src="https://...">
+  // is still allowed through unchanged on the HTML side.
+  it('strips an <img> tag entirely, not just its src attribute', () => {
+    const dirty = '<img src="https://evil.example/x.png">';
+    const clean = sanitizeComponentHtml(dirty);
+    expect(clean).not.toContain('<img');
+  });
 });
 
 describe('sanitizeComponentCss', () => {
@@ -81,5 +90,43 @@ describe('sanitizeComponentCss', () => {
 
   it('rejects @import url(...) explicitly (not just via the generic url() test)', () => {
     expect(() => sanitizeComponentCss("@import url('https://evil.example/style.css');")).toThrow();
+  });
+
+  // Round 3: a live-browser-verified bypass. CSS Images Level 4's bare-string
+  // <image-set-option> syntax loads an external resource exactly like url(),
+  // but contains neither "url(", a backslash, nor "@import" — it defeated
+  // all 3 substring checks above, which is why sanitizeComponentCss was
+  // rewritten to parse real CSS (postcss) and allowlist function names
+  // (postcss-value-parser) instead of blocklisting known-bad substrings.
+  it('rejects the image-set() bypass (no url(), no backslash, no @import)', () => {
+    expect(() =>
+      sanitizeComponentCss('.btn { background-image: image-set("https://evil.example/track.png" 1x); }')
+    ).toThrow();
+  });
+
+  it('rejects any at-rule, not just @import (e.g. @font-face)', () => {
+    expect(() => sanitizeComponentCss('@font-face { src: url(x.woff); }')).toThrow();
+  });
+
+  it('rejects an unknown/unsafe function not in the allowlist (cross-fade)', () => {
+    expect(() =>
+      sanitizeComponentCss('.btn { background: cross-fade(url(a.png), url(b.png)); }')
+    ).toThrow();
+  });
+
+  // The design spec's later <style>-embedding template is vulnerable to a
+  // literal "</style" sequence breaking out of the tag once combined into a
+  // document. A quoted CSS string value containing it is syntactically
+  // valid CSS (postcss.parse accepts it without complaint), so this needs
+  // its own check independent of the at-rule/function-allowlist checks.
+  it('rejects CSS containing a </style breakout sequence', () => {
+    expect(() =>
+      sanitizeComponentCss('.btn { color: red; }</style><img src="https://evil.example/x.png">')
+    ).toThrow();
+  });
+
+  it('passes through legitimate CSS using rgba() and linear-gradient() unchanged', () => {
+    const css = '.btn { background: linear-gradient(rgba(0, 0, 0, 0.5), red); }';
+    expect(sanitizeComponentCss(css)).toBe(css);
   });
 });
