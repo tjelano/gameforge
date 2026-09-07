@@ -541,12 +541,16 @@ Add inside `PresetServiceImpl`, after `softDelete`:
 
     const db = DatabaseConnection.getInstance();
 
-    class NothingToGenerateError extends Error {}
-
-    const runApply = db.transaction(() => {
+    // No custom Error subclass (AGENTS.md forbids them) - "nothing to
+    // generate" is checked before any write happens, so it can just return
+    // the error variant directly instead of throwing. better-sqlite3's
+    // transaction() only rolls back on an uncaught throw; a normal return
+    // here simply commits zero writes, which is correct - nothing was
+    // written yet at this point in the callback.
+    const runApply = db.transaction((): { styleId: string; batchId: string; jobIds: string[] } | { error: 'NOTHING_TO_GENERATE' } => {
       const components = JSON.parse(preset.components) as { assetType: string; prompt: string }[];
       if (!preset.theme_prompt && components.length === 0) {
-        throw new NothingToGenerateError();
+        return { error: 'NOTHING_TO_GENERATE' };
       }
 
       let styleId: string;
@@ -584,12 +588,13 @@ Add inside `PresetServiceImpl`, after `softDelete`:
       return { styleId, batchId, jobIds };
     });
 
-    try {
-      return runApply();
-    } catch (e) {
-      if (e instanceof NothingToGenerateError) return { error: 'NOTHING_TO_GENERATE' };
-      throw e;
-    }
+    // A malformed components JSON string (only reachable via a corrupted
+    // row - see the forced-rollback test) throws a plain built-in
+    // SyntaxError from JSON.parse above; better-sqlite3 rolls back
+    // automatically on any uncaught throw from the callback, and that
+    // error is left to propagate uncaught here too - it is not an expected
+    // condition this method translates into a typed result.
+    return runApply();
   }
 ```
 
