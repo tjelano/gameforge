@@ -21,6 +21,8 @@ export function useCurrentUser() {
         const res = await fetch('/api/auth/me');
         const body = await res.json();
         if (!ignore && body.success) setUser(body.data);
+      } catch {
+        // Purely informational — a failed fetch just means no identity shows.
       } finally {
         if (!ignore) setLoading(false);
       }

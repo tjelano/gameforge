@@ -30,19 +30,24 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const [styleRes, assetsRes] = await Promise.all([
-        fetch(`/api/styles/${id}`),
-        fetch(`/api/styles/${id}/assets`),
-      ]);
-      const styleBody = await styleRes.json();
-      const assetsBody = await assetsRes.json();
-      if (ignore) return;
-      if (styleBody.success) {
-        setStyle(styleBody.data);
-        setNameDraft(styleBody.data.name);
+      try {
+        const [styleRes, assetsRes] = await Promise.all([
+          fetch(`/api/styles/${id}`),
+          fetch(`/api/styles/${id}/assets`),
+        ]);
+        const styleBody = await styleRes.json();
+        const assetsBody = await assetsRes.json();
+        if (ignore) return;
+        if (styleBody.success) {
+          setStyle(styleBody.data);
+          setNameDraft(styleBody.data.name);
+        }
+        if (assetsBody.success) setAssets(assetsBody.data);
+      } catch {
+        // Falls through to "Style Bible not found." below since style stays null.
+      } finally {
+        if (!ignore) setLoading(false);
       }
-      if (assetsBody.success) setAssets(assetsBody.data);
-      setLoading(false);
     })();
     return () => {
       ignore = true;
