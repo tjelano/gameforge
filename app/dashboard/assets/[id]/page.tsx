@@ -158,6 +158,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
 
   async function handleDelete() {
     if (deleting || !asset) return;
+    if (!window.confirm('Delete this asset? This can\'t be undone from the UI.')) return;
     setDeleting(true);
     setError(null);
     try {

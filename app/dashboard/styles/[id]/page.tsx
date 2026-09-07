@@ -77,6 +77,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
 
   async function handleDeleteStyle() {
     if (deleting) return;
+    if (!window.confirm('Delete this Style Bible? Its assets will stay active but this can\'t be undone from the UI.')) return;
     setDeleting(true);
     setError(null);
     try {
