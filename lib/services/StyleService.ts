@@ -33,15 +33,16 @@ class StyleServiceImpl {
     return (await this.getById(id))!;
   }
 
-  /** Only the creator may edit a style. Everyone else must Fork. */
+  /** Only the creator, or an admin, may edit a style. Everyone else must Fork. */
   async update(
     id: string,
     requestingUserId: string,
-    patch: { name?: string; parameters?: string }
+    patch: { name?: string; parameters?: string },
+    isAdmin: boolean = false
   ): Promise<Style | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
     const existing = await this.getById(id);
     if (!existing) return { error: 'NOT_FOUND' };
-    if (existing.created_by !== requestingUserId) return { error: 'FORBIDDEN' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
 
     const db = DatabaseConnection.getInstance();
     db.prepare(`
