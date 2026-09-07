@@ -5,6 +5,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
 import { parseComponentHtml } from '@/lib/services/componentDocument';
+import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { composePageHtml, type PageComponentTokens } from '@/lib/services/pageDocument';
 
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         continue;
       }
       const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
-      items.push(parseComponentHtml(document));
+      const tokens = parseComponentHtml(document);
+      items.push({
+        html: sanitizeComponentHtml(tokens.html),
+        css: sanitizeComponentCss(tokens.css),
+      });
     } catch (e) {
       console.error(`Failed to load component asset ${assetId} for page ${id}, skipping:`, e);
     }

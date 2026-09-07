@@ -101,6 +101,21 @@ describe('GET /api/pages/[id]/render', () => {
     }
   });
 
+  it('sanitizes a hostile component instead of serving it raw', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const hostileAsset = await makeComponentAsset(style.id, 'hostile.html',
+      '<!DOCTYPE html><html><head><style>.a {}</style></head><body><button onclick="alert(1)">Go</button><script>alert(document.cookie)</script></body></html>');
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([hostileAsset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('<script');
+    expect(body).not.toContain('onclick');
+    expect(body).not.toContain('alert(document.cookie)');
+  });
+
   it('with ?download=1, sets Content-Disposition to attachment with a slugified filename', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'My Landing Page!', createdBy: 'user-1' });
