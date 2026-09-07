@@ -31,6 +31,7 @@ export interface DriveFile {
 }
 
 const LIST_FIELDS = 'files(id, name, mimeType, size, modifiedTime, webViewLink, iconLink, parents)';
+const FILE_FIELDS = 'id, name, mimeType, size, modifiedTime, webViewLink, iconLink, parents';
 
 // Escapes a single-quoted string for Drive's `q` query language — the only
 // character that needs escaping inside a single-quoted q-string is the
@@ -103,11 +104,70 @@ class DriveServiceImpl {
         requestBody: { name: params.name, parents: [params.parentFolderId] },
         media: { mimeType: params.mimeType, body: params.stream },
       }, {
-        fields: LIST_FIELDS.replace('files(', '').replace(')', ''),
+        fields: FILE_FIELDS,
       });
       return res.data as DriveFile;
     } catch (e) {
       console.error(`Failed to upload ${params.name} to Drive:`, e);
+      throw e;
+    }
+  }
+
+  // Moves to Trash — recoverable for 30 days, matching Drive's own web UI
+  // delete button. Never calls files.delete(), which is immediate and
+  // permanent with no recovery — see this plan's Global Constraints.
+  async trashFile(fileId: string): Promise<void> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      await client.files.update({ fileId, requestBody: { trashed: true } });
+    } catch (e) {
+      console.error(`Failed to trash Drive file ${fileId}:`, e);
+      throw e;
+    }
+  }
+
+  async renameFile(fileId: string, newName: string): Promise<DriveFile> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      const res = await client.files.update(
+        { fileId, requestBody: { name: newName } },
+        { fields: FILE_FIELDS }
+      );
+      return res.data as DriveFile;
+    } catch (e) {
+      console.error(`Failed to rename Drive file ${fileId}:`, e);
+      throw e;
+    }
+  }
+
+  async moveFile(fileId: string, newParentId: string, oldParentId: string): Promise<DriveFile> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      const res = await client.files.update(
+        { fileId, addParents: newParentId, removeParents: oldParentId, requestBody: {} },
+        { fields: FILE_FIELDS }
+      );
+      return res.data as DriveFile;
+    } catch (e) {
+      console.error(`Failed to move Drive file ${fileId}:`, e);
+      throw e;
+    }
+  }
+
+  async createFolder(name: string, parentFolderId: string): Promise<DriveFile> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      const res = await client.files.create(
+        { requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] } },
+        { fields: FILE_FIELDS }
+      );
+      return res.data as DriveFile;
+    } catch (e) {
+      console.error(`Failed to create Drive folder ${name}:`, e);
       throw e;
     }
   }
