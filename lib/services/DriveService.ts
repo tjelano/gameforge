@@ -8,7 +8,7 @@ const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const REDIRECT_PATH = '/api/drive/callback';
 
 function baseUrl(): string {
-  return process.env.APP_BASE_URL || 'http://localhost:3000';
+  return (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
 function newOAuthClient(): OAuth2Client {

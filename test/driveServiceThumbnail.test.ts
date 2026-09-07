@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockFilesGet = vi.fn();
 const mockFetch = vi.fn();
@@ -38,6 +38,10 @@ beforeEach(() => {
   vi.stubGlobal('fetch', mockFetch);
   vi.stubEnv('GOOGLE_CLIENT_ID', 'test-client-id');
   vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-client-secret');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('driveService.getThumbnail', () => {

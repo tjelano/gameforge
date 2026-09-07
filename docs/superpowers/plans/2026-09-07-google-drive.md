@@ -6,7 +6,7 @@
 
 **Architecture:** One `DriveService` wrapping the official `@googleapis/drive` client (auth via `google-auth-library`'s `OAuth2Client`, a single app-wide refresh token stored in the existing `settings` table). A set of thin `/api/drive/*` routes, each gated by the existing `getCurrentUser` session check. A `/dashboard/drive` page (breadcrumb navigation + grid + actions) using the existing `usePolling` hook for live refresh — no new sync mechanism.
 
-**Tech Stack:** Next.js 16.3.4 (Route Handlers), `@googleapis/drive@22.0.0`, `google-auth-library@11.0.2`, Zod, Vitest.
+**Tech Stack:** Next.js 16.3.4 (Route Handlers), `@googleapis/drive@22.0.0`, `google-auth-library@10.5.0`, Zod, Vitest.
 
 **Spec:** `docs/superpowers/specs/2026-09-07-google-drive-design.md`
 

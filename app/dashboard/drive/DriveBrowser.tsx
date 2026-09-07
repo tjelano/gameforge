@@ -183,6 +183,10 @@ export function DriveBrowser({
       setMovingItem(null);
       return;
     }
+    if (movingItem.id === destinationFolderId) {
+      setError('Cannot move a folder into itself.');
+      return;
+    }
     const item = movingItem;
     setBusyItemId(item.id);
     setError(null);

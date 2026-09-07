@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockFilesList = vi.fn();
 
@@ -21,6 +21,10 @@ beforeEach(() => {
   mockFilesList.mockReset();
   vi.stubEnv('GOOGLE_CLIENT_ID', 'test-client-id');
   vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-client-secret');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('driveService.listFiles', () => {
