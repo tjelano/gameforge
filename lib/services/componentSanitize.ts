@@ -84,7 +84,12 @@ export function sanitizeComponentCss(css: string): string {
   root.walkDecls((decl) => {
     const parsedValue = valueParser(decl.value);
     parsedValue.walk((node) => {
-      if (node.type === 'function' && !ALLOWED_CSS_FUNCTIONS.has(node.value.toLowerCase())) {
+      // node.value === '' is a bare grouping paren (e.g. the outer (...) in
+      // `calc((var(--space-unit) * 3) - 2px)`), not a function call — skip
+      // the allowlist check for it. .walk() still descends into its
+      // children regardless, so a disallowed function hidden inside extra
+      // parens is still caught on its own real name.
+      if (node.type === 'function' && node.value !== '' && !ALLOWED_CSS_FUNCTIONS.has(node.value.toLowerCase())) {
         throw new Error(`Component CSS cannot use the "${node.value}(...)" function.`);
       }
     });

@@ -129,9 +129,10 @@ genuine three-kind (and future-extensible) one.
 - **No component-to-component composition** (e.g. "assemble a page from these 3 components") —
   a single component per generation, matching the confirmed scope ("real UI code" for individual
   pieces, not a page-builder).
-- **No CSS sanitization beyond the `url(` rejection** — no attempt to build a general-purpose CSS
-  parser/sanitizer. This is a deliberate, narrow policy choice (see gap #1 above), not a
-  half-finished broader sanitizer.
+- **No general-purpose CSS parser/sanitizer** — `sanitizeComponentCss` uses `postcss` to validate
+  and reject (at-rules, an explicit function allowlist, a `</style` check), never to transform or
+  rewrite CSS. This is a deliberate, narrow policy choice (see gap #1 above), not a half-finished
+  broader sanitizer.
 
 ## Data model
 
@@ -149,11 +150,24 @@ matching the existing one-physical-file-per-job convention already used for imag
 
 **Sanitization** (`lib/services/componentSanitize.ts`, new file):
 - `sanitizeComponentHtml(html: string): string` — via `sanitize-html`, allowlisting a set of
-  common structural/content tags (divs, headings, paragraphs, lists, links, buttons, images,
+  common structural/content tags (divs, headings, paragraphs, lists, links, buttons,
   nav/header/footer/section, forms and their standard input types) and their standard attributes,
-  with `sanitize-html`'s own script/event-handler stripping doing the heavy lifting.
-- `sanitizeComponentCss(css: string): string` — throws if the CSS contains the substring `url(`
-  (case-insensitive) anywhere; otherwise returns it unchanged. No other CSS transformation.
+  with `sanitize-html`'s own script/event-handler stripping doing the heavy lifting. `img` is
+  deliberately NOT in the allowlist (the whole tag is stripped) — this scope has no real need for
+  external photographic images, and allowing it would leave "no external resources, ever" unmet
+  on the HTML side no matter how tight the CSS check is.
+- `sanitizeComponentCss(css: string): string` — real CSS parsing via `postcss`, not substring
+  matching. A substring-blocklist approach (reject the literal text `url(`) was tried first and
+  defeated three times in a row across post-implementation review: a hex-escaped `\75rl(...)`, a
+  bare-string `@import "...";` form, and a live-browser-verified `image-set(...)` call. It now
+  throws if: the raw CSS contains a literal `</style` sequence (closes a `<style>`-tag-breakout
+  vector — a quoted CSS string value containing it is syntactically valid, so a real parser alone
+  doesn't catch it); the CSS contains any at-rule at all (`postcss`'s `walkAtRules`, not just
+  `@import`/`@font-face` — a deliberate "plain declarations only" policy); or any declaration's
+  value (walked via `postcss-value-parser`) contains a function call whose name isn't in an
+  explicit allowlist of ~40 safe functions (`var`, `calc`, color functions, gradients,
+  transforms, etc.) — an allowlist of safe functions, not a blocklist of dangerous ones, so an
+  unknown/future CSS function defaults to rejected. Otherwise returns the CSS unchanged.
 - Both are called at generation time (before the file is first written) and at every edit-save
   (before the file is overwritten) — the same two-call-site pattern the theme editor's
   `ThemeTokensSchema.parse()` already follows.

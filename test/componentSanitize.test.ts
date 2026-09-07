@@ -129,4 +129,19 @@ describe('sanitizeComponentCss', () => {
     const css = '.btn { background: linear-gradient(rgba(0, 0, 0, 0.5), red); }';
     expect(sanitizeComponentCss(css)).toBe(css);
   });
+
+  // postcss-value-parser represents a bare grouping paren (the outer (...)
+  // in an expression like calc((a) - b), used purely for precedence, not a
+  // function call) as a function-type node with an empty name (value: '').
+  // That empty string isn't in ALLOWED_CSS_FUNCTIONS, so ordinary CSS math
+  // using extra parens for grouping was being rejected outright.
+  it('passes through legitimate CSS using grouping parens inside calc() unchanged', () => {
+    const css = '.btn { padding: calc((var(--space-unit) * 3) - 2px); }';
+    expect(sanitizeComponentCss(css)).toBe(css);
+  });
+
+  it('passes through legitimate CSS with doubly-nested grouping parens unchanged', () => {
+    const css = '.btn { font-size: clamp(4px, calc((100vw - 320px) / 100), 24px); }';
+    expect(sanitizeComponentCss(css)).toBe(css);
+  });
 });
