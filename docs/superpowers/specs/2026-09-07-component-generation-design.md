@@ -68,8 +68,11 @@ before any human review happens, purely via `background: url(...)` or `@font-fac
 **Fix, matching a policy this codebase already has implicitly**: `ThemeTokensSchema`'s font
 fields are plain family names, never `@font-face`/URLs; colors are never `url()`-based. Extending
 that same "no external resource references, ever" policy to components is simpler and more
-auditable than building a nuanced CSS-URL allowlist: reject any generated or edited CSS
-containing the substring `url(` at all, on both generation and edit-save.
+auditable than building a nuanced CSS-URL allowlist — but a substring check on `url(` turned out
+not to be that policy in practice (see the "Component design" section below for the three
+bypasses it was defeated by). What actually ships: real CSS parsing via `postcss`, rejecting
+every at-rule outright and allowing CSS functions only through an explicit safe allowlist via
+`postcss-value-parser`, applied on both generation and edit-save.
 
 Additionally, `GET /api/components/[filename]` sets a `Content-Security-Policy: default-src
 'none'` **response header** (not baked into the stored file) as defense-in-depth for GameForge's

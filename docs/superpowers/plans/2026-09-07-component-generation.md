@@ -15,7 +15,7 @@
 - Output format is plain HTML + CSS only — never React/JSX.
 - Generated CSS references the Style Bible's theme variables (`var(--color-accent)`, etc.) — never bakes in concrete values.
 - No multi-candidate generation or dedup-steering for components (item 4's OKLab math is color-specific, doesn't generalize).
-- No CSS sanitization beyond rejecting any CSS containing the substring `url(` (case-insensitive) — no general-purpose CSS parser/sanitizer.
+- CSS sanitization uses real parsing (`postcss`): rejects any at-rule outright, and allows CSS functions only via an explicit safe allowlist (`postcss-value-parser`), not a `url(` blocklist — plus raw-string checks for `</style`, `<body`, `</body`.
 - Sanitization runs on both generation and every edit-save — never generation-only.
 - Editing is only available for a component job in `complete` status — not yet promoted, not yet discarded (matches item 5's theme-editor scope boundary).
 - `GET /api/components/[filename]` sets a `Content-Security-Policy: default-src 'none'` response header — the stored file itself never has this baked in, since it's meant to be copied into the user's own real website.
