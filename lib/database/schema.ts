@@ -64,3 +64,11 @@ export const JobSchema = z.object({
   batch_id: z.string().uuid().nullable().default(null),
 });
 export type Job = z.infer<typeof JobSchema>;
+
+export const UserSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  is_admin: z.union([z.literal(0), z.literal(1)]),
+  created_at: z.number().int(),
+});
+export type User = z.infer<typeof UserSchema>;
