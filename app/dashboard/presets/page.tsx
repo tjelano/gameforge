@@ -11,6 +11,8 @@ export default function PresetsPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [applyMode, setApplyMode] = useState<'new' | 'existing'>('new');
   const [applyNewName, setApplyNewName] = useState('');
@@ -49,40 +51,74 @@ export default function PresetsPage() {
   }, []);
 
   async function handleCreate(value: PresetFormValue) {
-    await fetch('/api/presets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: value.name,
-        prompt: value.prompt,
-        techStackTags: value.techStackTags.split(',').map(t => t.trim()).filter(Boolean),
-        themePrompt: value.themePrompt.trim() || null,
-        components: value.components,
-      }),
-    });
-    setCreating(false);
-    await refresh();
+    setError(null);
+    try {
+      const res = await fetch('/api/presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: value.name,
+          prompt: value.prompt,
+          techStackTags: value.techStackTags.split(',').map(t => t.trim()).filter(Boolean),
+          themePrompt: value.themePrompt.trim() || null,
+          components: value.components,
+        }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setError(body.error ?? 'Could not create preset.');
+        return;
+      }
+      setCreating(false);
+      await refresh();
+    } catch {
+      setError('Could not reach the server.');
+    }
   }
 
   async function handleDelete(id: string) {
-    await fetch(`/api/presets/${id}`, { method: 'DELETE' });
-    await refresh();
+    if (deletingId) return;
+    setDeletingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/presets/${id}`, { method: 'DELETE' });
+      const body = await res.json();
+      if (!body.success) {
+        setError(body.error ?? 'Could not delete preset.');
+        return;
+      }
+      await refresh();
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function handleUpdate(id: string, value: PresetFormValue) {
-    await fetch(`/api/presets/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: value.name,
-        prompt: value.prompt,
-        techStackTags: value.techStackTags.split(',').map(t => t.trim()).filter(Boolean),
-        themePrompt: value.themePrompt.trim() || null,
-        components: value.components,
-      }),
-    });
-    setEditingId(null);
-    await refresh();
+    setError(null);
+    try {
+      const res = await fetch(`/api/presets/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: value.name,
+          prompt: value.prompt,
+          techStackTags: value.techStackTags.split(',').map(t => t.trim()).filter(Boolean),
+          themePrompt: value.themePrompt.trim() || null,
+          components: value.components,
+        }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setError(body.error ?? 'Could not save changes.');
+        return;
+      }
+      setEditingId(null);
+      await refresh();
+    } catch {
+      setError('Could not reach the server.');
+    }
   }
 
   function presetToFormValue(preset: Preset): PresetFormValue {
@@ -137,6 +173,8 @@ export default function PresetsPage() {
         Applying one queues a theme (if set) and every listed component as one batch.
       </p>
 
+      {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
+
       {!creating ? (
         <button className="btn btn-primary" style={{ marginBottom: 24 }} onClick={() => setCreating(true)}>
           New Preset
@@ -179,7 +217,13 @@ export default function PresetsPage() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn btn-primary" onClick={() => openApply(preset.id)}>Apply</button>
                   <button className="btn" onClick={() => setEditingId(preset.id)}>Edit</button>
-                  <button className="btn" onClick={() => handleDelete(preset.id)}>Delete</button>
+                  <button
+                    className="btn"
+                    disabled={deletingId === preset.id}
+                    onClick={() => handleDelete(preset.id)}
+                  >
+                    {deletingId === preset.id ? 'Deleting…' : 'Delete'}
+                  </button>
                 </div>
               </div>
             );
