@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function GoogleDriveSettingsPage() {
+function GoogleDriveSettingsContent() {
   const searchParams = useSearchParams();
   const oauthError = searchParams.get('error');
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -52,5 +52,13 @@ export default function GoogleDriveSettingsPage() {
         )}
       </div>
     </>
+  );
+}
+
+export default function GoogleDriveSettingsPage() {
+  return (
+    <Suspense fallback={<p className="page-subtitle">Loading…</p>}>
+      <GoogleDriveSettingsContent />
+    </Suspense>
   );
 }
