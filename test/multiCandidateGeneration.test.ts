@@ -10,8 +10,10 @@ import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
 import { buildThemePrompt } from '@/lib/services/ThemeGenerator';
 import { POST } from '@/app/api/generate/route';
+import { seedSession } from './helpers/testSession';
 
 let tempRoot: string;
+let cookieHeader: string;
 
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-multicandidate-'));
@@ -24,6 +26,7 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  ({ cookieHeader } = await seedSession());
 });
 
 afterEach(async () => {
@@ -51,9 +54,9 @@ describe('POST /api/generate with candidateCount', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({
-        styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', outputKind: 'theme', candidateCount: 3,
+        styleId: style.id, assetType: 'theme', prompt: 'x', outputKind: 'theme', candidateCount: 3,
       }),
     });
     const res = await POST(req);
@@ -69,8 +72,8 @@ describe('POST /api/generate with candidateCount', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', outputKind: 'theme' }),
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      body: JSON.stringify({ styleId: style.id, assetType: 'theme', prompt: 'x', outputKind: 'theme' }),
     });
     const res = await POST(req);
     const body = await res.json();
@@ -83,8 +86,8 @@ describe('POST /api/generate with candidateCount', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', outputKind: 'theme', candidateCount: 4 }),
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      body: JSON.stringify({ styleId: style.id, assetType: 'theme', prompt: 'x', outputKind: 'theme', candidateCount: 4 }),
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
@@ -94,9 +97,9 @@ describe('POST /api/generate with candidateCount', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({
-        styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component', candidateCount: 3,
+        styleId: style.id, assetType: 'component', prompt: 'x', outputKind: 'component', candidateCount: 3,
       }),
     });
     const res = await POST(req);
@@ -107,9 +110,9 @@ describe('POST /api/generate with candidateCount', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({
-        styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component', candidateCount: 1,
+        styleId: style.id, assetType: 'component', prompt: 'x', outputKind: 'component', candidateCount: 1,
       }),
     });
     const res = await POST(req);

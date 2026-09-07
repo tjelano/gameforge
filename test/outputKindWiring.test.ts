@@ -8,8 +8,10 @@ import { DatabaseConnection } from '@/lib/database';
 import { jobService } from '@/lib/services/JobService';
 import { assetService } from '@/lib/services/AssetService';
 import { OutputKindSchema } from '@/lib/database/schema';
+import { seedSession } from './helpers/testSession';
 
 let tempRoot: string;
+let cookieHeader: string;
 const STYLE_ID = '33333333-3333-3333-3333-333333333333';
 
 describe('OutputKindSchema', () => {
@@ -35,6 +37,7 @@ beforeEach(async () => {
 
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  ({ cookieHeader } = await seedSession());
   const db = DatabaseConnection.getInstance();
   db.prepare(
     `INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
@@ -77,8 +80,8 @@ describe('POST /api/generate with outputKind', () => {
     const { POST } = await import('@/app/api/generate/route');
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ styleId: STYLE_ID, createdBy: 'user-1', assetType: 'theme', prompt: 'dark fantasy', outputKind: 'theme' }),
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      body: JSON.stringify({ styleId: STYLE_ID, assetType: 'theme', prompt: 'dark fantasy', outputKind: 'theme' }),
     });
     const res = await POST(req);
     const body = await res.json();
@@ -90,8 +93,8 @@ describe('POST /api/generate with outputKind', () => {
     const { POST } = await import('@/app/api/generate/route');
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ styleId: STYLE_ID, createdBy: 'user-1', assetType: 'sprite', prompt: 'a goblin' }),
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      body: JSON.stringify({ styleId: STYLE_ID, assetType: 'sprite', prompt: 'a goblin' }),
     });
     const res = await POST(req);
     const body = await res.json();
@@ -102,9 +105,9 @@ describe('POST /api/generate with outputKind', () => {
     const { POST } = await import('@/app/api/generate/route');
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({
-        styleId: STYLE_ID, createdBy: 'user-1', assetType: 'theme', prompt: 'x', outputKind: 'theme',
+        styleId: STYLE_ID, assetType: 'theme', prompt: 'x', outputKind: 'theme',
         options: { pieces: [{ shape: 'rect', x: 0, y: 0, width: 10, height: 10 }] },
       }),
     });
@@ -118,8 +121,8 @@ describe('POST /api/generate with outputKind', () => {
     const { POST } = await import('@/app/api/generate/route');
     const req = new NextRequest('http://localhost/api/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ styleId: STYLE_ID, createdBy: 'user-1', assetType: 'sprite', prompt: 'x'.repeat(2001) }),
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      body: JSON.stringify({ styleId: STYLE_ID, assetType: 'sprite', prompt: 'x'.repeat(2001) }),
     });
     const res = await POST(req);
     expect(res.status).toBe(400);

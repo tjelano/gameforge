@@ -6,8 +6,10 @@ import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { POST as fromCrop } from '@/app/api/assets/from-crop/route';
+import { seedSession } from './helpers/testSession';
 
 let tempRoot: string;
+let cookieHeader: string;
 const STYLE_ID = '99999999-9999-9999-9999-999999999999';
 
 // A real, tiny valid PNG (1x1 transparent), base64-encoded — same bytes
@@ -18,7 +20,7 @@ const TINY_PNG_DATA_URL =
 function postRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/assets/from-crop', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
     body: JSON.stringify(body),
   });
 }
@@ -34,6 +36,7 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  ({ cookieHeader } = await seedSession());
   const db = DatabaseConnection.getInstance();
   db.prepare(
     `INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
@@ -56,7 +59,6 @@ describe('POST /api/assets/from-crop', () => {
   it('saves the cropped image to storage/images and creates an asset with source_job_id set', async () => {
     const res = await fromCrop(postRequest({
       styleId: STYLE_ID,
-      createdBy: 'user-1',
       jobId: '11111111-1111-1111-1111-111111111111',
       label: 'Inventory',
       imageDataUrl: TINY_PNG_DATA_URL,
@@ -76,7 +78,6 @@ describe('POST /api/assets/from-crop', () => {
   it('rejects an empty label with a 400, not a 500 from a failed asset insert', async () => {
     const res = await fromCrop(postRequest({
       styleId: STYLE_ID,
-      createdBy: 'user-1',
       jobId: '11111111-1111-1111-1111-111111111111',
       label: '',
       imageDataUrl: TINY_PNG_DATA_URL,
