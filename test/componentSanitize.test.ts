@@ -39,6 +39,13 @@ describe('sanitizeComponentHtml', () => {
     const clean = sanitizeComponentHtml(dirty);
     expect(clean).not.toContain('<img');
   });
+
+  // `for` links a <label> to its <input> by id — dropping it silently
+  // breaks the accessible association for every Form component.
+  it('preserves the for attribute on <label>', () => {
+    const clean = sanitizeComponentHtml('<label for="email">Email</label><input id="email">');
+    expect(clean).toContain('for="email"');
+  });
 });
 
 describe('sanitizeComponentCss', () => {

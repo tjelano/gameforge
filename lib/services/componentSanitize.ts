@@ -29,6 +29,7 @@ const ALLOWED_ATTRIBUTES: sanitizeHtml.IOptions['allowedAttributes'] = {
   textarea: ['name', 'placeholder', 'rows', 'cols'],
   select: ['name'],
   option: ['value'],
+  label: ['for'],
 };
 
 export function sanitizeComponentHtml(html: string): string {
