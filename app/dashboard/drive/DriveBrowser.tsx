@@ -219,8 +219,9 @@ export function DriveBrowser({
             className="btn btn-primary"
             style={{ marginLeft: 12 }}
             onClick={() => onSelectFolder?.(currentFolderId, breadcrumb[breadcrumb.length - 1].name)}
+            disabled={busyItemId !== null}
           >
-            Move here
+            {busyItemId !== null ? 'Moving…' : 'Move here'}
           </button>
         )}
       </div>
