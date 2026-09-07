@@ -4,10 +4,43 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { parseComponentHtml, combineComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { assetService } from '@/lib/services/AssetService';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+// Looks up styleId's most-recently-promoted theme and returns its CSS,
+// re-sanitized through the same boundary as component CSS. Theme CSS is
+// validated by a completely separate pipeline (ThemeTokensSchema) at
+// generation/edit time only, never re-checked at serve time the way
+// component files now are — reusing sanitizeComponentCss here closes that
+// gap rather than trusting theme content raw. Returns null (no injection,
+// same as today's unstyled preview) for any reason the theme can't be used:
+// no styleId, no promoted theme, unreadable file, or failed sanitization.
+async function loadThemeCssForStyle(styleId: string | null): Promise<string | null> {
+  if (!styleId) return null;
+  try {
+    const themes = await assetService.getActiveThemeAssetsForStyle(styleId);
+    if (themes.length === 0) return null;
+    const themeFilename = themes[0].image_path;
+    // Same bare-filename guard as this route's own `filename` param below —
+    // image_path is DB-sourced, not user-typed, but it can arrive via
+    // GitService.importFromJson() (a git-synced JSON export from another
+    // machine, or a bad merge) with no validation on its shape, so it gets
+    // the same defense-in-depth treatment as every other filename this app
+    // serves off disk.
+    if (!themeFilename || themeFilename.includes('/') || themeFilename.includes('\\') || themeFilename.includes('..')) {
+      return null;
+    }
+    const themePath = path.join(getProjectRoot(), 'storage', 'themes', themeFilename);
+    const rawCss = await fsPromises.readFile(themePath, 'utf-8');
+    return sanitizeComponentCss(rawCss);
+  } catch (e) {
+    console.error(`Could not load theme CSS for style ${styleId}:`, e);
+    return null;
+  }
+}
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
   const { filename } = await params;
 
   // Same guard as app/api/themes/[filename]/route.ts and
@@ -43,10 +76,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ fil
   let safeDocument: string;
   try {
     const tokens = parseComponentHtml(data);
+    const styleId = req.nextUrl.searchParams.get('styleId');
+    const themeCss = await loadThemeCssForStyle(styleId);
     safeDocument = combineComponentHtml({
       html: sanitizeComponentHtml(tokens.html),
       css: sanitizeComponentCss(tokens.css),
-    });
+    }, themeCss ?? undefined);
   } catch (e) {
     console.error(`Component ${filename} failed re-sanitization at serve time:`, e);
     return NextResponse.json({ success: false, error: 'Component file failed validation' }, { status: 500 });
