@@ -31,7 +31,7 @@
 
 **Interfaces:**
 - Produces: `UserSchema` (Zod) and `type User = z.infer<typeof UserSchema>`, exported from `lib/database/schema.ts`. Fields: `id: string` (uuid), `name: string` (min 1), `is_admin: 0 | 1`, `created_at: number` (int). Every later task that touches a user row uses this exact shape.
-- Produces: the `users` table (`id TEXT PRIMARY KEY`, `name TEXT NOT NULL UNIQUE`, `is_admin INTEGER NOT NULL DEFAULT 0`, `created_at INTEGER NOT NULL`) and `sessions` table (`token TEXT PRIMARY KEY`, `user_id TEXT NOT NULL REFERENCES users(id)`, `expires_at INTEGER NOT NULL`, `created_at INTEGER NOT NULL`).
+- Produces: the `users` table (`id TEXT PRIMARY KEY`, `name TEXT NOT NULL`, `is_admin INTEGER NOT NULL DEFAULT 0`, `created_at INTEGER NOT NULL`) and `sessions` table (`token TEXT PRIMARY KEY`, `user_id TEXT NOT NULL REFERENCES users(id)`, `expires_at INTEGER NOT NULL`, `created_at INTEGER NOT NULL`). `name` was originally specified `UNIQUE`; the final whole-branch review found this could permanently break git sync (two machines independently creating a same-named first account), so the constraint was dropped before merge — see the fix-round commit and the ledger.
 
 - [ ] **Step 1: Write the migration file**
 
@@ -40,7 +40,7 @@
 
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   is_admin INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
@@ -112,15 +112,10 @@ describe('users/sessions tables', () => {
     expect(() => UserSchema.parse(row)).not.toThrow();
   });
 
-  it('enforces a unique name constraint', () => {
-    const db = DatabaseConnection.getInstance();
-    db.prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
-      .run('11111111-1111-1111-1111-111111111111', 'Alice', 1, Date.now());
-    expect(() =>
-      db.prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
-        .run('22222222-2222-2222-2222-222222222222', 'Alice', 0, Date.now())
-    ).toThrow();
-  });
+  // Superseded by the final whole-branch review: `name` is deliberately NOT
+  // unique (a cross-machine name collision must not abort git sync) — see
+  // test/userSchema.test.ts's actual "allows duplicate names" test for the
+  // shipped behavior.
 
   it('creates a session row referencing a user', () => {
     const db = DatabaseConnection.getInstance();
@@ -213,10 +208,9 @@ describe('userService.create', () => {
     expect(bob.is_admin).toBe(0);
   });
 
-  it('rejects a duplicate name', async () => {
-    await userService.create({ name: 'Alice' });
-    await expect(userService.create({ name: 'Alice' })).rejects.toThrow();
-  });
+  // Superseded by the final whole-branch review: duplicate names are
+  // deliberately allowed now — see test/userService.test.ts's actual test
+  // proving two same-named users can both be created successfully.
 });
 
 describe('userService reads', () => {

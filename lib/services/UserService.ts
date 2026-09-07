@@ -22,9 +22,13 @@ class UserServiceImpl {
     return row ? UserSchema.parse(row) : null;
   }
 
+  // name has no uniqueness constraint (two collaborators can pick the same
+  // display name without breaking git sync — see migration 011's history),
+  // so this orders deterministically rather than leaving SQLite free to
+  // return an arbitrary match among duplicates.
   async getByName(name: string): Promise<User | null> {
     const db = DatabaseConnection.getInstance();
-    const row = db.prepare('SELECT * FROM users WHERE name = ?').get(name);
+    const row = db.prepare('SELECT * FROM users WHERE name = ? ORDER BY created_at ASC LIMIT 1').get(name);
     return row ? UserSchema.parse(row) : null;
   }
 
