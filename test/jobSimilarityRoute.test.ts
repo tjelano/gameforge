@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import os from 'os';
@@ -164,5 +164,44 @@ describe('GET /api/jobs/[id]/similarity', () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.flagged).toBe(false);
+  });
+
+  it('does not attempt to read a non-theme sibling in the same batch', async () => {
+    // Two jobs share a batch_id: a theme job (the one we check) and a
+    // component job (a sibling that should be skipped entirely, not
+    // parsed as theme CSS). Preset-applied batches mix these; every batch
+    // before that feature was homogeneous, so this gap was never hit.
+    const db = DatabaseConnection.getInstance();
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const batchId = crypto.randomUUID();
+    const now = Date.now();
+
+    const themeJobId = await makeThemeJob(style.id, MOCK, batchId);
+
+    const componentJobId = crypto.randomUUID();
+    db.prepare(`
+      INSERT INTO jobs (id, style_id, created_by, asset_type, prompt, status, result_path, created_at, updated_at, options, output_kind, batch_id)
+      VALUES (?, ?, 'user-1', 'nav bar', 'x', 'complete', 'this-would-throw-if-parsed-as-css.html', ?, ?, '{}', 'component', ?)
+    `).run(componentJobId, style.id, now, now, batchId);
+
+    // The component sibling's result_path doesn't exist on disk, so if the
+    // route ever attempts to read+parse it as theme CSS, readThemeTokens's
+    // catch block logs a console.error mentioning that path. The fix must
+    // make the route skip this sibling via the output_kind filter, before
+    // any fs read is attempted at all.
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const req = new NextRequest(`http://localhost/api/jobs/${themeJobId}/similarity`);
+      const res = await GET(req, { params: Promise.resolve({ id: themeJobId }) });
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.data.flagged).toBe(false);
+
+      const attemptedPaths = consoleSpy.mock.calls.map(call => String(call[1] ?? call[0]));
+      expect(attemptedPaths.some(p => p.includes('this-would-throw-if-parsed-as-css.html'))).toBe(false);
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });

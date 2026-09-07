@@ -72,3 +72,23 @@ export const UserSchema = z.object({
   created_at: z.number().int(),
 });
 export type User = z.infer<typeof UserSchema>;
+
+export const PresetComponentSchema = z.object({
+  assetType: z.string().min(1),
+  prompt: z.string().min(1),
+});
+export type PresetComponent = z.infer<typeof PresetComponentSchema>;
+
+export const PresetSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  created_by: z.string().min(1),
+  prompt: z.string().min(1),
+  tech_stack_tags: z.string(), // JSON-serialized string[]
+  theme_prompt: z.string().nullable(),
+  components: z.string(), // JSON-serialized PresetComponent[]
+  is_deleted: z.union([z.literal(0), z.literal(1)]),
+  created_at: z.number().int(),
+  updated_at: z.number().int(),
+});
+export type Preset = z.infer<typeof PresetSchema>;
