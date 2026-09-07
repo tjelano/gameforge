@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { drive } from '@googleapis/drive';
+import type { Readable } from 'stream';
 import { settingsService } from '@/lib/services/SettingsService';
 import { GOOGLE_DRIVE_REFRESH_TOKEN_SETTING_KEY } from '@/lib/config';
 
@@ -90,6 +91,23 @@ class DriveServiceImpl {
       return (res.data.files ?? []) as DriveFile[];
     } catch (e) {
       console.error(`Failed to list Drive files for folder ${folderId}:`, e);
+      throw e;
+    }
+  }
+
+  async uploadFile(params: { name: string; mimeType: string; stream: Readable; parentFolderId: string }): Promise<DriveFile> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      const res = await client.files.create({
+        requestBody: { name: params.name, parents: [params.parentFolderId] },
+        media: { mimeType: params.mimeType, body: params.stream },
+      }, {
+        fields: LIST_FIELDS.replace('files(', '').replace(')', ''),
+      });
+      return res.data as DriveFile;
+    } catch (e) {
+      console.error(`Failed to upload ${params.name} to Drive:`, e);
       throw e;
     }
   }
