@@ -2,8 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
+import { DatabaseConnection } from '@/lib/database';
+import { styleService } from '@/lib/services/StyleService';
+import { assetService } from '@/lib/services/AssetService';
 import { GET } from '@/app/api/components/[filename]/route';
 
 let tempRoot: string;
@@ -11,13 +15,38 @@ let tempRoot: string;
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-componentroute-'));
   await fsPromises.mkdir(path.join(tempRoot, 'storage', 'components'), { recursive: true });
+  await fsPromises.mkdir(path.join(tempRoot, 'storage', 'themes'), { recursive: true });
+  await fsPromises.writeFile(path.join(tempRoot, 'package.json'), JSON.stringify({ name: 'x' }));
+  const realMigrationsDir = path.resolve(__dirname, '..', 'lib', 'database', 'migrations');
+  const tempMigrationsDir = path.join(tempRoot, 'lib', 'database', 'migrations');
+  await fsPromises.mkdir(tempMigrationsDir, { recursive: true });
+  for (const file of await fsPromises.readdir(realMigrationsDir)) {
+    await fsPromises.copyFile(path.join(realMigrationsDir, file), path.join(tempMigrationsDir, file));
+  }
   setProjectRootForTests(tempRoot);
+  DatabaseConnection.resetForTests();
 });
 
 afterEach(async () => {
+  DatabaseConnection.resetForTests();
   setProjectRootForTests(undefined);
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
+
+async function seedPromotedTheme(css: string): Promise<string> {
+  const style = await styleService.create({ name: `style-${randomUUID()}`, createdBy: 'user-1', parameters: '{}' });
+  const filename = `${randomUUID()}.css`;
+  await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', filename), css);
+  await assetService.create({
+    styleId: style.id,
+    createdBy: 'user-1',
+    assetType: 'theme',
+    prompt: 'test theme',
+    imagePath: filename,
+    outputKind: 'theme',
+  });
+  return style.id;
+}
 
 describe('GET /api/components/[filename]', () => {
   it('serves a stored component file as text/html with a restrictive CSP header', async () => {
@@ -75,5 +104,51 @@ describe('GET /api/components/[filename]', () => {
     expect(res.status).toBe(500);
     const body = await res.text();
     expect(body).not.toContain('evil.example');
+  });
+
+  it('injects the style\'s promoted theme CSS variables when ?styleId= names a style with a promoted theme', async () => {
+    const styleId = await seedPromotedTheme(':root { --color-accent: #ff6600; }');
+    const document = '<!DOCTYPE html><html><head><style>.btn { background: var(--color-accent); }</style></head><body><button>Go</button></body></html>';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'themed.html'), document);
+    const res = await GET(new NextRequest(`http://localhost/x?styleId=${styleId}`), { params: Promise.resolve({ filename: 'themed.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('--color-accent: #ff6600');
+    expect(body).toContain('var(--color-accent)');
+  });
+
+  it('serves the component unchanged when ?styleId= names a style with no promoted theme', async () => {
+    const style = await styleService.create({ name: `style-${randomUUID()}`, createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><p>hi</p></body></html>';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'notheme.html'), document);
+    const res = await GET(new NextRequest(`http://localhost/x?styleId=${style.id}`), { params: Promise.resolve({ filename: 'notheme.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain(':root');
+  });
+
+  it('serves the component unchanged when no ?styleId= is given', async () => {
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><p>hi</p></body></html>';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'plain.html'), document);
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'plain.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain(':root');
+  });
+
+  it('never splices raw theme CSS in — it re-sanitizes the theme file the same as a component file', async () => {
+    // The theme pipeline (ThemeTokensSchema) validates at generation/edit
+    // time, not at serve time, so a hostile or corrupted theme CSS file must
+    // be caught here, the same way a hostile component file is caught above.
+    // Falls back to "no injection" rather than failing the whole request —
+    // the component itself is still safe and valid; only its theming is lost.
+    const styleId = await seedPromotedTheme(':root { --color-accent: url(https://evil.example/x); }');
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><p>hi</p></body></html>';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'hostile-theme.html'), document);
+    const res = await GET(new NextRequest(`http://localhost/x?styleId=${styleId}`), { params: Promise.resolve({ filename: 'hostile-theme.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('evil.example');
+    expect(body).not.toContain(':root');
   });
 });

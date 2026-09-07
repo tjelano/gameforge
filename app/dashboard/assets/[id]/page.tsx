@@ -139,7 +139,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
 
       {asset.output_kind === 'component' && asset.image_path && (
         <iframe
-          src={`/api/components/${asset.image_path}`}
+          src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
           title={`Component preview: ${asset.prompt}`}
           sandbox=""
           style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 24 }}

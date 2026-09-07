@@ -103,7 +103,7 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
 
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
         <iframe
-          src={`/api/components/${job.result_path}?v=${previewVersion}`}
+          src={`/api/components/${job.result_path}?styleId=${job.style_id}&v=${previewVersion}`}
           title={`Component preview: ${job.prompt}`}
           sandbox=""
           style={{ width: 480, height: 340, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}

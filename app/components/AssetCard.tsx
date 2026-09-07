@@ -56,7 +56,7 @@ export function AssetCard({ asset }: { asset: Asset }) {
           />
         ) : asset.output_kind === 'component' && asset.image_path ? (
           <iframe
-            src={`/api/components/${asset.image_path}`}
+            src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
             title={`Component preview: ${asset.prompt}`}
             sandbox=""
             style={{ width: 320, height: 320, border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left' }}

@@ -86,7 +86,7 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
           />
         ) : job.output_kind === 'component' && job.result_path ? (
           <iframe
-            src={`/api/components/${job.result_path}`}
+            src={`/api/components/${job.result_path}?styleId=${job.style_id}`}
             title={`Component preview: ${job.prompt}`}
             sandbox=""
             style={{ width: 260, height: 180, border: 'none', transform: 'scale(0.28)', transformOrigin: 'top left' }}

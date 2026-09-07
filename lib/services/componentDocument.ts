@@ -22,7 +22,16 @@ const STYLE_CLOSE = '</style>';
 const BODY_OPEN = '<body>';
 const BODY_CLOSE = '</body>';
 
-export function combineComponentHtml(tokens: ComponentTokens): string {
+// themeCss is an optional SECOND <style> block appended after the
+// component's own — used only at serve time (GET /api/components/[filename])
+// to inject a Style Bible's :root{...} variable definitions so var(--color-
+// accent) etc. resolve to real values in GameForge's own preview UI. Never
+// passed by the write paths (generate/edit/reset), so it's never baked into
+// the stored file — the file the user copies into their own site stays
+// exactly what they wrote. parseComponentHtml only ever reads the FIRST
+// <style>...</style> pair, so appending this after it doesn't affect
+// round-tripping through the edit page.
+export function combineComponentHtml(tokens: ComponentTokens, themeCss?: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -30,7 +39,7 @@ export function combineComponentHtml(tokens: ComponentTokens): string {
 ${STYLE_OPEN}
 ${tokens.css}
 ${STYLE_CLOSE}
-</head>
+${themeCss ? `${STYLE_OPEN}\n${themeCss}\n${STYLE_CLOSE}\n` : ''}</head>
 ${BODY_OPEN}
 ${tokens.html}
 ${BODY_CLOSE}
