@@ -136,6 +136,31 @@ describe('GET /api/components/[filename]', () => {
     expect(body).not.toContain(':root');
   });
 
+  it('rejects a path-traversal theme filename instead of reading outside storage/themes', async () => {
+    // image_path is DB-sourced, not user-typed at request time — but
+    // GitService.importFromJson() writes it straight from a git-synced JSON
+    // export with no shape validation, so a hostile or corrupted import can
+    // still land a traversal-shaped value here. Plant a real secret file
+    // outside storage/themes/ and confirm it never leaks into the response.
+    const style = await styleService.create({ name: `style-${randomUUID()}`, createdBy: 'user-1', parameters: '{}' });
+    await fsPromises.writeFile(path.join(tempRoot, 'secret.txt'), 'top-secret-outside-themes-dir');
+    await assetService.create({
+      styleId: style.id,
+      createdBy: 'user-1',
+      assetType: 'theme',
+      prompt: 'test theme',
+      imagePath: '../secret.txt',
+      outputKind: 'theme',
+    });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><p>hi</p></body></html>';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'traversal.html'), document);
+    const res = await GET(new NextRequest(`http://localhost/x?styleId=${style.id}`), { params: Promise.resolve({ filename: 'traversal.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('top-secret-outside-themes-dir');
+    expect(body).not.toContain(':root');
+  });
+
   it('never splices raw theme CSS in — it re-sanitizes the theme file the same as a component file', async () => {
     // The theme pipeline (ThemeTokensSchema) validates at generation/edit
     // time, not at serve time, so a hostile or corrupted theme CSS file must

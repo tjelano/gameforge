@@ -21,7 +21,17 @@ async function loadThemeCssForStyle(styleId: string | null): Promise<string | nu
   try {
     const themes = await assetService.getActiveThemeAssetsForStyle(styleId);
     if (themes.length === 0) return null;
-    const themePath = path.join(getProjectRoot(), 'storage', 'themes', themes[0].image_path!);
+    const themeFilename = themes[0].image_path;
+    // Same bare-filename guard as this route's own `filename` param below —
+    // image_path is DB-sourced, not user-typed, but it can arrive via
+    // GitService.importFromJson() (a git-synced JSON export from another
+    // machine, or a bad merge) with no validation on its shape, so it gets
+    // the same defense-in-depth treatment as every other filename this app
+    // serves off disk.
+    if (!themeFilename || themeFilename.includes('/') || themeFilename.includes('\\') || themeFilename.includes('..')) {
+      return null;
+    }
+    const themePath = path.join(getProjectRoot(), 'storage', 'themes', themeFilename);
     const rawCss = await fsPromises.readFile(themePath, 'utf-8');
     return sanitizeComponentCss(rawCss);
   } catch (e) {
