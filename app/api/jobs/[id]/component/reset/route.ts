@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { jobService } from '@/lib/services/JobService';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
+import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +36,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ success: false, error: 'Invalid result path' }, { status: 400 });
     }
 
-    const originalTokens = options.originalComponent as ComponentTokens;
+    const parsed = z.object({ html: z.string(), css: z.string() }).parse(options.originalComponent);
+    let originalTokens: ComponentTokens;
+    try {
+      originalTokens = {
+        html: sanitizeComponentHtml(parsed.html),
+        css: sanitizeComponentCss(parsed.css),
+      };
+    } catch (e: any) {
+      return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+    }
     const filePath = path.join(getProjectRoot(), 'storage', 'components', job.result_path);
     try {
       await fsPromises.writeFile(filePath, combineComponentHtml(originalTokens));

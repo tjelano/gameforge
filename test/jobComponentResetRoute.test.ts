@@ -91,4 +91,24 @@ describe('POST /api/jobs/[id]/component/reset', () => {
     const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: '00000000-0000-0000-0000-000000000000' }) });
     expect(res.status).toBe(404);
   });
+
+  it('returns 400 instead of writing unsanitized content when the captured originalComponent no longer passes sanitization', async () => {
+    const { jobId, filename } = await makeCompleteComponentJob();
+    // Simulate an "already captured, now-invalid" originalComponent — the
+    // normal PATCH flow always sanitizes before capturing, so the only way
+    // to get one of these into the DB is to write it directly, the way an
+    // older build (or a direct DB edit) might have.
+    const unsanitized: ComponentTokens = { html: '<button>x</button>', css: 'body { background: url(evil.png); }' };
+    DatabaseConnection.getInstance()
+      .prepare('UPDATE jobs SET options = ? WHERE id = ?')
+      .run(JSON.stringify({ originalComponent: unsanitized }), jobId);
+
+    const before = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
+
+    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    expect(res.status).toBe(400);
+
+    const after = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
+    expect(after).toEqual(before);
+  });
 });
