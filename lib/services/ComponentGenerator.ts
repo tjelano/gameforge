@@ -7,11 +7,13 @@ import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/comp
 import { styleService } from '@/lib/services/StyleService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 
-export interface ComponentTokens {
-  html: string;
-  css: string;
-}
+// Re-exported so every existing server-side caller of this module keeps
+// working unchanged — the pure document assembly/parsing logic itself now
+// lives in componentDocument.ts (see that file for why: a 'use client'
+// component needs it without pulling in this file's Node-only imports).
+export { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 
 export interface GeneratedComponent {
   path: string; // filename only, under storage/components/
@@ -20,41 +22,6 @@ export interface GeneratedComponent {
 
 export interface ComponentGenerator {
   generate(prompt: string, styleId: string, componentType?: string): Promise<GeneratedComponent>;
-}
-
-const STYLE_OPEN = '<style>';
-const STYLE_CLOSE = '</style>';
-const BODY_OPEN = '<body>';
-const BODY_CLOSE = '</body>';
-
-export function combineComponentHtml(tokens: ComponentTokens): string {
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-${STYLE_OPEN}
-${tokens.css}
-${STYLE_CLOSE}
-</head>
-${BODY_OPEN}
-${tokens.html}
-${BODY_CLOSE}
-</html>
-`;
-}
-
-export function parseComponentHtml(document: string): ComponentTokens {
-  const styleStart = document.indexOf(STYLE_OPEN);
-  const styleEnd = document.indexOf(STYLE_CLOSE);
-  const bodyStart = document.indexOf(BODY_OPEN);
-  const bodyEnd = document.indexOf(BODY_CLOSE);
-  if (styleStart === -1 || styleEnd === -1 || bodyStart === -1 || bodyEnd === -1) {
-    throw new Error('Component document is missing a <style> or <body> section.');
-  }
-  return {
-    css: document.slice(styleStart + STYLE_OPEN.length, styleEnd).trim(),
-    html: document.slice(bodyStart + BODY_OPEN.length, bodyEnd).trim(),
-  };
 }
 
 const TOOL_INPUT_SCHEMA = {
