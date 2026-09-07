@@ -12,6 +12,7 @@ const LINKS = [
   { href: '/dashboard/jobs', label: 'Jobs' },
   { href: '/dashboard/assets', label: 'Assets' },
   { href: '/dashboard/styles', label: 'Style Bibles' },
+  { href: '/dashboard/presets', label: 'Presets' },
   { href: '/dashboard/export', label: 'Export' },
   { href: '/dashboard/drive', label: 'Drive' },
   { href: '/dashboard/settings/storage', label: 'Storage' },

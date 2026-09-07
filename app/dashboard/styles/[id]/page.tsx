@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Asset, Style, OutputKind } from '@/lib/database/schema';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { AssetCard } from '@/app/components/AssetCard';
+import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
 
 const SECTIONS: { kind: OutputKind; label: string }[] = [
   { kind: 'theme', label: 'Themes' },
@@ -26,6 +27,9 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   const [savingName, setSavingName] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [showSavePreset, setShowSavePreset] = useState(false);
+  const [savePresetStatus, setSavePresetStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -100,6 +104,43 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     }
   }
 
+  function buildPresetPrefill(): Partial<PresetFormValue> {
+    const themeAssets = assets.filter(a => a.output_kind === 'theme');
+    const componentAssets = assets.filter(a => a.output_kind === 'component');
+    const mostRecentTheme = themeAssets[0]; // assets are ordered newest-first by the API
+    return {
+      name: `${style?.name ?? 'Untitled'} preset`,
+      themePrompt: mostRecentTheme?.prompt ?? '',
+      components: componentAssets.map(a => ({ assetType: a.asset_type, prompt: a.prompt })),
+    };
+  }
+
+  async function handleSavePreset(value: PresetFormValue) {
+    setSavePresetStatus(null);
+    try {
+      const res = await fetch('/api/presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: value.name,
+          prompt: value.prompt,
+          techStackTags: value.techStackTags.split(',').map(t => t.trim()).filter(Boolean),
+          themePrompt: value.themePrompt.trim() || null,
+          components: value.components,
+        }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setSavePresetStatus(body.error ?? 'Could not save preset.');
+        return;
+      }
+      setShowSavePreset(false);
+      setSavePresetStatus('Saved as a new preset.');
+    } catch {
+      setSavePresetStatus('Could not reach the server.');
+    }
+  }
+
   if (loading) return <p className="page-subtitle">Loading…</p>;
   if (!style) return <p className="page-subtitle">Style Bible not found.</p>;
 
@@ -160,6 +201,26 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
           </div>
         );
       })}
+
+      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+        <button className="btn" onClick={() => setShowSavePreset(true)}>Save as preset</button>
+        {!showSavePreset && savePresetStatus && (
+          <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{savePresetStatus}</p>
+        )}
+      </div>
+
+      {showSavePreset && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div className="card" style={{ width: 560, maxHeight: '80vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <strong>Save as preset</strong>
+              <button className="btn" onClick={() => setShowSavePreset(false)}>Cancel</button>
+            </div>
+            {savePresetStatus && <p style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-dim)' }}>{savePresetStatus}</p>}
+            <PresetForm initial={buildPresetPrefill()} onSubmit={handleSavePreset} submitLabel="Save Preset" />
+          </div>
+        </div>
+      )}
     </>
   );
 }
