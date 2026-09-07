@@ -235,7 +235,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
               <button className="btn" onClick={() => setShowDrivePicker(false)}>Cancel</button>
             </div>
             {shareStatus && <p style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
-            <DriveBrowser selectMode onSelectFolder={handleShareToDrive} selectBusy={sharingToDrive} />
+            <DriveBrowser selectMode onSelectFolder={handleShareToDrive} selectBusy={sharingToDrive} selectLabel="Share here" />
           </div>
         </div>
       )}
