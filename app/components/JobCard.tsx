@@ -84,6 +84,13 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
             sandbox=""
             style={{ width: 260, height: 180, border: 'none', transform: 'scale(0.28)', transformOrigin: 'top left' }}
           />
+        ) : job.output_kind === 'component' && job.result_path ? (
+          <iframe
+            src={`/api/components/${job.result_path}`}
+            title={`Component preview: ${job.prompt}`}
+            sandbox=""
+            style={{ width: 260, height: 180, border: 'none', transform: 'scale(0.28)', transformOrigin: 'top left' }}
+          />
         ) : job.result_path ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -121,6 +128,11 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
             )}
             {job.output_kind === 'theme' && job.status === 'complete' && (
               <Link href={`/dashboard/jobs/${job.id}/edit`} className="btn">
+                Edit
+              </Link>
+            )}
+            {job.output_kind === 'component' && job.status === 'complete' && (
+              <Link href={`/dashboard/jobs/${job.id}/edit-component`} className="btn">
                 Edit
               </Link>
             )}
