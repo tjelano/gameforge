@@ -28,6 +28,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (result.error === 'NOTHING_TO_GENERATE') {
         return NextResponse.json({ success: false, error: 'This preset has nothing to generate.' }, { status: 400 });
       }
+      if (result.error === 'INVALID_TARGET') {
+        return NextResponse.json({ success: false, error: 'Provide exactly one of newStyleName or existingStyleId.' }, { status: 400 });
+      }
       return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
     }
 

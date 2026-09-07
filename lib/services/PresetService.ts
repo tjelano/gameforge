@@ -84,8 +84,18 @@ class PresetServiceImpl {
     createdBy: string
   ): Promise<
     | { styleId: string; batchId: string; jobIds: string[] }
-    | { error: 'PRESET_NOT_FOUND' | 'STYLE_NOT_FOUND' | 'NOTHING_TO_GENERATE' }
+    | { error: 'PRESET_NOT_FOUND' | 'STYLE_NOT_FOUND' | 'NOTHING_TO_GENERATE' | 'INVALID_TARGET' }
   > {
+    // The only current caller (the apply route) already enforces this via a
+    // Zod .refine(), but that's caller-side validation, not a guarantee this
+    // method itself provides - a future direct caller with neither or both
+    // fields set would otherwise hit an untyped bind-time throw from
+    // better-sqlite3 deep inside the transaction. Guarding here makes the
+    // method safe regardless of caller.
+    if ((target.newStyleName ? 1 : 0) + (target.existingStyleId ? 1 : 0) !== 1) {
+      return { error: 'INVALID_TARGET' };
+    }
+
     const preset = await this.getById(presetId);
     if (!preset) return { error: 'PRESET_NOT_FOUND' };
 

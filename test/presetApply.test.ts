@@ -92,6 +92,27 @@ describe('presetService.applyPreset', () => {
     expect(result).toEqual({ error: 'STYLE_NOT_FOUND' });
   });
 
+  it('returns INVALID_TARGET when called directly with neither newStyleName nor existingStyleId, and creates nothing', async () => {
+    // The apply API route enforces "exactly one" via a Zod .refine() before
+    // ever calling this method - this test calls the service directly,
+    // bypassing that route-level validation, to prove the service itself
+    // is safe against a future caller that doesn't validate first.
+    const preset = await makeFullPreset();
+    const result = await presetService.applyPreset(preset.id, {}, 'user-1');
+    expect(result).toEqual({ error: 'INVALID_TARGET' });
+
+    const db = DatabaseConnection.getInstance();
+    const styleCount = (db.prepare('SELECT COUNT(*) as c FROM styles').get() as { c: number }).c;
+    expect(styleCount).toBe(0);
+  });
+
+  it('returns INVALID_TARGET when called directly with both newStyleName and existingStyleId', async () => {
+    const existing = await styleService.create({ name: 'Existing', createdBy: 'user-1', parameters: '{}' });
+    const preset = await makeFullPreset();
+    const result = await presetService.applyPreset(preset.id, { newStyleName: 'x', existingStyleId: existing.id }, 'user-1');
+    expect(result).toEqual({ error: 'INVALID_TARGET' });
+  });
+
   it('returns NOTHING_TO_GENERATE for a preset with no theme_prompt and no components, and creates nothing', async () => {
     const preset = await presetService.create({
       name: 'Empty', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',

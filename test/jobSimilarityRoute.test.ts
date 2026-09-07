@@ -190,15 +190,18 @@ describe('GET /api/jobs/[id]/similarity', () => {
     // make the route skip this sibling via the output_kind filter, before
     // any fs read is attempted at all.
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const req = new NextRequest(`http://localhost/api/jobs/${themeJobId}/similarity`);
-    const res = await GET(req, { params: Promise.resolve({ id: themeJobId }) });
-    const body = await res.json();
+    try {
+      const req = new NextRequest(`http://localhost/api/jobs/${themeJobId}/similarity`);
+      const res = await GET(req, { params: Promise.resolve({ id: themeJobId }) });
+      const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(body.data.flagged).toBe(false);
+      expect(res.status).toBe(200);
+      expect(body.data.flagged).toBe(false);
 
-    const attemptedPaths = consoleSpy.mock.calls.map(call => String(call[1] ?? call[0]));
-    expect(attemptedPaths.some(p => p.includes('this-would-throw-if-parsed-as-css.html'))).toBe(false);
-    consoleSpy.mockRestore();
+      const attemptedPaths = consoleSpy.mock.calls.map(call => String(call[1] ?? call[0]));
+      expect(attemptedPaths.some(p => p.includes('this-would-throw-if-parsed-as-css.html'))).toBe(false);
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });
