@@ -1,12 +1,15 @@
 'use client';
 
 import { useEffect, useState, use as usePromise } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Asset } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
+import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { DriveBrowser } from '@/app/dashboard/drive/DriveBrowser';
 
 export default function AssetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
+  const router = useRouter();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [margins, setMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   const [nineSliceEnabled, setNineSliceEnabled] = useState(false);
@@ -21,6 +24,8 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [sharingToDrive, setSharingToDrive] = useState(false);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
   useEffect(() => {
     // Same ignore-flag shape as useStyles.ts / the split page's mount effect:
@@ -134,6 +139,43 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     setNewState('');
   }
 
+  async function handleCopy(part: 'html' | 'css') {
+    if (!asset?.image_path) return;
+    setCopyStatus(null);
+    try {
+      // No ?styleId= — the pure stored file, same content the "Download
+      // HTML" button and the export route serve, never the preview-only
+      // theme-CSS-injected version.
+      const res = await fetch(`/api/components/${asset.image_path}`);
+      const document = await res.text();
+      const tokens = parseComponentHtml(document);
+      await navigator.clipboard.writeText(part === 'html' ? tokens.html : tokens.css);
+      setCopyStatus(`${part.toUpperCase()} copied.`);
+    } catch {
+      setCopyStatus('Could not copy — try Download instead.');
+    }
+  }
+
+  async function handleDelete() {
+    if (deleting || !asset) return;
+    if (!window.confirm('Delete this asset? This can\'t be undone from the UI.')) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/assets/${id}`, { method: 'DELETE' });
+      const body = await res.json();
+      if (!body.success) {
+        setError(body.error ?? 'Delete failed.');
+        setDeleting(false);
+        return;
+      }
+      router.push(`/dashboard/styles/${asset.style_id}`);
+    } catch {
+      setError('Could not reach the server.');
+      setDeleting(false);
+    }
+  }
+
   if (!asset) return <p className="page-subtitle">Loading…</p>;
 
   return (
@@ -166,12 +208,22 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       )}
 
       {asset.output_kind === 'component' && asset.image_path && (
-        <iframe
-          src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
-          title={`Component preview: ${asset.prompt}`}
-          sandbox=""
-          style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 24 }}
-        />
+        <>
+          <iframe
+            src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
+            title={`Component preview: ${asset.prompt}`}
+            sandbox=""
+            style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <a className="btn" href={`/api/assets/${id}/export?format=html`} download>
+              Download HTML
+            </a>
+            <button className="btn" onClick={() => handleCopy('html')}>Copy HTML</button>
+            <button className="btn" onClick={() => handleCopy('css')}>Copy CSS</button>
+          </div>
+          <p style={{ marginBottom: 24, fontSize: 13, color: 'var(--ink-dim)', minHeight: 18 }}>{copyStatus}</p>
+        </>
       )}
 
       {asset.output_kind !== 'theme' && asset.output_kind !== 'component' && asset.image_path && (
@@ -195,27 +247,29 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
         </>
       )}
 
-      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontWeight: 600 }}>
-          <input type="checkbox" checked={nineSliceEnabled} onChange={e => setNineSliceEnabled(e.target.checked)} />
-          9-slice margins
-        </label>
-        {nineSliceEnabled && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {(['top', 'right', 'bottom', 'left'] as const).map(side => (
-              <div className="field" key={side}>
-                <label htmlFor={side}>{side}</label>
-                <input
-                  id={side}
-                  type="number"
-                  value={margins[side]}
-                  onChange={e => setMargins({ ...margins, [side]: Number(e.target.value) })}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {asset.output_kind === 'image' && (
+        <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontWeight: 600 }}>
+            <input type="checkbox" checked={nineSliceEnabled} onChange={e => setNineSliceEnabled(e.target.checked)} />
+            9-slice margins
+          </label>
+          {nineSliceEnabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {(['top', 'right', 'bottom', 'left'] as const).map(side => (
+                <div className="field" key={side}>
+                  <label htmlFor={side}>{side}</label>
+                  <input
+                    id={side}
+                    type="number"
+                    value={margins[side]}
+                    onChange={e => setMargins({ ...margins, [side]: Number(e.target.value) })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
         <button className="btn" onClick={() => setShowDrivePicker(true)} disabled={sharingToDrive}>
@@ -225,6 +279,12 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
             closes (handleShareToDrive sets shareStatus and closes the modal in the same batched
             update, so a copy that only lived inside the modal would never actually be seen). */}
         {!showDrivePicker && shareStatus && <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
+      </div>
+
+      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+        <button className="btn" onClick={handleDelete} disabled={deleting}>
+          {deleting ? 'Deleting…' : 'Delete asset'}
+        </button>
       </div>
 
       {showDrivePicker && (
@@ -240,26 +300,34 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
 
-      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12 }}>States</div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-          {states.map(s => (
-            <span key={s} className="badge" style={{ cursor: 'pointer' }} onClick={() => setStates(states.filter(x => x !== s))}>
-              {s} x
-            </span>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input value={newState} onChange={e => setNewState(e.target.value)} placeholder="hover" onKeyDown={e => e.key === 'Enter' && addState()} />
-          <button className="btn" onClick={addState}>Add</button>
-        </div>
-      </div>
+      {asset.output_kind === 'image' && (
+        <>
+          <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+            <div style={{ fontWeight: 600, marginBottom: 12 }}>States</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              {states.map(s => (
+                <span key={s} className="badge" style={{ cursor: 'pointer' }} onClick={() => setStates(states.filter(x => x !== s))}>
+                  {s} x
+                </span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={newState} onChange={e => setNewState(e.target.value)} placeholder="hover" onKeyDown={e => e.key === 'Enter' && addState()} />
+              <button className="btn" onClick={addState}>Add</button>
+            </div>
+          </div>
 
-      {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
+          {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
 
-      <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-        {saving ? 'Saving…' : 'Save'}
-      </button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      )}
+
+      {asset.output_kind !== 'image' && error && (
+        <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>
+      )}
     </>
   );
 }

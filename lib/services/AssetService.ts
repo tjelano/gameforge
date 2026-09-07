@@ -65,6 +65,15 @@ class AssetServiceImpl {
     return rows.map(row => AssetSchema.parse(row));
   }
 
+  /** All active assets (any kind) for one style — powers the Style Bible Hub page. */
+  async getActiveAssetsForStyle(styleId: string): Promise<Asset[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare(
+      `SELECT * FROM assets WHERE style_id = ? AND is_deleted = 0 ORDER BY created_at DESC`
+    ).all(styleId);
+    return rows.map(row => AssetSchema.parse(row));
+  }
+
   /** Every asset row, active and soft-deleted alike. Used for Git export. */
   async getAll(): Promise<Asset[]> {
     const db = DatabaseConnection.getInstance();

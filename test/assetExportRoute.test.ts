@@ -40,10 +40,30 @@ async function makeThemeAsset(styleName: string, tokens: ThemeTokens = TOKENS): 
   return { assetId: asset.id };
 }
 
+async function makeComponentAsset(
+  styleName: string,
+  document: string,
+  assetType = 'button'
+): Promise<{ assetId: string }> {
+  const style = await styleService.create({ name: styleName, createdBy: 'user-1', parameters: '{}' });
+  const filename = `component-${style.id}.html`;
+  await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', filename), document);
+  const asset = await assetService.create({
+    styleId: style.id,
+    createdBy: 'user-1',
+    assetType,
+    prompt: 'x',
+    imagePath: filename,
+    outputKind: 'component',
+  });
+  return { assetId: asset.id };
+}
+
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-themeexport-'));
   await fsPromises.writeFile(path.join(tempRoot, 'package.json'), JSON.stringify({ name: 'x' }));
   await fsPromises.mkdir(path.join(tempRoot, 'storage', 'themes'), { recursive: true });
+  await fsPromises.mkdir(path.join(tempRoot, 'storage', 'components'), { recursive: true });
 
   const realMigrationsDir = path.resolve(__dirname, '..', 'lib', 'database', 'migrations');
   const tempMigrationsDir = path.join(tempRoot, 'lib', 'database', 'migrations');
@@ -154,5 +174,47 @@ describe('GET /api/assets/[id]/export', () => {
     const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="theme.css"');
+  });
+
+  it('exports a component asset as a standalone sanitized HTML document', async () => {
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><button class="btn">Go</button></body></html>';
+    const { assetId } = await makeComponentAsset('DaisyUI: Cyberpunk', document, 'primary button');
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('text/html');
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="daisyui-cyberpunk-primary-button.html"');
+    const body = await res.text();
+    expect(body).toContain('<button class="btn">Go</button>');
+    expect(body).toContain('.btn { color: red; }');
+  });
+
+  it('strips disallowed content from a component export, same as the serve route', async () => {
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><button class="btn" onclick="alert(1)">Go</button><script>alert(2)</script></body></html>';
+    const { assetId } = await makeComponentAsset('x', document);
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    const body = await res.text();
+    expect(body).not.toContain('onclick');
+    expect(body).not.toContain('<script>');
+  });
+
+  it('rejects a non-"html" format for a component asset', async () => {
+    const { assetId } = await makeComponentAsset('x', '<!DOCTYPE html><html><head><style>a{}</style></head><body>x</body></html>');
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=tailwind`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 500 when the component file is missing on disk', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await assetService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'button', prompt: 'x', imagePath: 'missing.html', outputKind: 'component',
+    });
+    const req = new NextRequest(`http://localhost/api/assets/${asset.id}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: asset.id }) });
+    expect(res.status).toBe(500);
   });
 });

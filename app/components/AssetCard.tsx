@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Asset } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
+import { DriveBrowser } from '@/app/dashboard/drive/DriveBrowser';
 
 export function AssetCard({ asset }: { asset: Asset }) {
   const states: string[] = (() => {
@@ -16,6 +17,9 @@ export function AssetCard({ asset }: { asset: Asset }) {
   })();
 
   const [contrast, setContrast] = useState<{ ratio: number; meetsAA: boolean } | null>(null);
+  const [sharingToDrive, setSharingToDrive] = useState(false);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (asset.output_kind !== 'theme') return;
@@ -34,8 +38,33 @@ export function AssetCard({ asset }: { asset: Asset }) {
     };
   }, [asset.id, asset.output_kind]);
 
+  async function handleShareToDrive(parentFolderId: string) {
+    if (sharingToDrive) return;
+    setSharingToDrive(true);
+    setShareStatus(null);
+    try {
+      const res = await fetch(`/api/assets/${asset.id}/share-to-drive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentFolderId }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        setShareStatus(`Shared to Drive as "${body.data.name}".`);
+        setShowDrivePicker(false);
+      } else {
+        setShareStatus(body.error ?? 'Could not share to Drive.');
+      }
+    } catch {
+      setShareStatus('Could not reach the server.');
+    } finally {
+      setSharingToDrive(false);
+    }
+  }
+
   return (
-    <Link href={`/dashboard/assets/${asset.id}`} className="card" style={{ padding: 0, overflow: 'hidden', display: 'block' }}>
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <Link href={`/dashboard/assets/${asset.id}`} style={{ display: 'block' }}>
       <div
         style={{
           aspectRatio: '1 / 1',
@@ -93,6 +122,33 @@ export function AssetCard({ asset }: { asset: Asset }) {
           )}
         </div>
       </div>
-    </Link>
+      </Link>
+      <div style={{ padding: '0 12px 12px' }}>
+        <button
+          className="btn"
+          style={{ width: '100%' }}
+          disabled={sharingToDrive}
+          onClick={() => setShowDrivePicker(true)}
+        >
+          {sharingToDrive ? 'Sharing…' : 'Share to Drive'}
+        </button>
+        {!showDrivePicker && shareStatus && (
+          <p style={{ marginTop: 8, fontSize: 12, color: 'var(--ink-dim)' }}>{shareStatus}</p>
+        )}
+      </div>
+
+      {showDrivePicker && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div className="card" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <strong>Choose a destination folder</strong>
+              <button className="btn" onClick={() => setShowDrivePicker(false)}>Cancel</button>
+            </div>
+            {shareStatus && <p style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
+            <DriveBrowser selectMode onSelectFolder={handleShareToDrive} selectBusy={sharingToDrive} selectLabel="Share here" />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
