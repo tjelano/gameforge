@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
@@ -56,6 +56,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
     return NextResponse.json({ success: true, data: originalTokens });
   } catch (error: any) {
+    if (error instanceof ZodError) {
+      return NextResponse.json({
+        success: false,
+        error: error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', '),
+      }, { status: 400 });
+    }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

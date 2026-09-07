@@ -111,4 +111,25 @@ describe('POST /api/jobs/[id]/component/reset', () => {
     const after = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
     expect(after).toEqual(before);
   });
+
+  it('returns a clean 400 (not 500) when originalComponent is shape-invalid', async () => {
+    const { jobId, filename } = await makeCompleteComponentJob();
+    // Only reachable via a corrupted DB row — normal PATCH/reset flow only
+    // ever writes originalComponent after Zod validation + sanitization.
+    DatabaseConnection.getInstance()
+      .prepare('UPDATE jobs SET options = ? WHERE id = ?')
+      .run(JSON.stringify({ originalComponent: { html: '<button>x</button>' } }), jobId);
+
+    const before = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
+
+    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(typeof body.error).toBe('string');
+    expect(body.error).not.toMatch(/\[|Zod/); // no raw issues-array dump
+
+    const after = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
+    expect(after).toEqual(before);
+  });
 });
