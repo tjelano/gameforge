@@ -48,6 +48,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }
     const filePath = path.join(getProjectRoot(), 'storage', 'components', job.result_path);
     try {
+      await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
       await fsPromises.writeFile(filePath, combineComponentHtml(originalTokens));
     } catch (e) {
       console.error(`Failed to write component file on reset (job ${id}):`, e);

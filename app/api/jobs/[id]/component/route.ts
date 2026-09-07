@@ -70,6 +70,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     try {
+      await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
       await fsPromises.writeFile(filePath, combineComponentHtml(tokens));
     } catch (e) {
       console.error(`Failed to write component file on edit (job ${id}):`, e);
