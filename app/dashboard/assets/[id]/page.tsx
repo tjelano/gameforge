@@ -3,6 +3,7 @@
 import { useEffect, useState, use as usePromise } from 'react';
 import type { Asset } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
+import { DriveBrowser } from '@/app/dashboard/drive/DriveBrowser';
 
 export default function AssetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
@@ -17,6 +18,9 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [editStatus, setEditStatus] = useState<string | null>(null);
   const [editFailed, setEditFailed] = useState(false);
   const [contrast, setContrast] = useState<{ ratio: number; meetsAA: boolean } | null>(null);
+  const [sharingToDrive, setSharingToDrive] = useState(false);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
 
   useEffect(() => {
     // Same ignore-flag shape as useStyles.ts / the split page's mount effect:
@@ -96,6 +100,30 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       setEditFailed(true);
     } finally {
       setEditing(false);
+    }
+  }
+
+  async function handleShareToDrive(parentFolderId: string) {
+    if (sharingToDrive) return;
+    setSharingToDrive(true);
+    setShareStatus(null);
+    try {
+      const res = await fetch(`/api/assets/${id}/share-to-drive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentFolderId }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        setShareStatus(`Shared to Drive as "${body.data.name}".`);
+        setShowDrivePicker(false);
+      } else {
+        setShareStatus(body.error ?? 'Could not share to Drive.');
+      }
+    } catch {
+      setShareStatus('Could not reach the server.');
+    } finally {
+      setSharingToDrive(false);
     }
   }
 
@@ -188,6 +216,29 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         )}
       </div>
+
+      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+        <button className="btn" onClick={() => setShowDrivePicker(true)} disabled={sharingToDrive}>
+          {sharingToDrive ? 'Sharing…' : 'Share to Drive'}
+        </button>
+        {/* Renders here too so the success confirmation is still visible after the modal below
+            closes (handleShareToDrive sets shareStatus and closes the modal in the same batched
+            update, so a copy that only lived inside the modal would never actually be seen). */}
+        {!showDrivePicker && shareStatus && <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
+      </div>
+
+      {showDrivePicker && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div className="card" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <strong>Choose a destination folder</strong>
+              <button className="btn" onClick={() => setShowDrivePicker(false)}>Cancel</button>
+            </div>
+            {shareStatus && <p style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
+            <DriveBrowser selectMode onSelectFolder={handleShareToDrive} selectBusy={sharingToDrive} selectLabel="Share here" />
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 12 }}>States</div>

@@ -45,6 +45,26 @@ Instead of the official Anthropic API, theme generation can also run through che
 unset keeps the `ANTHROPIC_API_KEY`-or-mock behavior above unchanged. An explicitly-selected provider whose
 key is missing fails with a clear error rather than silently falling back to the mock.
 
+### Google Drive setup
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env.local` to enable the Drive file manager and
+"Share to Drive" (browse, upload, and share assets to Drive without leaving GameForge). `APP_BASE_URL`
+controls the OAuth redirect URI and defaults to `http://localhost:3000` if unset.
+
+To get a Client ID/Secret:
+
+1. Create a project (or use an existing one) in the [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable the **Google Drive API** for that project.
+3. Create an **OAuth 2.0 Client ID** (application type: **Web application**).
+4. Add `http://localhost:3000/api/drive/callback` as an **Authorized redirect URI** (or
+   `${APP_BASE_URL}/api/drive/callback` if you've set a non-default `APP_BASE_URL`).
+5. Copy the generated Client ID and Client Secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in
+   `.env.local`.
+6. In GameForge, go to **Settings > Google Drive** and click **Connect**.
+
+(`google-auth-library` is exact-pinned in `package.json` to match `@googleapis/drive`'s own internal
+dependency version — see git history for why.)
+
 **If you're running the worker separately** (`npm run dev:worker`, not through `next dev`), env vars only
 reach it because that script explicitly passes `--env-file-if-exists=.env.local` — a bare `tsx worker.ts`
 does not load `.env.local` on its own the way `next dev` does. If you ever invoke the worker a different

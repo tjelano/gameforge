@@ -13,9 +13,11 @@ const LINKS = [
   { href: '/dashboard/assets', label: 'Assets' },
   { href: '/dashboard/styles', label: 'Style Bibles' },
   { href: '/dashboard/export', label: 'Export' },
+  { href: '/dashboard/drive', label: 'Drive' },
   { href: '/dashboard/settings/storage', label: 'Storage' },
   { href: '/dashboard/settings/aseprite', label: 'Aseprite' },
   { href: '/dashboard/settings/seed-themes', label: 'Seed Themes' },
+  { href: '/dashboard/settings/google-drive', label: 'Google Drive' },
 ];
 
 export function NavRail() {
