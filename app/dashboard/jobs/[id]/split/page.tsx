@@ -3,7 +3,6 @@
 import { useEffect, useState, use as usePromise } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
-import { getClientId } from '@/lib/utils/clientId';
 import type { PlacedPiece } from '@/lib/utils/pieceShapes';
 import type { Job } from '@/lib/database/schema';
 
@@ -128,7 +127,6 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             styleId: job.style_id,
-            createdBy: getClientId(),
             jobId: job.id,
             label: box.label.trim(),
             imageDataUrl: dataUrl,

@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
 import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
-import { getClientId } from '@/lib/utils/clientId';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 import {
   PIECE_PRESETS,
@@ -56,7 +55,6 @@ export default function UiSheetsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           styleId: activeStyleId,
-          createdBy: getClientId(),
           assetType: 'ui_sheet',
           prompt: description.trim(),
           options: {
