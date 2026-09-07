@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { drive } from '@googleapis/drive';
-import type { Readable } from 'stream';
+import { Readable } from 'stream';
 import { settingsService } from '@/lib/services/SettingsService';
 import { GOOGLE_DRIVE_REFRESH_TOKEN_SETTING_KEY } from '@/lib/config';
 
@@ -169,6 +169,30 @@ class DriveServiceImpl {
     } catch (e) {
       console.error(`Failed to create Drive folder ${name}:`, e);
       throw e;
+    }
+  }
+
+  async getThumbnail(fileId: string): Promise<{ stream: Readable; mimeType: string } | null> {
+    try {
+      const auth = await this.getAuthedClient();
+      const client = drive({ version: 'v3', auth });
+      const meta = await client.files.get({ fileId, fields: 'thumbnailLink' });
+      const thumbnailLink = meta.data.thumbnailLink;
+      if (!thumbnailLink) return null;
+
+      const accessToken = (await auth.getAccessToken()).token;
+      const res = await fetch(thumbnailLink, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok || !res.body) return null;
+
+      return {
+        stream: Readable.fromWeb(res.body as any),
+        mimeType: res.headers.get('content-type') ?? 'application/octet-stream',
+      };
+    } catch (e) {
+      console.error(`Failed to fetch thumbnail for Drive file ${fileId}:`, e);
+      return null;
     }
   }
 }
