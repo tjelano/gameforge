@@ -116,6 +116,28 @@ describe('GET /api/pages/[id]/render', () => {
     expect(body).not.toContain('alert(document.cookie)');
   });
 
+  it('skips a component whose CSS fails sanitization, still renders the rest of the page', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const hostileAsset = await makeComponentAsset(style.id, 'hostile-css.html',
+      '<!DOCTYPE html><html><head><style>.a { background: url(https://evil.example/x); }</style></head><body><p>Hostile</p></body></html>');
+    const validAsset = await makeComponentAsset(style.id, 'valid.html',
+      '<!DOCTYPE html><html><head><style>.a {}</style></head><body><p>Still Here</p></body></html>');
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([hostileAsset.id, validAsset.id]) });
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('Still Here');
+      expect(body).not.toContain('Hostile');
+      expect(body).not.toContain('evil.example');
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
   it('with ?download=1, sets Content-Disposition to attachment with a slugified filename', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'My Landing Page!', createdBy: 'user-1' });
