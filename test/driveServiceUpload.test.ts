@@ -43,6 +43,7 @@ describe('driveService.uploadFile', () => {
     expect(mockFilesCreate).toHaveBeenCalledWith(expect.objectContaining({
       requestBody: { name: 'sprite.png', parents: ['folder123'] },
       media: { mimeType: 'image/png', body: stream },
-    }), expect.anything());
+      fields: expect.any(String),
+    }));
   });
 });

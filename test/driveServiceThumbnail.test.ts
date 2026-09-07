@@ -14,6 +14,7 @@ vi.mock('@googleapis/drive', () => ({
 
 vi.mock('google-auth-library', () => ({
   OAuth2Client: class MockOAuth2Client {
+    credentials: { refresh_token: string };
     constructor() {
       this.credentials = { refresh_token: 'fake-refresh-token' };
     }

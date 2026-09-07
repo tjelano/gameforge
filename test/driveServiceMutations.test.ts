@@ -47,7 +47,8 @@ describe('driveService mutations', () => {
     expect(mockFilesUpdate).toHaveBeenCalledWith(expect.objectContaining({
       fileId: 'file1',
       requestBody: { name: 'new-name.png' },
-    }), expect.anything());
+      fields: expect.any(String),
+    }));
   });
 
   it('moveFile adds the new parent and removes the old one in one call', async () => {
@@ -59,7 +60,8 @@ describe('driveService mutations', () => {
       fileId: 'file1',
       addParents: 'newFolder',
       removeParents: 'oldFolder',
-    }), expect.anything());
+      fields: expect.any(String),
+    }));
   });
 
   it('createFolder creates a folder-mimeType file', async () => {
@@ -70,6 +72,7 @@ describe('driveService mutations', () => {
     expect(result.name).toBe('Sprites');
     expect(mockFilesCreate).toHaveBeenCalledWith(expect.objectContaining({
       requestBody: { name: 'Sprites', mimeType: 'application/vnd.google-apps.folder', parents: ['root'] },
-    }), expect.anything());
+      fields: expect.any(String),
+    }));
   });
 });

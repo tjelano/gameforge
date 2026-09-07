@@ -103,7 +103,6 @@ class DriveServiceImpl {
       const res = await client.files.create({
         requestBody: { name: params.name, parents: [params.parentFolderId] },
         media: { mimeType: params.mimeType, body: params.stream },
-      }, {
         fields: FILE_FIELDS,
       });
       return res.data as DriveFile;
@@ -131,10 +130,11 @@ class DriveServiceImpl {
     try {
       const auth = await this.getAuthedClient();
       const client = drive({ version: 'v3', auth });
-      const res = await client.files.update(
-        { fileId, requestBody: { name: newName } },
-        { fields: FILE_FIELDS }
-      );
+      const res = await client.files.update({
+        fileId,
+        requestBody: { name: newName },
+        fields: FILE_FIELDS,
+      });
       return res.data as DriveFile;
     } catch (e) {
       console.error(`Failed to rename Drive file ${fileId}:`, e);
@@ -146,10 +146,13 @@ class DriveServiceImpl {
     try {
       const auth = await this.getAuthedClient();
       const client = drive({ version: 'v3', auth });
-      const res = await client.files.update(
-        { fileId, addParents: newParentId, removeParents: oldParentId, requestBody: {} },
-        { fields: FILE_FIELDS }
-      );
+      const res = await client.files.update({
+        fileId,
+        addParents: newParentId,
+        removeParents: oldParentId,
+        requestBody: {},
+        fields: FILE_FIELDS,
+      });
       return res.data as DriveFile;
     } catch (e) {
       console.error(`Failed to move Drive file ${fileId}:`, e);
@@ -161,10 +164,10 @@ class DriveServiceImpl {
     try {
       const auth = await this.getAuthedClient();
       const client = drive({ version: 'v3', auth });
-      const res = await client.files.create(
-        { requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] } },
-        { fields: FILE_FIELDS }
-      );
+      const res = await client.files.create({
+        requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentFolderId] },
+        fields: FILE_FIELDS,
+      });
       return res.data as DriveFile;
     } catch (e) {
       console.error(`Failed to create Drive folder ${name}:`, e);
