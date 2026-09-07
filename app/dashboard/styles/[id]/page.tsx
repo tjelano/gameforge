@@ -2,10 +2,11 @@
 
 import { useEffect, useState, use as usePromise } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Asset, Style, OutputKind } from '@/lib/database/schema';
+import type { Asset, Style, OutputKind, Page } from '@/lib/database/schema';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { AssetCard } from '@/app/components/AssetCard';
 import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
+import { PageEditor } from '@/app/components/PageEditor';
 
 const SECTIONS: { kind: OutputKind; label: string }[] = [
   { kind: 'theme', label: 'Themes' },
@@ -22,6 +23,12 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [pages, setPages] = useState<Page[]>([]);
+  const [creatingPage, setCreatingPage] = useState(false);
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [deletingPageId, setDeletingPageId] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -35,18 +42,21 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     let ignore = false;
     (async () => {
       try {
-        const [styleRes, assetsRes] = await Promise.all([
+        const [styleRes, assetsRes, pagesRes] = await Promise.all([
           fetch(`/api/styles/${id}`),
           fetch(`/api/styles/${id}/assets`),
+          fetch(`/api/styles/${id}/pages`),
         ]);
         const styleBody = await styleRes.json();
         const assetsBody = await assetsRes.json();
+        const pagesBody = await pagesRes.json();
         if (ignore) return;
         if (styleBody.success) {
           setStyle(styleBody.data);
           setNameDraft(styleBody.data.name);
         }
         if (assetsBody.success) setAssets(assetsBody.data);
+        if (pagesBody.success) setPages(pagesBody.data);
       } catch {
         // Falls through to "Style Bible not found." below since style stays null.
       } finally {
@@ -101,6 +111,80 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     } catch {
       setError('Could not reach the server.');
       setDeleting(false);
+    }
+  }
+
+  async function refreshPages() {
+    const res = await fetch(`/api/styles/${id}/pages`);
+    const body = await res.json();
+    if (body.success) setPages(body.data);
+  }
+
+  async function handleCreatePage(value: { name: string; componentAssetIds: string[] }) {
+    setPageError(null);
+    try {
+      const res = await fetch(`/api/styles/${id}/pages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: value.name }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setPageError(body.error ?? 'Could not create page.');
+        return;
+      }
+      // Component order is set in a second call, since POST only accepts a name.
+      if (value.componentAssetIds.length > 0) {
+        await fetch(`/api/pages/${body.data.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ componentAssetIds: value.componentAssetIds }),
+        });
+      }
+      setCreatingPage(false);
+      await refreshPages();
+    } catch {
+      setPageError('Could not reach the server.');
+    }
+  }
+
+  async function handleUpdatePage(pageId: string, value: { name: string; componentAssetIds: string[] }) {
+    setPageError(null);
+    try {
+      const res = await fetch(`/api/pages/${pageId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: value.name, componentAssetIds: value.componentAssetIds }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setPageError(body.error ?? 'Could not save page.');
+        return;
+      }
+      setEditingPageId(null);
+      await refreshPages();
+    } catch {
+      setPageError('Could not reach the server.');
+    }
+  }
+
+  async function handleDeletePage(pageId: string) {
+    if (deletingPageId) return;
+    if (!window.confirm('Delete this page? This can\'t be undone from the UI.')) return;
+    setPageError(null);
+    setDeletingPageId(pageId);
+    try {
+      const res = await fetch(`/api/pages/${pageId}`, { method: 'DELETE' });
+      const body = await res.json();
+      if (!body.success) {
+        setPageError(body.error ?? 'Could not delete page.');
+        return;
+      }
+      await refreshPages();
+    } catch {
+      setPageError('Could not reach the server.');
+    } finally {
+      setDeletingPageId(null);
     }
   }
 
@@ -201,6 +285,69 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
           </div>
         );
       })}
+
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Pages</h2>
+        {pageError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{pageError}</p>}
+
+        {!creatingPage ? (
+          <button className="btn" style={{ marginBottom: 16 }} onClick={() => setCreatingPage(true)}>
+            New Page
+          </button>
+        ) : (
+          <div style={{ marginBottom: 16 }}>
+            <PageEditor
+              availableComponents={assets.filter(a => a.output_kind === 'component')}
+              onSubmit={handleCreatePage}
+              submitLabel="Create Page"
+            />
+            <button className="btn" style={{ marginTop: 8 }} onClick={() => setCreatingPage(false)}>Cancel</button>
+          </div>
+        )}
+
+        {pages.length === 0 ? (
+          <div className="empty-state">None yet.</div>
+        ) : (
+          <div className="grid">
+            {pages.map(p => {
+              if (editingPageId === p.id) {
+                return (
+                  <div key={p.id} style={{ gridColumn: '1 / -1' }}>
+                    <PageEditor
+                      availableComponents={assets.filter(a => a.output_kind === 'component')}
+                      initialName={p.name}
+                      initialComponentAssetIds={JSON.parse(p.component_asset_ids)}
+                      onSubmit={value => handleUpdatePage(p.id, value)}
+                      submitLabel="Save Changes"
+                      downloadHref={`/api/pages/${p.id}/render?download=1`}
+                    />
+                    <button className="btn" style={{ marginTop: 8 }} onClick={() => setEditingPageId(null)}>Cancel</button>
+                  </div>
+                );
+              }
+              return (
+                <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <iframe
+                    src={`/api/pages/${p.id}/render`}
+                    title={`Page preview: ${p.name}`}
+                    sandbox=""
+                    style={{ width: '100%', height: 240, border: 'none', display: 'block' }}
+                  />
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 8 }}>{p.name}</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn" onClick={() => setEditingPageId(p.id)}>Edit</button>
+                      <button className="btn" onClick={() => handleDeletePage(p.id)} disabled={deletingPageId === p.id}>
+                        {deletingPageId === p.id ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
         <button className="btn" onClick={() => setShowSavePreset(true)}>Save as preset</button>
