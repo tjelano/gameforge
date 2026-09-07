@@ -6,9 +6,10 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { assetService } from '@/lib/services/AssetService';
 import { styleService } from '@/lib/services/StyleService';
+import { userService } from '@/lib/services/UserService';
 import { storageDirFor } from '@/lib/services/shared/assetSafety';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
-import { StyleSchema, AssetSchema } from '@/lib/database/schema';
+import { StyleSchema, AssetSchema, UserSchema } from '@/lib/database/schema';
 
 export interface SyncResult {
   success: boolean;
@@ -19,7 +20,7 @@ export interface SyncResult {
 // Line-anchored: a real git conflict marker owns its whole line.
 const CONFLICT_MARKER_REGEX = /^<<<<<<<|^=======$|^>>>>>>>/m;
 
-const DATA_DIRS = ['data/styles', 'data/assets'] as const;
+const DATA_DIRS = ['data/styles', 'data/assets', 'data/users'] as const;
 
 class GitServiceImpl {
   private git() {
@@ -40,9 +41,11 @@ class GitServiceImpl {
 
     const styles = await styleService.getAll();
     const assets = await assetService.getAll();
+    const users = await userService.getAll();
 
     const stylesDir = path.join(getProjectRoot(), 'data', 'styles');
     const assetsDir = path.join(getProjectRoot(), 'data', 'assets');
+    const usersDir = path.join(getProjectRoot(), 'data', 'users');
 
     for (const style of styles) {
       const filePath = path.join(stylesDir, `style-${style.id}.json`);
@@ -53,10 +56,32 @@ class GitServiceImpl {
       const filePath = path.join(assetsDir, `asset-${asset.id}.json`);
       await fsPromises.writeFile(filePath, JSON.stringify(asset, null, 2), 'utf-8');
     }
+
+    for (const user of users) {
+      const filePath = path.join(usersDir, `user-${user.id}.json`);
+      await fsPromises.writeFile(filePath, JSON.stringify(user, null, 2), 'utf-8');
+    }
   }
 
   async importFromJson(): Promise<void> {
     const db = DatabaseConnection.getInstance();
+
+    const usersDir = path.join(getProjectRoot(), 'data', 'users');
+    const userFiles = await this.readJsonFiles(usersDir);
+    for (const { filePath, content } of userFiles) {
+      if (CONFLICT_MARKER_REGEX.test(content)) {
+        throw new Error(`Conflict markers found in ${filePath}. Please resolve manually.`);
+      }
+      const data = UserSchema.parse(JSON.parse(content));
+      db.prepare(`
+        INSERT INTO users (id, name, is_admin, created_at)
+        VALUES (@id, @name, @is_admin, @created_at)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          is_admin = excluded.is_admin,
+          created_at = excluded.created_at
+      `).run(data);
+    }
 
     const stylesDir = path.join(getProjectRoot(), 'data', 'styles');
     const styleFiles = await this.readJsonFiles(stylesDir);

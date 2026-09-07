@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
-import { getClientId } from '@/lib/utils/clientId';
 
 export default function StylesPage() {
   const { styles, loading, refresh } = useStyles();
@@ -18,7 +17,7 @@ export default function StylesPage() {
       await fetch('/api/styles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), createdBy: getClientId() }),
+        body: JSON.stringify({ name: name.trim() }),
       });
       setName('');
       await refresh();
@@ -30,11 +29,7 @@ export default function StylesPage() {
   async function handleFork(styleId: string) {
     setForkingId(styleId);
     try {
-      await fetch(`/api/styles/${styleId}/fork`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newOwnerId: getClientId() }),
-      });
+      await fetch(`/api/styles/${styleId}/fork`, { method: 'POST' });
       await refresh();
     } finally {
       setForkingId(null);

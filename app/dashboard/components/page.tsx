@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { useJobStore } from '@/lib/store/useJobStore';
-import { getClientId } from '@/lib/utils/clientId';
 import { JobCard } from '@/app/components/JobCard';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 
@@ -36,7 +35,6 @@ export default function ComponentsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           styleId: activeStyleId,
-          createdBy: getClientId(),
           assetType: 'component',
           prompt: `${componentType}: ${prompt.trim()}`,
           outputKind: 'component',

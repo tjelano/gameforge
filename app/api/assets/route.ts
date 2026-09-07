@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
 import { assetService } from '@/lib/services/AssetService';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,6 @@ export async function GET(req: NextRequest) {
 
 const CreateAssetSchema = z.object({
   styleId: z.string().uuid(),
-  createdBy: z.string().min(1),
   assetType: z.string().min(1),
   prompt: z.string().min(1),
   imagePath: z.string().nullable().optional(),
@@ -40,12 +40,17 @@ const CreateAssetSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const body = await req.json();
     const input = CreateAssetSchema.parse(body);
 
     const asset = await assetService.create({
       styleId: input.styleId,
-      createdBy: input.createdBy,
+      createdBy: user.id,
       assetType: input.assetType,
       prompt: input.prompt,
       imagePath: input.imagePath ?? null,

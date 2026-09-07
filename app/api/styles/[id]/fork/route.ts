@@ -1,29 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z, ZodError } from 'zod';
 import { styleService } from '@/lib/services/StyleService';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
-const ForkSchema = z.object({ newOwnerId: z.string().min(1) });
-
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const { newOwnerId } = ForkSchema.parse(await req.json());
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
 
-    const result = await styleService.fork(id, newOwnerId);
+    const { id } = await params;
+    const result = await styleService.fork(id, user.id);
     if ('error' in result) {
       return NextResponse.json({ success: false, error: 'Style not found' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, data: result });
   } catch (error: any) {
-    if (error instanceof ZodError) {
-      return NextResponse.json({
-        success: false,
-        error: error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', '),
-      }, { status: 400 });
-    }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

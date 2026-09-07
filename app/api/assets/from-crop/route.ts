@@ -5,12 +5,12 @@ import path from 'path';
 import crypto from 'crypto';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { assetService } from '@/lib/services/AssetService';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
 const FromCropSchema = z.object({
   styleId: z.string().uuid(),
-  createdBy: z.string().min(1),
   jobId: z.string().uuid(),
   label: z.string().min(1),
   imageDataUrl: z.string().startsWith('data:image/'),
@@ -25,6 +25,11 @@ function decodeDataUrl(dataUrl: string): { bytes: Buffer; extension: string } {
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const input = FromCropSchema.parse(await req.json());
     const { bytes, extension } = decodeDataUrl(input.imageDataUrl);
 
@@ -40,7 +45,7 @@ export async function POST(req: NextRequest) {
 
     const asset = await assetService.create({
       styleId: input.styleId,
-      createdBy: input.createdBy,
+      createdBy: user.id,
       assetType: 'ui_element',
       prompt: input.label,
       imagePath: filename,
