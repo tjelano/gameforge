@@ -27,6 +27,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (input.outputKind === 'component' && input.candidateCount !== undefined && input.candidateCount !== 1) {
+      return NextResponse.json({ success: false, error: 'Component jobs do not support multi-candidate generation.' }, { status: 400 });
+    }
+
     const count = input.candidateCount ?? 1;
     if (count === 1) {
       const job = await jobService.create(input);
