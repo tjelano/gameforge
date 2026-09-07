@@ -20,6 +20,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard/settings/google-drive', req.url));
   } catch (e: any) {
     console.error('Failed to exchange Google Drive OAuth code:', e);
-    return NextResponse.redirect(new URL(`/dashboard/settings/google-drive?error=${encodeURIComponent(e.message)}`, req.url));
+    return NextResponse.redirect(new URL('/dashboard/settings/google-drive?error=exchange_failed', req.url));
   }
 }
