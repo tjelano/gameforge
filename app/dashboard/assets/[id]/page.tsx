@@ -137,7 +137,16 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
         </>
       )}
 
-      {asset.output_kind !== 'theme' && asset.image_path && (
+      {asset.output_kind === 'component' && asset.image_path && (
+        <iframe
+          src={`/api/components/${asset.image_path}`}
+          title={`Component preview: ${asset.prompt}`}
+          sandbox=""
+          style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 24 }}
+        />
+      )}
+
+      {asset.output_kind !== 'theme' && asset.output_kind !== 'component' && asset.image_path && (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img

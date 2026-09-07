@@ -89,4 +89,32 @@ describe('POST /api/generate with candidateCount', () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
   });
+
+  it('rejects a component request with candidateCount 3 (components are single-candidate only)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const req = new NextRequest('http://localhost/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component', candidateCount: 3,
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a component request with candidateCount 1 (or omitted)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const req = new NextRequest('http://localhost/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component', candidateCount: 1,
+      }),
+    });
+    const res = await POST(req);
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+  });
 });

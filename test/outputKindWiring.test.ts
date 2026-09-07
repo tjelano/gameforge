@@ -7,9 +7,20 @@ import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { jobService } from '@/lib/services/JobService';
 import { assetService } from '@/lib/services/AssetService';
+import { OutputKindSchema } from '@/lib/database/schema';
 
 let tempRoot: string;
 const STYLE_ID = '33333333-3333-3333-3333-333333333333';
+
+describe('OutputKindSchema', () => {
+  it('accepts "component"', () => {
+    expect(OutputKindSchema.parse('component')).toBe('component');
+  });
+
+  it('rejects an unrecognized output_kind value', () => {
+    expect(() => OutputKindSchema.parse('bogus')).toThrow();
+  });
+});
 
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-outputkind-'));

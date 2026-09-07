@@ -12,7 +12,7 @@ const GenerateSchema = z.object({
   assetType: z.string().min(1),
   prompt: z.string().min(1).max(2000),
   options: z.record(z.string(), z.unknown()).optional(),
-  outputKind: z.enum(['image', 'theme']).optional(),
+  outputKind: z.enum(['image', 'theme', 'component']).optional(),
   candidateCount: z.union([z.literal(1), z.literal(3), z.literal(5)]).optional(),
 });
 
@@ -25,6 +25,10 @@ export async function POST(req: NextRequest) {
       if (Array.isArray(pieces) && pieces.length > 0) {
         return NextResponse.json({ success: false, error: 'Theme jobs cannot include UI-sheet options.' }, { status: 400 });
       }
+    }
+
+    if (input.outputKind === 'component' && input.candidateCount !== undefined && input.candidateCount !== 1) {
+      return NextResponse.json({ success: false, error: 'Component jobs do not support multi-candidate generation.' }, { status: 400 });
     }
 
     const count = input.candidateCount ?? 1;

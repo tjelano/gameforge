@@ -5,6 +5,8 @@ import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { assetService } from '@/lib/services/AssetService';
+import { styleService } from '@/lib/services/StyleService';
+import { jobService } from '@/lib/services/JobService';
 
 let tempRoot: string;
 const STYLE_ID = '99999999-9999-9999-9999-999999999999';
@@ -70,5 +72,25 @@ describe('AssetService.cleanupOrphanedThemes', () => {
 
     const removed = await assetService.cleanupOrphanedThemes();
     expect(removed).toBe(0);
+  });
+});
+
+describe('cleanupOrphanedComponents', () => {
+  it('removes an orphaned component file but keeps one referenced by an active job', async () => {
+    const componentsDir = path.join(tempRoot, 'storage', 'components');
+    await fsPromises.mkdir(componentsDir, { recursive: true });
+    await fsPromises.writeFile(path.join(componentsDir, 'orphan.html'), '<html></html>');
+    await fsPromises.writeFile(path.join(componentsDir, 'kept.html'), '<html></html>');
+
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component' });
+    const db = DatabaseConnection.getInstance();
+    db.prepare(`UPDATE jobs SET status = 'complete', result_path = 'kept.html' WHERE style_id = ?`).run(style.id);
+
+    const removed = await assetService.cleanupOrphanedComponents();
+
+    expect(removed).toBe(1);
+    await expect(fsPromises.access(path.join(componentsDir, 'orphan.html'))).rejects.toThrow();
+    await expect(fsPromises.access(path.join(componentsDir, 'kept.html'))).resolves.toBeUndefined();
   });
 });

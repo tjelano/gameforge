@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
-import { deleteFileIfSafe, deleteFileIfSafeSync } from '@/lib/services/shared/assetSafety';
+import { deleteFileIfSafe, deleteFileIfSafeSync, storageDirFor } from '@/lib/services/shared/assetSafety';
 
 let tempRoot: string;
 
@@ -59,5 +59,16 @@ describe('deleteFileIfSafeSync with outputKind', () => {
     await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', 'orphan-sync.css'), ':root {}');
     deleteFileIfSafeSync('orphan-sync.css', 'theme');
     await expect(fsPromises.access(path.join(tempRoot, 'storage', 'themes', 'orphan-sync.css'))).rejects.toThrow();
+  });
+});
+
+describe('storageDirFor mapping', () => {
+  it('storageDirFor resolves "component" to "components"', () => {
+    expect(storageDirFor('component')).toBe('components');
+  });
+
+  it('storageDirFor still resolves "image" and "theme" correctly', () => {
+    expect(storageDirFor('image')).toBe('images');
+    expect(storageDirFor('theme')).toBe('themes');
   });
 });

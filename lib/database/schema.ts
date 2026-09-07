@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const OutputKindSchema = z.enum(['image', 'theme']);
+export const OutputKindSchema = z.enum(['image', 'theme', 'component']);
 export type OutputKind = z.infer<typeof OutputKindSchema>;
 
 export const NineSliceMarginsSchema = z.object({

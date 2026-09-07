@@ -5,6 +5,7 @@ import { DatabaseConnection } from '@/lib/database';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getImageGenerator } from '@/lib/services/ImageGenerator';
 import { getThemeGenerator } from '@/lib/services/ThemeGenerator';
+import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 
@@ -73,11 +74,27 @@ export async function processJob(job: any): Promise<void> {
   }
 
   try {
-    const result = job.output_kind === 'theme'
-      ? await getThemeGenerator().generate(job.prompt, job.style_id)
-      : sheetOptions
-        ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
-        : await getImageGenerator().generate(job.prompt, job.style_id);
+    let result: { path: string };
+    switch (job.output_kind) {
+      case 'theme':
+        result = await getThemeGenerator().generate(job.prompt, job.style_id);
+        break;
+      case 'component':
+        result = await getComponentGenerator().generate(job.prompt, job.style_id);
+        break;
+      case 'image':
+        result = sheetOptions
+          ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
+          : await getImageGenerator().generate(job.prompt, job.style_id);
+        break;
+      default:
+        // job.output_kind comes from a raw SQL row, not a Zod-validated
+        // object — an unrecognized value must fail loudly, not silently
+        // fall through to the image generator. Throwing here routes
+        // through the existing catch below, which already marks the job
+        // failed and logs — no separate failure-handling path needed.
+        throw new Error(`Job ${job.id} has unrecognized output_kind: ${job.output_kind}`);
+    }
 
     db.prepare(`UPDATE jobs SET status = 'complete', result_path = ?, updated_at = ? WHERE id = ?`)
       .run(result.path, Date.now(), job.id);
