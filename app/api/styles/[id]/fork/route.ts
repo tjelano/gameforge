@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ZodError } from 'zod';
 import { styleService } from '@/lib/services/StyleService';
 import { getCurrentUser } from '@/lib/utils/session';
 
@@ -20,12 +19,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return NextResponse.json({ success: true, data: result });
   } catch (error: any) {
-    if (error instanceof ZodError) {
-      return NextResponse.json({
-        success: false,
-        error: error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', '),
-      }, { status: 400 });
-    }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
