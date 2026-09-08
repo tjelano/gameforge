@@ -99,4 +99,25 @@ describe('POST /api/styles/import-tokens', () => {
     const res = await POST(req({ name: 'Broken', tokensJson: 'not valid json {' }, cookieHeader));
     expect(res.status).toBe(400);
   });
+
+  it('returns a 400 (not a 500) for a pathologically deeply-nested tokensJson, and creates nothing', async () => {
+    const { cookieHeader } = await seedSession();
+    // Built as a raw string via repetition, not JSON.stringify(deeplyNestedObject)
+    // - see the matching test in w3cImporter.test.ts for why.
+    const deepJson = '{"nested":'.repeat(5000)
+      + '{"$type":"color","$value":{"colorSpace":"srgb","components":[1,0,0],"alpha":1}}'
+      + '}'.repeat(5000);
+    const res = await POST(req({ name: 'TooDeep', tokensJson: deepJson }, cookieHeader));
+    expect(res.status).toBe(400);
+
+    const styles = await styleService.getAll();
+    expect(styles.filter(s => s.name === 'TooDeep')).toHaveLength(0);
+  });
+
+  it('rejects a tokensJson payload over the size ceiling with a 400', async () => {
+    const { cookieHeader } = await seedSession();
+    const huge = 'a'.repeat(2_000_001);
+    const res = await POST(req({ name: 'Huge', tokensJson: huge }, cookieHeader));
+    expect(res.status).toBe(400);
+  });
 });

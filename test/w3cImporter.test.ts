@@ -139,4 +139,72 @@ describe('parseW3cTokensJson', () => {
     expect(result.tokens.fontBody).toBe('Helvetica, Arial, sans-serif');
     expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
   });
+
+  it('rejects a font value crafted to close the CSS custom-property declaration early, instead of writing it to disk', () => {
+    // tokensToCss() interpolates these strings directly into a real CSS
+    // file; a naive converter with no schema check would let this value
+    // close :root{} early and inject an arbitrary rule. ThemeTokensSchema's
+    // CSS_FONT_RE only allows [a-zA-Z0-9\s,'"-], so this must be rejected
+    // as a whole import, not silently written.
+    const malicious = {
+      color: {
+        background: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 1, 1], alpha: 1 } },
+        foreground: { $type: 'color', $value: { colorSpace: 'srgb', components: [0, 0, 0], alpha: 1 } },
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 1 } },
+        border: { $type: 'color', $value: { colorSpace: 'srgb', components: [0.8, 0.8, 0.8], alpha: 1 } },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: "Arial'; } body { background: url(https://evil.example/steal) } .x { color: red" },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(malicious));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toMatch(/valid CSS|fontHeading/);
+  });
+
+  it('rejects an out-of-range alpha value rather than emitting invalid CSS', () => {
+    const doc = {
+      color: {
+        background: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 1, 1], alpha: 1 } },
+        foreground: { $type: 'color', $value: { colorSpace: 'srgb', components: [0, 0, 0], alpha: 1 } },
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 5 } }, // out of the valid 0-1 range
+        border: { $type: 'color', $value: { colorSpace: 'srgb', components: [0.8, 0.8, 0.8], alpha: 1 } },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(false);
+  });
+
+  it('does not crash on a pathologically deeply-nested (but validly-parsed) JSON document', () => {
+    // A ~5,000-level-deep object crashes a naive unbounded-recursion walker
+    // with a real RangeError (verified directly) - this must resolve to a
+    // clean {success:false}, not throw. Built as a raw string via
+    // repetition, not JSON.stringify(deeplyNestedObject) - V8's own
+    // JSON.stringify also recurses per object-graph level and hits the
+    // exact same stack limit on the *test's* construction step, which
+    // would make this test crash regardless of whether collectTokens's
+    // own depth guard works. JSON.parse, by contrast, really does handle
+    // deep nesting fine (confirmed separately), so parsing this string is
+    // a clean test of collectTokens alone.
+    const deepJson = '{"nested":'.repeat(5000)
+      + '{"$type":"color","$value":{"colorSpace":"srgb","components":[1,0,0],"alpha":1}}'
+      + '}'.repeat(5000);
+    expect(() => parseW3cTokensJson(deepJson)).not.toThrow();
+    const result = parseW3cTokensJson(deepJson);
+    expect(result.success).toBe(false);
+  });
 });

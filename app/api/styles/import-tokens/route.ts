@@ -12,9 +12,16 @@ import { parseW3cTokensJson } from '@/lib/services/themeImport/w3cImporter';
 
 export const dynamic = 'force-dynamic';
 
+// Real W3C tokens files (even a large design system with hundreds of
+// tokens) are a few hundred KB at most - 2,000,000 chars is generous
+// headroom while still being a real, deliberate ceiling, matching this
+// codebase's existing precedent for bounding a client-supplied string
+// payload (see MAX_REFERENCE_IMAGE_BASE64_LENGTH in app/api/generate/route.ts).
+const MAX_TOKENS_JSON_LENGTH = 2_000_000;
+
 const ImportTokensSchema = z.object({
   name: z.string().min(1),
-  tokensJson: z.string().min(1),
+  tokensJson: z.string().min(1).max(MAX_TOKENS_JSON_LENGTH),
 });
 
 export async function POST(req: NextRequest) {

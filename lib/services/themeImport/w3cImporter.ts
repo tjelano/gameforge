@@ -1,4 +1,12 @@
-import type { ThemeTokens } from '@/lib/services/themeTokens';
+import { ThemeTokensSchema, type ThemeTokens } from '@/lib/services/themeTokens';
+
+// No real W3C tokens file nests anywhere close to this deep - this exists
+// purely as a DoS guard. Without it, an adversarial (but validly-parsed)
+// deeply-nested JSON document overflows the call stack: verified a ~30KB
+// payload nesting ~5,000 levels crashes collectTokens's naive recursion
+// with an uncaught RangeError, which the route would then report as a 500
+// instead of the 400 this is actually is.
+const MAX_TREE_DEPTH = 64;
 
 // Aliases matched against a token's own key (last path segment), normalized
 // to lowercase-alphanumeric-only so "color-accent", "colorAccent", "Accent"
@@ -26,9 +34,10 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** Walks the whole JSON tree collecting every {$type, $value} leaf, regardless of nesting or group names. */
-function collectTokens(node: unknown, lastKey: string, out: FoundToken[]): void {
+/** Walks the whole JSON tree collecting every {$type, $value} leaf, regardless of nesting or group names. Stops descending past MAX_TREE_DEPTH rather than recursing unboundedly - see that constant's comment. */
+function collectTokens(node: unknown, lastKey: string, out: FoundToken[], depth = 0): void {
   if (!node || typeof node !== 'object') return;
+  if (depth > MAX_TREE_DEPTH) return;
   const obj = node as Record<string, unknown>;
   if (typeof obj.$type === 'string' && '$value' in obj) {
     out.push({ key: normalize(lastKey), type: obj.$type, value: obj.$value });
@@ -36,7 +45,7 @@ function collectTokens(node: unknown, lastKey: string, out: FoundToken[]): void 
   }
   for (const [key, child] of Object.entries(obj)) {
     if (key.startsWith('$')) continue;
-    collectTokens(child, key, out);
+    collectTokens(child, key, out, depth + 1);
   }
 }
 
@@ -110,5 +119,22 @@ export function parseW3cTokensJson(jsonText: string): ParseW3cTokensResult {
     };
   }
 
-  return { success: true, tokens: result as ThemeTokens };
+  // Every other producer of ThemeTokens in this codebase validates through
+  // this same schema before the value is trusted (ClaudeApiThemeGenerator,
+  // the theme edit routes, the seed-theme mappers) - tokensToCss() below
+  // interpolates these strings directly into a real CSS file, and several
+  // read paths for that file (export, contrast) never re-sanitize it,
+  // relying on this exact validation having already happened at write
+  // time. Skipping it here would let a value like an $value string
+  // containing "'; } body { ... }" close the CSS custom-property
+  // declaration early and inject an arbitrary rule.
+  const validated = ThemeTokensSchema.safeParse(result);
+  if (!validated.success) {
+    return {
+      success: false,
+      error: `Found tokens for every role, but some values aren't valid CSS: ${validated.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; ')}`,
+    };
+  }
+
+  return { success: true, tokens: validated.data };
 }
