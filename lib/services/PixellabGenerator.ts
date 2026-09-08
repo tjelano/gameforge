@@ -47,17 +47,35 @@ export class PixellabGenerator implements ImageGenerator {
     const width = clampSize(options?.width);
     const height = clampSize(options?.height);
 
+    const body: Record<string, unknown> = {
+      description: prompt,
+      image_size: { width, height },
+      no_background: true,
+    };
+    // NOTE (matching this file's own header comment's precedent): the exact
+    // init_image wire shape below is per Pixellab's public docs
+    // (https://www.pixellab.ai/docs/options/init-image — "Supports init
+    // images and forced palettes", strength range 0-900) but has NOT been
+    // confirmed via a live test call the way the rest of this endpoint's
+    // schema was. Before shipping, make one real create-image-pixflux call
+    // with a reference image and inspect the actual accepted request/
+    // response shape — adjust the field name/nesting below to match if it
+    // differs, exactly as this file's existing docstring describes doing
+    // for the base pixflux schema.
+    if (options?.referenceImage) {
+      body.init_image = { type: 'base64', base64: options.referenceImage.base64 };
+      if (options.referenceStrength !== undefined) {
+        body.strength = options.referenceStrength;
+      }
+    }
+
     const res = await fetch(`${API_BASE}/create-image-pixflux`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        description: prompt,
-        image_size: { width, height },
-        no_background: true,
-      }),
+      body: JSON.stringify(body),
       signal: options?.signal,
     });
 

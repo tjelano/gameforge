@@ -4,9 +4,12 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { createPlaceholderPng } from '@/lib/utils/placeholderImage';
 import { PixellabGenerator } from '@/lib/services/PixellabGenerator';
 import type { PlacedPiece } from '@/lib/utils/pieceShapes';
+import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 
 export interface GenerateOptions {
   signal?: AbortSignal;
+  referenceImage?: ReferenceImagePayload;
+  referenceStrength?: number;
 }
 
 export interface GeneratedImage {
