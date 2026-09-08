@@ -45,7 +45,7 @@ export async function saveReferenceImage(payload: ReferenceImagePayload): Promis
 
 /** Maps a filename's extension to its ReferenceImagePayload mediaType, or null if unrecognized. Exported so callers reading a non-reference-image file (e.g. a promoted asset's own stored image) can still build a valid ReferenceImagePayload from it without duplicating this lookup. */
 export function mediaTypeForFilename(filename: string): ReferenceImagePayload['mediaType'] | null {
-  const ext = filename.split('.').pop() ?? '';
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
   return MEDIA_TYPE_FOR_EXTENSION[ext] ?? null;
 }
 
@@ -60,7 +60,7 @@ export async function loadReferenceImage(filename: string | undefined): Promise<
   if (!filename) return null;
   if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) return null;
 
-  const ext = filename.split('.').pop() ?? '';
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
   const mediaType = MEDIA_TYPE_FOR_EXTENSION[ext];
   if (!mediaType) return null;
 

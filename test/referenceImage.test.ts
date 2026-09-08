@@ -52,13 +52,31 @@ describe('saveReferenceImage / loadReferenceImage', () => {
     expect(await loadReferenceImage('../../etc/passwd')).toBeNull();
     expect(await loadReferenceImage('sub/dir.png')).toBeNull();
   });
+
+  it('recognizes an uppercase extension, matching the sibling /api/images route\'s normalization', async () => {
+    const original = { base64: Buffer.from('fake-png-bytes').toString('base64'), mediaType: 'image/png' as const };
+    const filename = await saveReferenceImage(original);
+    const uppercased = filename.replace(/\.png$/, '.PNG');
+    await fsPromises.rename(
+      path.join(tempRoot, 'storage', 'references', filename),
+      path.join(tempRoot, 'storage', 'references', uppercased)
+    );
+    const loaded = await loadReferenceImage(uppercased);
+    expect(loaded).toEqual(original);
+  });
 });
 
 describe('mediaTypeForFilename', () => {
   it('maps a known extension to its media type', () => {
     expect(mediaTypeForFilename('sprite-123.png')).toBe('image/png');
     expect(mediaTypeForFilename('sprite-123.jpg')).toBe('image/jpeg');
+    expect(mediaTypeForFilename('sprite-123.jpeg')).toBe('image/jpeg');
     expect(mediaTypeForFilename('sprite-123.webp')).toBe('image/webp');
+  });
+
+  it('is case-insensitive on the extension', () => {
+    expect(mediaTypeForFilename('sprite-123.PNG')).toBe('image/png');
+    expect(mediaTypeForFilename('sprite-123.JPEG')).toBe('image/jpeg');
   });
 
   it('returns null for an unrecognized extension', () => {
