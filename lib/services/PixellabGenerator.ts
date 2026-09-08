@@ -61,7 +61,10 @@ export class PixellabGenerator implements ImageGenerator {
     // with a reference image and inspect the actual accepted request/
     // response shape — adjust the field name/nesting below to match if it
     // differs, exactly as this file's existing docstring describes doing
-    // for the base pixflux schema.
+    // for the base pixflux schema. Specific open question worth checking
+    // first: the docs page's own title ("Init image options") groups
+    // strength alongside init_image, so `strength` may need to nest INSIDE
+    // the init_image object rather than sit top-level as written below.
     if (options?.referenceImage) {
       body.init_image = { type: 'base64', base64: options.referenceImage.base64 };
       if (options.referenceStrength !== undefined) {
