@@ -15,7 +15,6 @@
 // reference text.
 
 import { parseDocument } from 'htmlparser2';
-import postcss from 'postcss';
 
 interface ParsedNode {
   type: string;
@@ -105,29 +104,6 @@ function renderAttributes(attribs: Record<string, string>): string {
     // escaping via JSON.stringify regardless of the value's content.
     return `${jsxName}={${JSON.stringify(value)}}`;
   }).join(' ');
-}
-
-// CSS Modules (both webpack's css-loader and Next 16's Turbopack default)
-// compile in "pure" mode, which REJECTS any selector with no local class
-// (confirmed by actually running Next's own vendored
-// postcss-modules-local-by-default plugin in mode:'pure': `button {...}`,
-// `a:hover {...}`, `*{...}`, and `:root{...}` all fail; `.btn`, `.nav a`,
-// `.card:hover` all pass). sanitizeComponentCss validates functions and
-// at-rules but never selectors, so an LLM-emitted bare-tag/universal/
-// pseudo-class rule with no class reaches here unchanged and would break
-// the exported project's build with an opaque CSS-loader error the user
-// can't fix from inside GameForge. Also handles `id` selectors the same
-// way (as global, not local): htmlToJsx emits `id={"..."}` as the raw,
-// unmodified string (unlike `class`, which gets rewritten to reference
-// the CSS-Module-scoped `styles[...]` object) - so an `#id` rule must
-// stay a GLOBAL selector to keep matching the literal, un-hashed id
-// CSS Modules would otherwise apply to it.
-export function globalizeBareSelectors(css: string): string {
-  const root = postcss.parse(css);
-  root.walkRules((rule) => {
-    rule.selector = rule.selectors.map(s => (/\.[A-Za-z_-]/.test(s) ? s : `:global(${s})`)).join(', ');
-  });
-  return root.toString();
 }
 
 function renderNode(node: ParsedNode): string {

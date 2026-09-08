@@ -7,8 +7,15 @@ import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
-import { htmlToJsx, escapeJsxText, globalizeBareSelectors } from '@/lib/services/siteExportDocument';
+import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
+import { scopeComponentCss } from '@/lib/services/pageDocument';
 import type { Page, Asset } from '@/lib/database/schema';
+
+// The literal CSS-Module class name every component's wrapper element
+// carries - a fixed, predictable name is fine since it's scoped to that
+// one component's own .module.css file (no cross-component collision
+// risk; CSS Modules hashes it uniquely per file regardless).
+const COMPONENT_SCOPE_CLASS = 'root';
 
 export interface SiteExportResult {
   pagesExported: number;
@@ -158,13 +165,27 @@ class SiteExporterImpl {
       const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
       const tokens = parseComponentHtml(document);
       const html = sanitizeComponentHtml(tokens.html);
-      // globalizeBareSelectors runs AFTER sanitization (it needs real,
-      // trusted CSS to parse) and BEFORE this CSS is ever written to a
-      // .module.css file - CSS Modules compile in "pure" mode, which
-      // rejects any selector with no local class, and this is the fix
-      // for that (see the function's own comment for the real,
-      // verified failure mode this closes).
-      const css = globalizeBareSelectors(sanitizeComponentCss(tokens.css));
+      // scopeComponentCss runs AFTER sanitization (it needs real, trusted
+      // CSS to parse) and BEFORE this CSS is ever written to a
+      // .module.css file. Next's CSS Modules compiler runs in "pure"
+      // mode, which REJECTS any selector with no local class (confirmed
+      // by actually running Next's own vendored
+      // postcss-modules-local-by-default plugin: `button{}`, `a:hover{}`,
+      // `*{}`, `:root{}` all fail; `.btn`, `.nav a` pass) -
+      // sanitizeComponentCss validates functions/at-rules but never
+      // selectors, so an LLM-emitted bare-tag/universal/pseudo-class rule
+      // reaches here unchanged and would otherwise break the exported
+      // project's build. Prefixing every selector with a real local
+      // class (this function, reused unchanged from Page Composer's
+      // already-shipped, already-tested scoping logic) is the ONLY
+      // verified-working fix - wrapping bare selectors in `:global(...)`
+      // does NOT work (confirmed by actually running the same real
+      // compiler against that approach: :global() explicitly marks its
+      // contents non-local, so the rule still has zero local selectors
+      // and still fails identically). buildComponentFile below wraps the
+      // component's JSX in a real element carrying this same scope
+      // class, matching what this CSS now expects to be nested under.
+      const css = scopeComponentCss(sanitizeComponentCss(tokens.css), COMPONENT_SCOPE_CLASS);
       return { asset, componentName: componentName(asset), jsx: htmlToJsx(html), css };
     } catch (e) {
       console.error(`Failed to convert component asset ${assetId} for export, skipping:`, e);
@@ -173,13 +194,21 @@ class SiteExporterImpl {
   }
 
   private buildComponentFile(component: ConvertedComponent): string {
+    // Wraps in a real element (not a bare Fragment) carrying the same
+    // scope class scopeComponentCss prefixed every selector in this
+    // component's CSS with - the wrapper is what makes ".root button"
+    // (etc.) actually match something in the rendered DOM. A <div> is a
+    // safe, neutral choice regardless of the component's own top-level
+    // tag (nav/button/section/...): it adds no semantics of its own and
+    // doesn't hide the wrapped element's own semantics from assistive
+    // tech (e.g. a wrapped <nav> is still a real nav landmark).
     return `import styles from './${component.componentName}.module.css';
 
 export function ${component.componentName}() {
   return (
-    <>
+    <div className={styles.${COMPONENT_SCOPE_CLASS}}>
 ${component.jsx}
-    </>
+    </div>
   );
 }
 `;

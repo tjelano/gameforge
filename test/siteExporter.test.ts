@@ -2,6 +2,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import postcss from 'postcss';
+// Next's own vendored CSS Modules compiler - the exact one next dev/next
+// build use. Imported here specifically so this test suite can prove
+// generated CSS actually passes real compilation, not just a
+// hand-written string-equality assertion (which is exactly what let an
+// earlier, broken version of the selector-scoping fix pass its own
+// tests while still failing for real - see the correction note earlier
+// in this plan's Task 1 section for the full story). No .d.ts ships for
+// this Next-internal compiled path, so noImplicitAny (via strict: true)
+// flags it as TS7016 - suppressed here rather than adding a project-wide
+// ambient module declaration for one test's import.
+// @ts-expect-error - no type declarations for this Next-internal compiled module
+import localByDefault from 'next/dist/compiled/postcss-modules-local-by-default';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
@@ -245,5 +258,36 @@ describe('siteExporter.exportSite', () => {
     const ok = result as { targetDir: string };
     const globalsCss = await fsPromises.readFile(path.join(ok.targetDir, 'app', 'globals.css'), 'utf-8');
     expect(globalsCss).not.toContain('--color-bg: var(--color-background)');
+  });
+
+  it('generates CSS that actually passes Next.js CSS Modules pure-mode compilation for a bare-selector component', async () => {
+    // This is the exact class of bug a hand-written string-equality unit
+    // test cannot catch: an earlier version of this fix wrapped bare
+    // selectors in :global(...), which passed its OWN hand-written
+    // string-equality test while still failing real compilation
+    // (:global() marks its contents non-local, so the rule still has
+    // zero local selectors - pure mode's actual requirement). This test
+    // runs the ACTUAL generated CSS through Next's own vendored
+    // compiler - the same one next dev/next build use - so a regression
+    // of this exact mistake fails here immediately, not silently.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const bareSelectorDoc = '<!DOCTYPE html><html><head><style>button { color: red; } a:hover { text-decoration: underline; }</style></head><body><button>Go</button></body></html>';
+    const component = await makeComponentAsset(style.id, 'bare.html', bareSelectorDoc);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([component.id]) });
+
+    const result = await siteExporter.exportSite(style.id, 'test-pure-mode');
+    const ok = result as { targetDir: string };
+    const componentFiles = await fsPromises.readdir(path.join(ok.targetDir, 'components'));
+    const cssFile = componentFiles.find(f => f.endsWith('.module.css'));
+    expect(cssFile).toBeDefined();
+    const generatedCss = await fsPromises.readFile(path.join(ok.targetDir, 'components', cssFile!), 'utf-8');
+
+    // If this throws, the test fails - no try/catch, no expect() wrapper
+    // needed, an async test that rejects fails on its own.
+    const compiled = await postcss([localByDefault({ mode: 'pure' })]).process(generatedCss, { from: undefined });
+    // Confirms real scoping happened too, not just "didn't throw" (which
+    // could trivially pass on empty input).
+    expect(compiled.css).toContain(':local(.root)');
   });
 });
