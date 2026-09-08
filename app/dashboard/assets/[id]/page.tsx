@@ -159,11 +159,13 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     if (!REGEN_ALLOWED_TYPES.includes(file.type)) {
       setRegenerateImageError('Only PNG, JPEG, or WebP images are supported.');
       e.target.value = '';
+      setRegenerateImage(null);
       return;
     }
     if (file.size > REGEN_MAX_FILE_BYTES) {
       setRegenerateImageError('Image must be under 5MB.');
       e.target.value = '';
+      setRegenerateImage(null);
       return;
     }
     setRegenerateImageError(null);
