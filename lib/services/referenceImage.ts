@@ -42,6 +42,12 @@ export async function saveReferenceImage(payload: ReferenceImagePayload): Promis
   return filename;
 }
 
+/** Maps a filename's extension to its ReferenceImagePayload mediaType, or null if unrecognized. Exported so callers reading a non-reference-image file (e.g. a promoted asset's own stored image) can still build a valid ReferenceImagePayload from it without duplicating this lookup. */
+export function mediaTypeForFilename(filename: string): ReferenceImagePayload['mediaType'] | null {
+  const ext = filename.split('.').pop() ?? '';
+  return MEDIA_TYPE_FOR_EXTENSION[ext] ?? null;
+}
+
 /**
  * Reads a reference image back off disk. Returns null (never throws) for an
  * unset filename, a missing file, or a filename that isn't a bare name —

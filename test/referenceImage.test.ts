@@ -3,7 +3,7 @@ import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
-import { saveReferenceImage, loadReferenceImage } from '@/lib/services/referenceImage';
+import { saveReferenceImage, loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referenceImage';
 
 let tempRoot: string;
 
@@ -51,5 +51,18 @@ describe('saveReferenceImage / loadReferenceImage', () => {
   it('returns null and does not read the filesystem for a path-traversal filename', async () => {
     expect(await loadReferenceImage('../../etc/passwd')).toBeNull();
     expect(await loadReferenceImage('sub/dir.png')).toBeNull();
+  });
+});
+
+describe('mediaTypeForFilename', () => {
+  it('maps a known extension to its media type', () => {
+    expect(mediaTypeForFilename('sprite-123.png')).toBe('image/png');
+    expect(mediaTypeForFilename('sprite-123.jpg')).toBe('image/jpeg');
+    expect(mediaTypeForFilename('sprite-123.webp')).toBe('image/webp');
+  });
+
+  it('returns null for an unrecognized extension', () => {
+    expect(mediaTypeForFilename('sprite-123.gif')).toBeNull();
+    expect(mediaTypeForFilename('no-extension')).toBeNull();
   });
 });

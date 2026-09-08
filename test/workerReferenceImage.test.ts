@@ -9,6 +9,7 @@ import { jobService } from '@/lib/services/JobService';
 import { assetService } from '@/lib/services/AssetService';
 import { saveReferenceImage } from '@/lib/services/referenceImage';
 import * as ThemeGeneratorModule from '@/lib/services/ThemeGenerator';
+import * as ImageGeneratorModule from '@/lib/services/ImageGenerator';
 import { processJob } from '../worker';
 
 let tempRoot: string;
@@ -96,5 +97,85 @@ describe('processJob with a reference image', () => {
 
     const generateFn = generateSpy.mock.results[0].value.generate;
     expect(generateFn).toHaveBeenCalledWith('x', style.id, undefined, undefined);
+  });
+});
+
+describe('processJob sprite regeneration falls back to the based-on asset\'s own image', () => {
+  it('loads the based-on sprite asset\'s stored image and passes it as the reference when no fresh upload was attached', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await fsPromises.mkdir(path.join(tempRoot, 'storage', 'images'), { recursive: true });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'images', 'existing.png'), 'fake-sprite-bytes');
+    const existingAsset = await assetService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'sprite', prompt: 'a goblin',
+      imagePath: 'existing.png', outputKind: 'image',
+    });
+    const job = await jobService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'sprite', prompt: 'a goblin, angrier',
+      outputKind: 'image', options: { basedOnAssetId: existingAsset.id },
+    });
+
+    const generateSpy = vi.spyOn(ImageGeneratorModule, 'getImageGenerator').mockReturnValue({
+      generate: vi.fn().mockResolvedValue({ path: 'result.png', prompt: 'a goblin, angrier', metadata: { width: 64, height: 64, format: 'png' } }),
+      generateUiAsset: vi.fn(),
+    } as any);
+
+    await processJob(job);
+
+    const generateFn = generateSpy.mock.results[0].value.generate;
+    expect(generateFn).toHaveBeenCalledWith('a goblin, angrier', style.id, {
+      referenceImage: { base64: Buffer.from('fake-sprite-bytes').toString('base64'), mediaType: 'image/png' },
+      referenceStrength: undefined,
+    });
+  });
+
+  it('prefers a freshly-uploaded reference image over the based-on asset\'s own image', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await fsPromises.mkdir(path.join(tempRoot, 'storage', 'images'), { recursive: true });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'images', 'existing.png'), 'fake-sprite-bytes');
+    const existingAsset = await assetService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'sprite', prompt: 'a goblin',
+      imagePath: 'existing.png', outputKind: 'image',
+    });
+    const filename = await saveReferenceImage({ base64: 'ZnJlc2g=', mediaType: 'image/jpeg' });
+    const job = await jobService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'sprite', prompt: 'a goblin, angrier',
+      outputKind: 'image', options: { basedOnAssetId: existingAsset.id, referenceImageFilename: filename },
+    });
+
+    const generateSpy = vi.spyOn(ImageGeneratorModule, 'getImageGenerator').mockReturnValue({
+      generate: vi.fn().mockResolvedValue({ path: 'result.png', prompt: 'a goblin, angrier', metadata: { width: 64, height: 64, format: 'png' } }),
+      generateUiAsset: vi.fn(),
+    } as any);
+
+    await processJob(job);
+
+    const generateFn = generateSpy.mock.results[0].value.generate;
+    expect(generateFn).toHaveBeenCalledWith('a goblin, angrier', style.id, {
+      referenceImage: { base64: 'ZnJlc2g=', mediaType: 'image/jpeg' },
+      referenceStrength: undefined,
+    });
+  });
+
+  it('completes normally when the based-on asset is a theme/component (no image to fall back to)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', 'existing.css'), ':root {}');
+    const existingAsset = await assetService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x',
+      imagePath: 'existing.css', outputKind: 'theme',
+    });
+    const job = await jobService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'sprite', prompt: 'a goblin',
+      outputKind: 'image', options: { basedOnAssetId: existingAsset.id },
+    });
+
+    const generateSpy = vi.spyOn(ImageGeneratorModule, 'getImageGenerator').mockReturnValue({
+      generate: vi.fn().mockResolvedValue({ path: 'result.png', prompt: 'a goblin', metadata: { width: 64, height: 64, format: 'png' } }),
+      generateUiAsset: vi.fn(),
+    } as any);
+
+    await processJob(job);
+
+    const generateFn = generateSpy.mock.results[0].value.generate;
+    expect(generateFn).toHaveBeenCalledWith('a goblin', style.id, { referenceImage: undefined, referenceStrength: undefined });
   });
 });
