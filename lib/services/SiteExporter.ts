@@ -1,0 +1,261 @@
+import fsPromises from 'fs/promises';
+import path from 'path';
+import { getProjectRoot } from '@/lib/utils/projectRoot';
+import { pageService } from '@/lib/services/PageService';
+import { assetService } from '@/lib/services/AssetService';
+import { parseComponentHtml } from '@/lib/services/componentDocument';
+import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { parseThemeCss } from '@/lib/services/ThemeGenerator';
+import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
+import { htmlToJsx } from '@/lib/services/siteExportDocument';
+import type { Page, Asset } from '@/lib/database/schema';
+
+export interface SiteExportResult {
+  pagesExported: number;
+  componentsExported: number;
+  targetDir: string;
+}
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function pascalCase(name: string): string {
+  return name.replace(/(^|[-_\s]+)([a-z0-9])/gi, (_m, _sep, ch) => ch.toUpperCase());
+}
+
+function componentName(asset: Asset): string {
+  return `${pascalCase(asset.asset_type)}${asset.id.replace(/-/g, '').slice(0, 6)}`;
+}
+
+interface ConvertedComponent {
+  asset: Asset;
+  componentName: string;
+  jsx: string;
+  css: string;
+}
+
+class SiteExporterImpl {
+  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' }> {
+    const pagesNewestFirst = await pageService.getActivePagesForStyle(styleId);
+    if (pagesNewestFirst.length === 0) {
+      return { error: 'NOTHING_TO_EXPORT' };
+    }
+    // getActivePagesForStyle returns newest-first (ORDER BY created_at
+    // DESC) - reverse to oldest-first so pages[0] is the home page and
+    // the nav lists pages in creation order.
+    const pages: Page[] = [...pagesNewestFirst].reverse();
+
+    const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
+    try {
+      await fsPromises.access(targetDir);
+      return { error: 'ALREADY_EXISTS' };
+    } catch {
+      // ENOENT is the expected, non-error case - the target doesn't exist yet.
+    }
+
+    const componentsByAssetId = new Map<string, ConvertedComponent>();
+    const pageComponentNames: string[][] = [];
+
+    for (const page of pages) {
+      const assetIds = JSON.parse(page.component_asset_ids) as string[];
+      const namesForThisPage: string[] = [];
+      for (const assetId of assetIds) {
+        if (!componentsByAssetId.has(assetId)) {
+          const converted = await this.convertComponent(assetId, page.id);
+          if (!converted) continue;
+          componentsByAssetId.set(assetId, converted);
+        }
+        namesForThisPage.push(componentsByAssetId.get(assetId)!.componentName);
+      }
+      pageComponentNames.push(namesForThisPage);
+    }
+
+    const components = [...componentsByAssetId.values()];
+
+    try {
+      await fsPromises.mkdir(path.join(targetDir, 'app'), { recursive: true });
+      await fsPromises.mkdir(path.join(targetDir, 'components'), { recursive: true });
+
+      for (const component of components) {
+        await fsPromises.writeFile(
+          path.join(targetDir, 'components', `${component.componentName}.tsx`),
+          this.buildComponentFile(component)
+        );
+        await fsPromises.writeFile(
+          path.join(targetDir, 'components', `${component.componentName}.module.css`),
+          component.css
+        );
+      }
+
+      const themeCss = await assetService.loadThemeCssForStyle(styleId);
+      let themeBlock = '';
+      if (themeCss) {
+        try {
+          themeBlock = tokensToTailwindTheme(parseThemeCss(themeCss));
+        } catch (e) {
+          console.error(`Could not convert theme CSS to Tailwind theme for style ${styleId}, exporting without it:`, e);
+        }
+      }
+      await fsPromises.writeFile(
+        path.join(targetDir, 'app', 'globals.css'),
+        `@import "tailwindcss";\n\n${themeBlock}`
+      );
+
+      const slugs = this.buildPageSlugs(pages);
+      await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
+      await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), this.buildPageFile(pages[0], pageComponentNames[0], components));
+
+      for (let i = 1; i < pages.length; i++) {
+        const pageDir = path.join(targetDir, 'app', slugs[i]);
+        await fsPromises.mkdir(pageDir, { recursive: true });
+        await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), this.buildPageFile(pages[i], pageComponentNames[i], components));
+      }
+
+      await fsPromises.writeFile(path.join(targetDir, 'package.json'), this.buildPackageJson());
+      await fsPromises.writeFile(path.join(targetDir, 'tsconfig.json'), this.buildTsConfig());
+    } catch (e) {
+      console.error(`Failed to write exported site files to ${targetDir}:`, e);
+      throw e;
+    }
+
+    return { pagesExported: pages.length, componentsExported: components.length, targetDir };
+  }
+
+  private async convertComponent(assetId: string, pageId: string): Promise<ConvertedComponent | null> {
+    try {
+      const asset = await assetService.getById(assetId);
+      if (!asset || asset.is_deleted || asset.output_kind !== 'component' || !asset.image_path) {
+        console.error(`Page ${pageId} references a stale/invalid component asset ${assetId}, skipping`);
+        return null;
+      }
+      const filename = asset.image_path;
+      if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+        console.error(`Page ${pageId} references a component asset ${assetId} with an unsafe filename, skipping`);
+        return null;
+      }
+      const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
+      const tokens = parseComponentHtml(document);
+      const html = sanitizeComponentHtml(tokens.html);
+      const css = sanitizeComponentCss(tokens.css);
+      return { asset, componentName: componentName(asset), jsx: htmlToJsx(html), css };
+    } catch (e) {
+      console.error(`Failed to convert component asset ${assetId} for export, skipping:`, e);
+      return null;
+    }
+  }
+
+  private buildComponentFile(component: ConvertedComponent): string {
+    return `import styles from './${component.componentName}.module.css';
+
+export function ${component.componentName}() {
+  return (
+    <>
+${component.jsx}
+    </>
+  );
+}
+`;
+  }
+
+  private buildPageSlugs(pages: Page[]): string[] {
+    const used = new Set<string>();
+    return pages.map((page, i) => {
+      if (i === 0) return ''; // home page has no slug directory
+      let slug = slugify(page.name) || 'page';
+      if (used.has(slug)) {
+        slug = `${slug}-${page.id.replace(/-/g, '').slice(0, 6)}`;
+      }
+      used.add(slug);
+      return slug;
+    });
+  }
+
+  private buildLayoutFile(pages: Page[], slugs: string[]): string {
+    const links = pages.map((page, i) => {
+      const href = i === 0 ? '/' : `/${slugs[i]}`;
+      return `        <a href="${href}">${page.name}</a>`;
+    }).join('\n');
+    return `import './globals.css';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <nav style={{ display: 'flex', gap: 16, padding: 16 }}>
+${links}
+        </nav>
+        {children}
+      </body>
+    </html>
+  );
+}
+`;
+  }
+
+  private buildPageFile(page: Page, componentNames: string[], allComponents: ConvertedComponent[]): string {
+    const usedComponents = allComponents.filter(c => componentNames.includes(c.componentName));
+    const imports = usedComponents.map(c => `import { ${c.componentName} } from '@/components/${c.componentName}';`).join('\n');
+    const elements = componentNames.map(name => `      <${name} />`).join('\n');
+    return `${imports}
+
+export default function Page() {
+  return (
+    <>
+${elements}
+    </>
+  );
+}
+`;
+  }
+
+  private buildPackageJson(): string {
+    return JSON.stringify({
+      name: 'exported-site',
+      version: '0.1.0',
+      private: true,
+      scripts: {
+        dev: 'next dev',
+        build: 'next build',
+        start: 'next start',
+      },
+      dependencies: {
+        next: '^16.3.4',
+        react: '^19.1.0',
+        'react-dom': '^19.1.0',
+        tailwindcss: '^4.0.0',
+      },
+      devDependencies: {
+        typescript: '^5.7.2',
+        '@types/react': '^19.0.0',
+        '@types/react-dom': '^19.0.0',
+        '@types/node': '^24.0.0',
+      },
+    }, null, 2);
+  }
+
+  private buildTsConfig(): string {
+    return JSON.stringify({
+      compilerOptions: {
+        target: 'ES2017',
+        lib: ['dom', 'dom.iterable', 'esnext'],
+        allowJs: true,
+        skipLibCheck: true,
+        strict: true,
+        noEmit: true,
+        esModuleInterop: true,
+        module: 'esnext',
+        moduleResolution: 'bundler',
+        resolveJsonModule: true,
+        isolatedModules: true,
+        jsx: 'preserve',
+        incremental: true,
+        paths: { '@/*': ['./*'] },
+      },
+      include: ['**/*.ts', '**/*.tsx'],
+      exclude: ['node_modules'],
+    }, null, 2);
+  }
+}
+
+export const siteExporter = new SiteExporterImpl();
