@@ -6,6 +6,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { ThemeTokensSchema, tokensToCss, type ThemeTokens } from '@/lib/services/themeTokens';
+import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 
 // Re-exported so every existing server-side caller of this module keeps
 // working unchanged — the pure schema/serialization logic itself now
@@ -19,18 +20,21 @@ export interface GeneratedTheme {
 }
 
 export interface ThemeGenerator {
-  generate(prompt: string, styleId: string): Promise<GeneratedTheme>;
+  generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedTheme>;
 }
 
-export function buildThemePrompt(styleParameters: string, jobPrompt: string, avoidColors: string[] = []): string {
+export function buildThemePrompt(styleParameters: string, jobPrompt: string, avoidColors: string[] = [], basedOnContent?: string): string {
   const steering = avoidColors.length > 0
     ? `\n\nAvoid producing a palette close to these existing colors already used by this Style Bible: ${avoidColors.join(', ')}. Aim for a genuinely different combination.`
+    : '';
+  const basedOnSection = basedOnContent
+    ? `\n\nHere is the current version's CSS, to use as your starting point for the requested change:\n${basedOnContent}`
     : '';
   return `You are generating a website design token set (CSS custom properties only — colors, fonts, a base spacing unit, a base border radius). Match this aesthetic:
 
 Style Bible parameters (JSON): ${styleParameters}
 
-Additional direction for this generation: ${jobPrompt}${steering}
+Additional direction for this generation: ${jobPrompt}${steering}${basedOnSection}
 
 Respond by calling the emit_theme tool with concrete token values.`;
 }
@@ -47,7 +51,7 @@ const FIXED_MOCK_TOKENS: ThemeTokens = {
 };
 
 export class MockThemeGenerator implements ThemeGenerator {
-  async generate(prompt: string, _styleId: string): Promise<GeneratedTheme> {
+  async generate(prompt: string, _styleId: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string): Promise<GeneratedTheme> {
     const filename = `mock-theme-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.css`;
     const themesDir = path.join(getProjectRoot(), 'storage', 'themes');
     try {

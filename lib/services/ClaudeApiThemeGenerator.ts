@@ -6,6 +6,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { styleService } from '@/lib/services/StyleService';
 import { assetService } from '@/lib/services/AssetService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
+import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 import {
   ThemeTokensSchema,
   tokensToCss,
@@ -62,7 +63,7 @@ interface AnthropicMessageResponse {
 export class ClaudeApiThemeGenerator implements ThemeGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string): Promise<GeneratedTheme> {
+  async generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
     let existingThemes: Awaited<ReturnType<typeof assetService.getActiveThemeAssetsForStyle>> = [];
     try {
@@ -102,7 +103,14 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
         // A single unreadable/unparseable existing theme shouldn't block generation — steering is best-effort.
       }
     }
-    const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt, avoidColors);
+    const fullPrompt = buildThemePrompt(style?.parameters ?? '{}', prompt, avoidColors, basedOnContent);
+
+    const content: string | Array<Record<string, unknown>> = referenceImage
+      ? [
+          { type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } },
+          { type: 'text', text: fullPrompt },
+        ]
+      : fullPrompt;
 
     const res = await fetch(this.provider.requestUrl, {
       method: 'POST',
@@ -122,7 +130,7 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
           },
         ],
         tool_choice: { type: 'tool', name: 'emit_theme' },
-        messages: [{ role: 'user', content: fullPrompt }],
+        messages: [{ role: 'user', content }],
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
