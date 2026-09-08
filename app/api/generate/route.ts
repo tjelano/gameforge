@@ -30,6 +30,14 @@ const GenerateSchema = z.object({
   basedOnAssetId: z.string().uuid().optional(),
 });
 
+// These three keys are computed by THIS route from the validated
+// referenceImage/basedOnAssetId fields below - options is a generic,
+// per-key-unvalidated bag (z.record(...unknown())), so a client could
+// otherwise inject a raw referenceImageFilename/referenceStrength/
+// basedOnAssetId directly into options and bypass ReferenceImageSchema's
+// size/type checks and basedOnAssetId's uuid format check entirely.
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId'] as const;
+
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
@@ -51,6 +59,9 @@ export async function POST(req: NextRequest) {
     }
 
     let mergedOptions: Record<string, unknown> = { ...(input.options ?? {}) };
+    for (const key of RESERVED_OPTION_KEYS) {
+      delete mergedOptions[key];
+    }
     if (input.referenceImage) {
       const filename = await saveReferenceImage({
         base64: input.referenceImage.base64,

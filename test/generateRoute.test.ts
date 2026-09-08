@@ -127,4 +127,24 @@ describe('POST /api/generate with referenceImage', () => {
     const body = await res.json();
     expect(JSON.parse(body.data.options)).toEqual({});
   });
+
+  it('strips a client-injected referenceImageFilename/referenceStrength/basedOnAssetId smuggled inside options, rather than trusting them unvalidated', async () => {
+    const res = await POST(req({
+      styleId,
+      assetType: 'sprite',
+      prompt: 'a goblin',
+      options: {
+        referenceImageFilename: 'sneaky-existing-file.png',
+        referenceStrength: 999,
+        basedOnAssetId: 'not-a-uuid',
+        harmlessKey: 'kept',
+      },
+    }));
+    const body = await res.json();
+    const options = JSON.parse(body.data.options);
+    expect(options.referenceImageFilename).toBeUndefined();
+    expect(options.referenceStrength).toBeUndefined();
+    expect(options.basedOnAssetId).toBeUndefined();
+    expect(options.harmlessKey).toBe('kept');
+  });
 });
