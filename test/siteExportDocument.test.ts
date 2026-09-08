@@ -4,12 +4,27 @@ import { htmlToJsx } from '@/lib/services/siteExportDocument';
 describe('htmlToJsx', () => {
   it('converts a simple element with a class attribute to className referencing styles[...]', () => {
     const result = htmlToJsx('<button class="btn-primary">Buy now</button>');
-    expect(result).toBe('<button className={styles[\'btn-primary\']}>Buy now</button>');
+    // The styles[...] key comes from JSON.stringify, which always produces
+    // double-quoted output - this is the ONLY safe choice (see the
+    // "class name containing a quote" test below for why single-quoting
+    // by hand is unsafe).
+    expect(result).toBe('<button className={styles["btn-primary"]}>Buy now</button>');
   });
 
   it('rewrites multiple space-separated classes into a template literal of styles[...] lookups', () => {
     const result = htmlToJsx('<div class="card shadow">Hi</div>');
-    expect(result).toBe('<div className={`${styles[\'card\']} ${styles[\'shadow\']}`}>Hi</div>');
+    expect(result).toBe('<div className={`${styles["card"]} ${styles["shadow"]}`}>Hi</div>');
+  });
+
+  it('escapes a quote character inside a class name via JSON.stringify, not raw interpolation', () => {
+    // AI-generated component HTML is untrusted-shaped content -
+    // sanitizeComponentHtml allowlists attribute NAMES, not value
+    // content, so a quote character inside a class name is a real,
+    // reachable case, not hypothetical. Raw string interpolation here
+    // would let the value break out of the generated .tsx file's string
+    // literal boundary - JSON.stringify is the only safe choice.
+    const result = htmlToJsx(`<div class="foo'bar">x</div>`);
+    expect(result).toBe(`<div className={styles["foo'bar"]}>x</div>`);
   });
 
   it('maps the "for" attribute to htmlFor', () => {
@@ -17,9 +32,19 @@ describe('htmlToJsx', () => {
     expect(result).toBe('<label htmlFor={"email"}>Email</label>');
   });
 
-  it('emits a bare boolean attribute shorthand for an empty-string attribute value', () => {
+  it('emits a bare boolean attribute shorthand only for genuine HTML boolean attributes', () => {
     const result = htmlToJsx('<button disabled>Wait</button>');
     expect(result).toBe('<button disabled>Wait</button>');
+  });
+
+  it('does NOT treat an empty-string value on a non-boolean attribute as boolean shorthand', () => {
+    // <option value=""> is the standard "please select" placeholder
+    // pattern, and <input placeholder=""> is a real, reachable case -
+    // an empty-string VALUE is not the same thing as a boolean
+    // attribute's mere presence. Only genuine HTML boolean attributes
+    // (disabled, required, in this allowlist) get the bare shorthand.
+    expect(htmlToJsx('<option value="">Please select</option>')).toBe('<option value={""}>Please select</option>');
+    expect(htmlToJsx('<input placeholder="">')).toBe('<input placeholder={""} />');
   });
 
   it('self-closes void elements', () => {
@@ -38,9 +63,21 @@ describe('htmlToJsx', () => {
     expect(result).toBe('<p>{"Buy {now}"}</p>');
   });
 
+  it('escapes literal angle brackets in text content, which are otherwise invalid inside JSX text', () => {
+    // Confirmed by actually compiling equivalent raw JSX with tsc
+    // (--jsx react-jsx): an unescaped "<" produces TS1003 (Identifier
+    // expected) and an unescaped ">" produces TS1382 - text content is
+    // NOT restricted by sanitizeComponentHtml (only tags/attributes
+    // are), so LLM-generated component copy containing "<"/">" (e.g.
+    // "Price < $10", "See > for details") is a real, reachable case
+    // that would otherwise break the exported project's build.
+    expect(htmlToJsx('<p>Price is < 10 dollars</p>')).toBe('<p>{"Price is < 10 dollars"}</p>');
+    expect(htmlToJsx('<p>See > for details</p>')).toBe('<p>{"See > for details"}</p>');
+  });
+
   it('renders nested elements and preserves attributes on each level', () => {
     const result = htmlToJsx('<nav class="nav"><a href="/" class="link">Home</a></nav>');
-    expect(result).toBe('<nav className={styles[\'nav\']}><a href={"/"} className={styles[\'link\']}>Home</a></nav>');
+    expect(result).toBe('<nav className={styles["nav"]}><a href={"/"} className={styles["link"]}>Home</a></nav>');
   });
 
   it('renders multiple top-level sibling nodes joined with no separator', () => {
