@@ -7,6 +7,9 @@ import { useJobStore } from '@/lib/store/useJobStore';
 import { JobCard } from '@/app/components/JobCard';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB raw file - keeps the base64 payload comfortably under the server's 10MB base64-string ceiling
+
 export default function ThemesPage() {
   const { styles, loading: stylesLoading } = useStyles();
   const jobs = useJobStore(s => s.jobs).filter(j => j.output_kind === 'theme');
@@ -18,8 +21,39 @@ export default function ThemesPage() {
   const [candidateCount, setCandidateCount] = useState<1 | 3 | 5>(3);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [referenceImage, setReferenceImage] = useState<{ base64: string; mediaType: string } | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const activeStyleId = styleId || styles[0]?.id || '';
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setReferenceImage(null);
+      setImageError(null);
+      return;
+    }
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      setImageError('Only PNG, JPEG, or WebP images are supported.');
+      e.target.value = '';
+      setReferenceImage(null);
+      return;
+    }
+    if (file.size > MAX_IMAGE_FILE_BYTES) {
+      setImageError('Image must be under 5MB.');
+      e.target.value = '';
+      setReferenceImage(null);
+      return;
+    }
+    setImageError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(',')[1] ?? '';
+      setReferenceImage({ base64, mediaType: file.type });
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,6 +71,7 @@ export default function ThemesPage() {
           prompt: prompt.trim(),
           outputKind: 'theme',
           candidateCount,
+          ...(referenceImage ? { referenceImage } : {}),
         }),
       });
       const body = await res.json();
@@ -44,6 +79,7 @@ export default function ThemesPage() {
         setError(body.error ?? 'Generation failed to queue.');
       } else {
         setPrompt('');
+        setReferenceImage(null);
         refreshActive();
       }
     } catch {
@@ -90,6 +126,13 @@ export default function ThemesPage() {
               <option value={3}>3 (recommended)</option>
               <option value={5}>5</option>
             </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="referenceImage">Reference image (optional)</label>
+            <input id="referenceImage" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} />
+            {imageError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 4 }}>{imageError}</p>}
+            {referenceImage && !imageError && <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 4 }}>Image attached.</p>}
           </div>
 
           {error && (
