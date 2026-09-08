@@ -17,14 +17,15 @@ interface JobCardProps {
 export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardProps) {
   const canAct = job.status === 'complete' || job.status === 'failed';
 
-  const hasPieces = (() => {
+  const parsedOptions = (() => {
     try {
-      const pieces = JSON.parse(job.options).pieces;
-      return Array.isArray(pieces) && pieces.length > 0;
+      return JSON.parse(job.options);
     } catch {
-      return false;
+      return {};
     }
   })();
+  const hasPieces = Array.isArray(parsedOptions.pieces) && parsedOptions.pieces.length > 0;
+  const referenceImageFilename = typeof parsedOptions.referenceImageFilename === 'string' ? parsedOptions.referenceImageFilename : null;
 
   const [similarity, setSimilarity] = useState<{ flagged: boolean; similarTo?: string } | null>(null);
 
@@ -113,6 +114,15 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
             <span className="badge" title={similarity.similarTo} style={{ color: 'var(--reject)' }}>
               Similar to {similarity.similarTo}
             </span>
+          )}
+          {referenceImageFilename && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/api/references/${referenceImageFilename}`}
+              alt="Reference image used for this generation"
+              title="Reference image used for this generation"
+              style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
+            />
           )}
         </div>
         <div style={{ fontSize: 14, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { DatabaseConnection } from '@/lib/database';
@@ -6,6 +7,8 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getImageGenerator } from '@/lib/services/ImageGenerator';
 import { getThemeGenerator } from '@/lib/services/ThemeGenerator';
 import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
+import { assetService } from '@/lib/services/AssetService';
+import { loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referenceImage';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 
@@ -41,6 +44,53 @@ function releaseLock(): void {
   }
 }
 
+/**
+ * Resolves options.basedOnAssetId to that asset's current stored content
+ * (theme CSS or component HTML), for the regenerate-with-feedback flow.
+ * Returns undefined (never throws) if the id is missing, the asset can't be
+ * found, its output_kind isn't theme/component, or its file can't be read —
+ * this is best-effort context, same reasoning as ClaudeApiThemeGenerator's
+ * own dedup-steering loop not failing the whole job over one bad read.
+ */
+async function loadBasedOnContent(basedOnAssetId: unknown, jobId: string): Promise<string | undefined> {
+  if (typeof basedOnAssetId !== 'string') return undefined;
+  try {
+    const asset = await assetService.getById(basedOnAssetId);
+    if (!asset?.image_path) return undefined;
+    if (asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) return undefined;
+    const subdir = asset.output_kind === 'theme' ? 'themes' : asset.output_kind === 'component' ? 'components' : null;
+    if (!subdir) return undefined;
+    return await fsPromises.readFile(path.join(getProjectRoot(), 'storage', subdir, asset.image_path), 'utf-8');
+  } catch (e) {
+    console.error(`Job ${jobId}: failed to load basedOnAssetId ${basedOnAssetId} content, continuing without it:`, e);
+    return undefined;
+  }
+}
+
+/**
+ * For a sprite regeneration: when the user didn't attach a fresh reference
+ * image, fall back to the based-on asset's own stored image so the
+ * "regenerate with changes" flow still has a real visual connection to what
+ * it's regenerating from. Never throws - a missing/invalid asset or a read
+ * failure just means no fallback reference, same best-effort reasoning as
+ * loadBasedOnContent().
+ */
+async function loadSpriteBasedOnImage(basedOnAssetId: unknown, jobId: string): Promise<import('@/lib/services/referenceImage').ReferenceImagePayload | undefined> {
+  if (typeof basedOnAssetId !== 'string') return undefined;
+  try {
+    const asset = await assetService.getById(basedOnAssetId);
+    if (!asset?.image_path || asset.output_kind !== 'image') return undefined;
+    if (asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) return undefined;
+    const mediaType = mediaTypeForFilename(asset.image_path);
+    if (!mediaType) return undefined;
+    const buffer = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'images', asset.image_path));
+    return { base64: buffer.toString('base64'), mediaType };
+  } catch (e) {
+    console.error(`Job ${jobId}: failed to load basedOnAssetId ${basedOnAssetId}'s own image for sprite regeneration, continuing without it:`, e);
+    return undefined;
+  }
+}
+
 export async function processJob(job: any): Promise<void> {
   const db = DatabaseConnection.getInstance();
 
@@ -73,20 +123,31 @@ export async function processJob(job: any): Promise<void> {
     sheetOptions = parsed.data;
   }
 
+  const referenceImage = await loadReferenceImage(
+    typeof options.referenceImageFilename === 'string' ? options.referenceImageFilename : undefined
+  );
+  const referenceStrength = typeof options.referenceStrength === 'number' ? options.referenceStrength : undefined;
+
   try {
     let result: { path: string };
     switch (job.output_kind) {
-      case 'theme':
-        result = await getThemeGenerator().generate(job.prompt, job.style_id);
+      case 'theme': {
+        const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
+        result = await getThemeGenerator().generate(job.prompt, job.style_id, referenceImage ?? undefined, basedOnContent);
         break;
-      case 'component':
-        result = await getComponentGenerator().generate(job.prompt, job.style_id);
+      }
+      case 'component': {
+        const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
+        result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent);
         break;
-      case 'image':
+      }
+      case 'image': {
+        const spriteReferenceImage = referenceImage ?? (await loadSpriteBasedOnImage(options.basedOnAssetId, job.id));
         result = sheetOptions
           ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
-          : await getImageGenerator().generate(job.prompt, job.style_id);
+          : await getImageGenerator().generate(job.prompt, job.style_id, { referenceImage: spriteReferenceImage, referenceStrength });
         break;
+      }
       default:
         // job.output_kind comes from a raw SQL row, not a Zod-validated
         // object — an unrecognized value must fail loudly, not silently

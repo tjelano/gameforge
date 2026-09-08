@@ -8,6 +8,7 @@ import { styleService } from '@/lib/services/StyleService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
+import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 
 // Re-exported so every existing server-side caller of this module keeps
 // working unchanged — the pure document assembly/parsing logic itself now
@@ -21,7 +22,7 @@ export interface GeneratedComponent {
 }
 
 export interface ComponentGenerator {
-  generate(prompt: string, styleId: string, componentType?: string): Promise<GeneratedComponent>;
+  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedComponent>;
 }
 
 const TOOL_INPUT_SCHEMA = {
@@ -42,11 +43,14 @@ interface AnthropicMessageResponse {
 const ANTHROPIC_VERSION = '2023-06-01';
 const REQUEST_TIMEOUT_MS = 60_000;
 
-function buildComponentPrompt(styleParameters: string, jobPrompt: string, componentType?: string): string {
+function buildComponentPrompt(styleParameters: string, jobPrompt: string, componentType?: string, basedOnContent?: string): string {
   const typeHint = componentType ? `Component type: ${componentType}.\n\n` : '';
+  const basedOnSection = basedOnContent
+    ? `\n\nHere is the current version's HTML+CSS, to use as your starting point for the requested change:\n${basedOnContent}`
+    : '';
   return `You are generating a single, reusable website UI component as plain HTML and CSS (no React, no JavaScript). ${typeHint}Style Bible parameters (JSON): ${styleParameters}
 
-Description: ${jobPrompt}
+Description: ${jobPrompt}${basedOnSection}
 
 Respond by calling the emit_component tool with the component's html and css.`;
 }
@@ -55,9 +59,16 @@ Respond by calling the emit_component tool with the component's html and css.`;
 export class ClaudeApiComponentGenerator implements ComponentGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string, componentType?: string): Promise<GeneratedComponent> {
+  async generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedComponent> {
     const style = await styleService.getById(styleId);
-    const fullPrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType);
+    const fullPrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType, basedOnContent);
+
+    const content: string | Array<Record<string, unknown>> = referenceImage
+      ? [
+          { type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } },
+          { type: 'text', text: fullPrompt },
+        ]
+      : fullPrompt;
 
     const res = await fetch(this.provider.requestUrl, {
       method: 'POST',
@@ -77,7 +88,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
           },
         ],
         tool_choice: { type: 'tool', name: 'emit_component' },
-        messages: [{ role: 'user', content: fullPrompt }],
+        messages: [{ role: 'user', content }],
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -117,7 +128,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
 }
 
 export class MockComponentGenerator implements ComponentGenerator {
-  async generate(prompt: string, _styleId: string): Promise<GeneratedComponent> {
+  async generate(prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string): Promise<GeneratedComponent> {
     const tokens: ComponentTokens = {
       html: '<button class="btn-primary">Buy now</button>',
       css: '.btn-primary { background: var(--color-accent); color: var(--color-bg); padding: calc(var(--space-unit) * 1.5) calc(var(--space-unit) * 3); border: none; border-radius: var(--radius-base); font-family: var(--font-body); }',

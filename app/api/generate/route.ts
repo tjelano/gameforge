@@ -4,8 +4,20 @@ import crypto from 'crypto';
 import { jobService } from '@/lib/services/JobService';
 import { DatabaseConnection } from '@/lib/database';
 import { getCurrentUser } from '@/lib/utils/session';
+import { saveReferenceImage } from '@/lib/services/referenceImage';
 
 export const dynamic = 'force-dynamic';
+
+// A base64 string of 10,000,000 chars decodes to ~7.5MB of binary — generous
+// for a single screenshot/photo reference, still bounded. Real ceiling, not
+// a placeholder: rejects before saveReferenceImage() ever touches disk.
+const MAX_REFERENCE_IMAGE_BASE64_LENGTH = 10_000_000;
+
+const ReferenceImageSchema = z.object({
+  base64: z.string().max(MAX_REFERENCE_IMAGE_BASE64_LENGTH),
+  mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  referenceStrength: z.number().min(0).max(900).optional(), // 0-900 matches Pixellab's documented init-image strength range
+});
 
 const GenerateSchema = z.object({
   styleId: z.string().uuid(),
@@ -14,7 +26,17 @@ const GenerateSchema = z.object({
   options: z.record(z.string(), z.unknown()).optional(),
   outputKind: z.enum(['image', 'theme', 'component']).optional(),
   candidateCount: z.union([z.literal(1), z.literal(3), z.literal(5)]).optional(),
+  referenceImage: ReferenceImageSchema.optional(),
+  basedOnAssetId: z.string().uuid().optional(),
 });
+
+// These three keys are computed by THIS route from the validated
+// referenceImage/basedOnAssetId fields below - options is a generic,
+// per-key-unvalidated bag (z.record(...unknown())), so a client could
+// otherwise inject a raw referenceImageFilename/referenceStrength/
+// basedOnAssetId directly into options and bypass ReferenceImageSchema's
+// size/type checks and basedOnAssetId's uuid format check entirely.
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId'] as const;
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,7 +58,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Component jobs do not support multi-candidate generation.' }, { status: 400 });
     }
 
-    const jobInput = { ...input, createdBy: user.id };
+    let mergedOptions: Record<string, unknown> = { ...(input.options ?? {}) };
+    for (const key of RESERVED_OPTION_KEYS) {
+      delete mergedOptions[key];
+    }
+    if (input.referenceImage) {
+      const filename = await saveReferenceImage({
+        base64: input.referenceImage.base64,
+        mediaType: input.referenceImage.mediaType,
+      });
+      mergedOptions.referenceImageFilename = filename;
+      if (input.referenceImage.referenceStrength !== undefined) {
+        mergedOptions.referenceStrength = input.referenceImage.referenceStrength;
+      }
+    }
+    if (input.basedOnAssetId) {
+      mergedOptions.basedOnAssetId = input.basedOnAssetId;
+    }
+
+    const jobInput = {
+      styleId: input.styleId,
+      assetType: input.assetType,
+      prompt: input.prompt,
+      outputKind: input.outputKind,
+      options: mergedOptions,
+      createdBy: user.id,
+    };
 
     const count = input.candidateCount ?? 1;
     if (count === 1) {

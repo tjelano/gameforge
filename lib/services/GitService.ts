@@ -269,8 +269,9 @@ class GitServiceImpl {
     const removedImages = await assetService.cleanupOrphanedImages();
     const removedThemes = await assetService.cleanupOrphanedThemes();
     const removedComponents = await assetService.cleanupOrphanedComponents();
-    if (removedImages > 0 || removedThemes > 0 || removedComponents > 0) {
-      console.log(`🧹 Removed ${removedImages} orphaned images, ${removedThemes} orphaned themes, and ${removedComponents} orphaned components.`);
+    const removedReferences = await assetService.cleanupOrphanedReferences();
+    if (removedImages > 0 || removedThemes > 0 || removedComponents > 0 || removedReferences > 0) {
+      console.log(`🧹 Removed ${removedImages} orphaned images, ${removedThemes} orphaned themes, ${removedComponents} orphaned components, and ${removedReferences} orphaned reference images.`);
     }
 
     const git = this.git();
@@ -307,8 +308,9 @@ class GitServiceImpl {
       const removedImages = await assetService.cleanupOrphanedImages();
       const removedThemes = await assetService.cleanupOrphanedThemes();
       const removedComponents = await assetService.cleanupOrphanedComponents();
-      if (removedImages > 0 || removedThemes > 0 || removedComponents > 0) {
-        console.log(`🧹 Removed ${removedImages} orphaned images, ${removedThemes} orphaned themes, and ${removedComponents} orphaned components.`);
+      const removedReferences = await assetService.cleanupOrphanedReferences();
+      if (removedImages > 0 || removedThemes > 0 || removedComponents > 0 || removedReferences > 0) {
+        console.log(`🧹 Removed ${removedImages} orphaned images, ${removedThemes} orphaned themes, ${removedComponents} orphaned components, and ${removedReferences} orphaned reference images.`);
       }
 
       await this.stageFilesForCommit();
