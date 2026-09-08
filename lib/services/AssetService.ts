@@ -212,6 +212,57 @@ class AssetServiceImpl {
   async cleanupOrphanedComponents(): Promise<number> {
     return this.cleanupOrphanedIn('components');
   }
+
+  /**
+   * Removes physical files in storage/references/ that are no longer
+   * needed. Unlike cleanupOrphanedIn() (which protects via jobs.result_path,
+   * the GENERATED-output column), a reference image's filename lives inside
+   * jobs.options — it's an INPUT the user supplied, not a job's result — so
+   * this needs its own protected-paths query reading that JSON field.
+   */
+  async cleanupOrphanedReferences(): Promise<number> {
+    const db = DatabaseConnection.getInstance();
+    const dir = path.join(getProjectRoot(), 'storage', 'references');
+
+    let filenames: string[];
+    try {
+      filenames = (await fsPromises.readdir(dir, { withFileTypes: true }))
+        .filter(entry => entry.isFile() && entry.name !== '.gitkeep')
+        .map(entry => entry.name);
+    } catch (e) {
+      console.error('Failed to read storage/references for cleanup:', e);
+      return 0;
+    }
+
+    const activeReferencePaths = new Set(
+      (db.prepare(`
+        SELECT json_extract(options, '$.referenceImageFilename') AS filename FROM jobs
+        WHERE json_extract(options, '$.referenceImageFilename') IS NOT NULL
+        AND status IN ('pending', 'processing', 'complete')
+      `).all() as { filename: string }[])
+        .map(row => row.filename)
+    );
+
+    const orphans = filenames.filter(f => !activeReferencePaths.has(f));
+
+    let removed = 0;
+    for (let i = 0; i < orphans.length; i += IO_WRITE_BATCH_SIZE) {
+      const chunk = orphans.slice(i, i + IO_WRITE_BATCH_SIZE);
+      const results = await Promise.all(chunk.map(async (filename) => {
+        const filePath = path.join(dir, filename);
+        try {
+          await fsPromises.unlink(filePath);
+          return true;
+        } catch (e: any) {
+          if (e.code !== 'ENOENT') console.error(`Failed to remove orphaned reference image ${filename}:`, e);
+          return false;
+        }
+      }));
+      removed += results.filter(Boolean).length;
+    }
+
+    return removed;
+  }
 }
 
 export const assetService = new AssetServiceImpl();
