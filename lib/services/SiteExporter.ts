@@ -7,7 +7,7 @@ import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
-import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
+import { htmlToJsx, escapeJsxText, globalizeBareSelectors } from '@/lib/services/siteExportDocument';
 import type { Page, Asset } from '@/lib/database/schema';
 
 export interface SiteExportResult {
@@ -158,7 +158,13 @@ class SiteExporterImpl {
       const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
       const tokens = parseComponentHtml(document);
       const html = sanitizeComponentHtml(tokens.html);
-      const css = sanitizeComponentCss(tokens.css);
+      // globalizeBareSelectors runs AFTER sanitization (it needs real,
+      // trusted CSS to parse) and BEFORE this CSS is ever written to a
+      // .module.css file - CSS Modules compile in "pure" mode, which
+      // rejects any selector with no local class, and this is the fix
+      // for that (see the function's own comment for the real,
+      // verified failure mode this closes).
+      const css = globalizeBareSelectors(sanitizeComponentCss(tokens.css));
       return { asset, componentName: componentName(asset), jsx: htmlToJsx(html), css };
     } catch (e) {
       console.error(`Failed to convert component asset ${assetId} for export, skipping:`, e);

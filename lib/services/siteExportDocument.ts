@@ -15,6 +15,7 @@
 // reference text.
 
 import { parseDocument } from 'htmlparser2';
+import postcss from 'postcss';
 
 interface ParsedNode {
   type: string;
@@ -32,13 +33,34 @@ const ATTRIBUTE_NAME_MAP: Record<string, string> = {
 const VOID_ELEMENTS = new Set(['br', 'hr', 'input']);
 
 // Only these two attributes in componentSanitize.ts's ALLOWED_ATTRIBUTES
-// are genuine HTML boolean attributes (presence = true, regardless of
-// value). An empty-string VALUE on any other attribute (e.g.
-// <option value=""> or <input placeholder="">) is a real empty string,
-// not "attribute absent" - it must still render as `name={""}`, never
-// be silently treated as boolean shorthand.
+// are genuine HTML boolean attributes. Per the HTML spec, PRESENCE alone
+// means true, regardless of the attribute's string value - browsers
+// ignore the value entirely, so both `disabled` and `disabled="disabled"`
+// (a real, common LLM-emitted XHTML-style form) mean the same thing.
+// React's typing for these props is `boolean`, not `string` - confirmed
+// with a real tsc compile that emitting `disabled={"disabled"}` (the old,
+// buggy `value === ''`-gated behavior's fallback path for any non-empty
+// value) produces TS2322. sanitizeHtml does NOT normalize
+// disabled="disabled" to an empty value (confirmed by actually running
+// it) - so ANY value on one of these two attributes, not just '', is
+// reachable and must always render as the bare JSX shorthand.
 const BOOLEAN_ATTRIBUTES = new Set(['disabled', 'required']);
 
+// input/textarea's rows/cols in componentSanitize.ts's ALLOWED_ATTRIBUTES
+// are the only two allowlisted attributes React types as `number`, not
+// `string` - confirmed with a real tsc compile that rows={"4"} produces
+// TS2322. The attribute allowlist has no value-format restriction (an
+// LLM could emit non-numeric text), so this coerces defensively rather
+// than assuming well-formed input, falling back to a safe positive
+// integer default (matches this being a purely cosmetic sizing hint,
+// not a security-relevant value).
+const NUMERIC_ATTRIBUTES = new Set(['rows', 'cols']);
+
+// Exported (not just used internally) because SiteExporter.ts's
+// buildLayoutFile also needs to safely embed free text (a Page's name)
+// into generated JSX - the exact same "{`/`}`/`<`/`>` breaks raw JSX
+// text" problem applies there too, and reusing this already-tested
+// function is safer than duplicating the escaping logic.
 export function escapeJsxText(text: string): string {
   // `{`/`}` would be misread as a JSX expression container. `<`/`>` are
   // syntax errors in raw JSX text (confirmed by actually compiling
@@ -72,13 +94,40 @@ function renderAttributes(attribs: Record<string, string>): string {
   return Object.entries(attribs).map(([name, value]) => {
     if (name === 'class') return renderClassAttribute(value);
     const jsxName = ATTRIBUTE_NAME_MAP[name] ?? name;
-    if (BOOLEAN_ATTRIBUTES.has(name) && value === '') return jsxName; // boolean shorthand, e.g. `disabled`
+    if (BOOLEAN_ATTRIBUTES.has(name)) return jsxName; // presence alone means true, any value
+    if (NUMERIC_ATTRIBUTES.has(name)) {
+      const num = Number.parseInt(value, 10);
+      return `${jsxName}={${Number.isFinite(num) && num > 0 ? num : 1}}`;
+    }
     // Wrapped as a JS string expression ({"..."}), not a bare
     // double-quoted JSX literal - JSX's plain-attribute-string escaping
     // is not the same as JS string escaping, so this guarantees correct
     // escaping via JSON.stringify regardless of the value's content.
     return `${jsxName}={${JSON.stringify(value)}}`;
   }).join(' ');
+}
+
+// CSS Modules (both webpack's css-loader and Next 16's Turbopack default)
+// compile in "pure" mode, which REJECTS any selector with no local class
+// (confirmed by actually running Next's own vendored
+// postcss-modules-local-by-default plugin in mode:'pure': `button {...}`,
+// `a:hover {...}`, `*{...}`, and `:root{...}` all fail; `.btn`, `.nav a`,
+// `.card:hover` all pass). sanitizeComponentCss validates functions and
+// at-rules but never selectors, so an LLM-emitted bare-tag/universal/
+// pseudo-class rule with no class reaches here unchanged and would break
+// the exported project's build with an opaque CSS-loader error the user
+// can't fix from inside GameForge. Also handles `id` selectors the same
+// way (as global, not local): htmlToJsx emits `id={"..."}` as the raw,
+// unmodified string (unlike `class`, which gets rewritten to reference
+// the CSS-Module-scoped `styles[...]` object) - so an `#id` rule must
+// stay a GLOBAL selector to keep matching the literal, un-hashed id
+// CSS Modules would otherwise apply to it.
+export function globalizeBareSelectors(css: string): string {
+  const root = postcss.parse(css);
+  root.walkRules((rule) => {
+    rule.selector = rule.selectors.map(s => (/\.[A-Za-z_-]/.test(s) ? s : `:global(${s})`)).join(', ');
+  });
+  return root.toString();
 }
 
 function renderNode(node: ParsedNode): string {

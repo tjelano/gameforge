@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { htmlToJsx } from '@/lib/services/siteExportDocument';
+import { htmlToJsx, globalizeBareSelectors } from '@/lib/services/siteExportDocument';
 
 describe('htmlToJsx', () => {
   it('converts a simple element with a class attribute to className referencing styles[...]', () => {
@@ -94,5 +94,62 @@ describe('htmlToJsx', () => {
     // less-well-specified plain-attribute-string parsing.
     const result = htmlToJsx('<a href="/a&quot;b">x</a>');
     expect(result).toBe('<a href={"/a\\"b"}>x</a>');
+  });
+
+  it('emits the bare boolean shorthand for disabled/required regardless of their string value, not just an empty string', () => {
+    // sanitizeHtml does NOT normalize disabled="disabled" to an empty
+    // value (confirmed by actually running it) - this XHTML-style form
+    // is common LLM output and must be treated identically to a bare
+    // `disabled`, since real HTML boolean-attribute semantics are
+    // presence-based, not value-based.
+    expect(htmlToJsx('<button disabled="disabled">Wait</button>')).toBe('<button disabled>Wait</button>');
+    expect(htmlToJsx('<input required="required">')).toBe('<input required />');
+  });
+
+  it('coerces rows/cols to a JSX number expression, never a string', () => {
+    // React types textarea's rows/cols as `number` - confirmed with a
+    // real tsc compile that rows={"4"} (a string) produces TS2322.
+    expect(htmlToJsx('<textarea rows="4" cols="30"></textarea>')).toBe('<textarea rows={4} cols={30}></textarea>');
+  });
+
+  it('falls back to a safe positive integer for a non-numeric rows/cols value', () => {
+    expect(htmlToJsx('<textarea rows="abc"></textarea>')).toBe('<textarea rows={1}></textarea>');
+  });
+});
+
+describe('globalizeBareSelectors', () => {
+  it('wraps a bare tag selector in :global(...) so CSS Modules pure mode accepts it', () => {
+    // Next's own CSS Modules loader (postcss-modules-local-by-default,
+    // mode: 'pure') rejects any selector with no local class -
+    // confirmed by actually running that exact loader against `button
+    // {...}`. sanitizeComponentCss validates functions/at-rules but
+    // never selectors, so this is a real, reachable case for
+    // LLM-generated component CSS.
+    const result = globalizeBareSelectors('button { color: red; }');
+    expect(result).toBe(':global(button) { color: red; }');
+  });
+
+  it('leaves a selector with a real local class untouched', () => {
+    const result = globalizeBareSelectors('.btn { color: red; }');
+    expect(result).toBe('.btn { color: red; }');
+  });
+
+  it('wraps only the bare part of a mixed selector list, leaving the class-bearing part untouched', () => {
+    const result = globalizeBareSelectors('a:hover, .btn { color: red; }');
+    expect(result).toBe(':global(a:hover), .btn { color: red; }');
+  });
+
+  it('treats an id selector as global, matching how htmlToJsx emits id unchanged (not rewritten to styles[...])', () => {
+    // Unlike `class`, htmlToJsx never rewrites `id` to reference the
+    // CSS-Module-scoped styles object - it stays the literal, unhashed
+    // string. An #id rule must therefore stay GLOBAL too, or CSS
+    // Modules would hash it to a name the rendered element never has.
+    const result = globalizeBareSelectors('#submit { color: red; }');
+    expect(result).toBe(':global(#submit) { color: red; }');
+  });
+
+  it('wraps a universal selector and a pseudo-element selector', () => {
+    expect(globalizeBareSelectors('* { margin: 0; }')).toBe(':global(*) { margin: 0; }');
+    expect(globalizeBareSelectors(':root { color: red; }')).toBe(':global(:root) { color: red; }');
   });
 });
