@@ -206,7 +206,12 @@ const VOID_ELEMENTS = new Set(['br', 'hr', 'input']);
 // be silently treated as boolean shorthand.
 const BOOLEAN_ATTRIBUTES = new Set(['disabled', 'required']);
 
-function escapeJsxText(text: string): string {
+// Exported (not just used internally) because SiteExporter.ts's
+// buildLayoutFile also needs to safely embed free text (a Page's name)
+// into generated JSX - the exact same "{`/`}`/`<`/`>` breaks raw JSX
+// text" problem applies there too, and reusing this already-tested
+// function is safer than duplicating the escaping logic.
+export function escapeJsxText(text: string): string {
   // `{`/`}` would be misread as a JSX expression container. `<`/`>` are
   // syntax errors in raw JSX text (confirmed by actually compiling
   // equivalent JSX with tsc --jsx react-jsx: unescaped "<" -> TS1003,
@@ -434,6 +439,52 @@ describe('siteExporter.exportSite', () => {
     expect(pkg.dependencies.react).toBe('^19.1.0');
     expect(pkg.scripts.dev).toBe('next dev');
   });
+
+  it('produces a safe component filename/identifier for an asset_type containing spaces, punctuation, and a leading digit', async () => {
+    // asset_type is free text (a plain <input> in PresetForm.tsx, no
+    // allowlist) - "2-column footer" would naively pascal-case to
+    // "2ColumnFooter", an invalid JS identifier (leading digit), and a
+    // colon in the type (not exercised here, but the same code path)
+    // would silently vanish into an NTFS Alternate Data Stream on
+    // Windows instead of erroring. This test proves the digit-leading
+    // case is handled; the fix (stripping all non-alphanumerics +
+    // guarding a leading digit) covers both by construction.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await assetService.create({
+      styleId: style.id,
+      createdBy: 'user-1',
+      assetType: '2-column footer',
+      prompt: 'a footer',
+      imagePath: 'weird-type.html',
+      outputKind: 'component',
+    });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'weird-type.html'), COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const result = await siteExporter.exportSite(style.id, 'test-weird-type');
+    const ok = result as { targetDir: string };
+    const componentFiles = await fsPromises.readdir(path.join(ok.targetDir, 'components'));
+    const tsxFile = componentFiles.find(f => f.endsWith('.tsx'));
+    expect(tsxFile).toBeDefined();
+    // Must not start with a digit - a leading-digit filename/identifier
+    // is exactly the bug this test guards against.
+    expect(tsxFile).not.toMatch(/^[0-9]/);
+    const content = await fsPromises.readFile(path.join(ok.targetDir, 'components', tsxFile!), 'utf-8');
+    expect(content).not.toMatch(/export function [0-9]/);
+  });
+
+  it('escapes a page name containing angle brackets so it does not break the generated layout.tsx', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await pageService.create({ styleId: style.id, name: 'Pricing & <Support>', createdBy: 'user-1' });
+    const result = await siteExporter.exportSite(style.id, 'test-page-name-escape');
+    const ok = result as { targetDir: string };
+    const layoutContent = await fsPromises.readFile(path.join(ok.targetDir, 'app', 'layout.tsx'), 'utf-8');
+    // The raw, unescaped name must never appear as literal JSX text -
+    // it must be wrapped as a JS string expression instead.
+    expect(layoutContent).not.toContain('>Pricing & <Support></a>');
+    expect(layoutContent).toContain(JSON.stringify('Pricing & <Support>'));
+  });
 });
 ```
 
@@ -456,7 +507,7 @@ import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
-import { htmlToJsx } from '@/lib/services/siteExportDocument';
+import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
 import type { Page, Asset } from '@/lib/database/schema';
 
 export interface SiteExportResult {
@@ -469,8 +520,28 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+// asset_type is free text typed by the user (PresetForm.tsx's "component
+// type" field is a plain <input>, not a dropdown) - it can contain
+// anything, including characters that are NOT safe in a JS identifier or
+// a Windows filename. Two real, verified failure modes if this only
+// stripped separator characters (a "-"/"_"/whitespace-only replace,
+// which was this plan's own earlier, buggy draft):
+//   1. A name starting with a digit after stripping (e.g. "2-column
+//      footer" -> "2ColumnFooter") produces an invalid JS identifier -
+//      confirmed with a real tsc compile: TS1003/TS1005/TS1351.
+//   2. A name containing a colon (e.g. "FAQ: how it works") is even
+//      worse on Windows (this project's own dev platform): a colon in a
+//      filename doesn't throw on write - NTFS silently treats it as an
+//      Alternate-Data-Stream separator, so fs.writeFile "succeeds" but
+//      creates a 0-byte file with the real content hidden in an
+//      invisible stream. Confirmed with a real fs.writeFileSync test.
+// The fix: strip EVERYTHING outside [A-Za-z0-9] (not just common
+// separators), and guard against a leading digit explicitly.
 function pascalCase(name: string): string {
-  return name.replace(/(^|[-_\s]+)([a-z0-9])/gi, (_m, _sep, ch) => ch.toUpperCase());
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const pascal = words.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('');
+  if (!pascal) return 'Component';
+  return /^[0-9]/.test(pascal) ? `C${pascal}` : pascal;
 }
 
 function componentName(asset: Asset): string {
@@ -621,9 +692,16 @@ ${component.jsx}
   }
 
   private buildLayoutFile(pages: Page[], slugs: string[]): string {
+    // page.name is free text (z.string().min(1), no character
+    // restriction - app/api/styles/[id]/pages/route.ts) and must be
+    // escaped the same way htmlToJsx escapes component text content: an
+    // unescaped "<"/">"/"{"/"}" in a page name is a real tsc syntax
+    // error (confirmed: TS17008 for an unclosed-looking "<Tag>" inside
+    // raw JSX text), and this codebase's own domain (game asset naming,
+    // e.g. "HP < 50%") makes such names plausible, not exotic.
     const links = pages.map((page, i) => {
       const href = i === 0 ? '/' : `/${slugs[i]}`;
-      return `        <a href="${href}">${page.name}</a>`;
+      return `        <a href="${href}">${escapeJsxText(page.name)}</a>`;
     }).join('\n');
     return `import './globals.css';
 
