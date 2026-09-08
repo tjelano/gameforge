@@ -7,9 +7,11 @@ import { DatabaseConnection } from '@/lib/database';
 import { assetService } from '@/lib/services/AssetService';
 import { styleService } from '@/lib/services/StyleService';
 import { userService } from '@/lib/services/UserService';
+import { presetService } from '@/lib/services/PresetService';
+import { pageService } from '@/lib/services/PageService';
 import { storageDirFor } from '@/lib/services/shared/assetSafety';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
-import { StyleSchema, AssetSchema, UserSchema } from '@/lib/database/schema';
+import { StyleSchema, AssetSchema, UserSchema, PresetSchema, PageSchema } from '@/lib/database/schema';
 
 export interface SyncResult {
   success: boolean;
@@ -20,7 +22,7 @@ export interface SyncResult {
 // Line-anchored: a real git conflict marker owns its whole line.
 const CONFLICT_MARKER_REGEX = /^<<<<<<<|^=======$|^>>>>>>>/m;
 
-const DATA_DIRS = ['data/styles', 'data/assets', 'data/users'] as const;
+const DATA_DIRS = ['data/styles', 'data/assets', 'data/users', 'data/presets', 'data/pages'] as const;
 
 class GitServiceImpl {
   private git() {
@@ -42,10 +44,14 @@ class GitServiceImpl {
     const styles = await styleService.getAll();
     const assets = await assetService.getAll();
     const users = await userService.getAll();
+    const presets = await presetService.getAll();
+    const pages = await pageService.getAll();
 
     const stylesDir = path.join(getProjectRoot(), 'data', 'styles');
     const assetsDir = path.join(getProjectRoot(), 'data', 'assets');
     const usersDir = path.join(getProjectRoot(), 'data', 'users');
+    const presetsDir = path.join(getProjectRoot(), 'data', 'presets');
+    const pagesDir = path.join(getProjectRoot(), 'data', 'pages');
 
     for (const style of styles) {
       const filePath = path.join(stylesDir, `style-${style.id}.json`);
@@ -60,6 +66,16 @@ class GitServiceImpl {
     for (const user of users) {
       const filePath = path.join(usersDir, `user-${user.id}.json`);
       await fsPromises.writeFile(filePath, JSON.stringify(user, null, 2), 'utf-8');
+    }
+
+    for (const preset of presets) {
+      const filePath = path.join(presetsDir, `preset-${preset.id}.json`);
+      await fsPromises.writeFile(filePath, JSON.stringify(preset, null, 2), 'utf-8');
+    }
+
+    for (const page of pages) {
+      const filePath = path.join(pagesDir, `page-${page.id}.json`);
+      await fsPromises.writeFile(filePath, JSON.stringify(page, null, 2), 'utf-8');
     }
   }
 
@@ -130,6 +146,52 @@ class GitServiceImpl {
           nine_slice_margins = excluded.nine_slice_margins,
           states = excluded.states,
           output_kind = excluded.output_kind
+      `).run(data);
+    }
+
+    const presetsDir = path.join(getProjectRoot(), 'data', 'presets');
+    const presetFiles = await this.readJsonFiles(presetsDir);
+    for (const { filePath, content } of presetFiles) {
+      if (CONFLICT_MARKER_REGEX.test(content)) {
+        throw new Error(`Conflict markers found in ${filePath}. Please resolve manually.`);
+      }
+      const data = PresetSchema.parse(JSON.parse(content));
+      db.prepare(`
+        INSERT INTO presets (id, name, created_by, prompt, tech_stack_tags, theme_prompt, components, is_deleted, created_at, updated_at)
+        VALUES (@id, @name, @created_by, @prompt, @tech_stack_tags, @theme_prompt, @components, @is_deleted, @created_at, @updated_at)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          created_by = excluded.created_by,
+          prompt = excluded.prompt,
+          tech_stack_tags = excluded.tech_stack_tags,
+          theme_prompt = excluded.theme_prompt,
+          components = excluded.components,
+          is_deleted = excluded.is_deleted,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
+      `).run(data);
+    }
+
+    // Pages import LAST - pages.style_id is a real FK (REFERENCES styles(id)),
+    // so styles must already exist in the DB before this runs.
+    const pagesDir = path.join(getProjectRoot(), 'data', 'pages');
+    const pageFiles = await this.readJsonFiles(pagesDir);
+    for (const { filePath, content } of pageFiles) {
+      if (CONFLICT_MARKER_REGEX.test(content)) {
+        throw new Error(`Conflict markers found in ${filePath}. Please resolve manually.`);
+      }
+      const data = PageSchema.parse(JSON.parse(content));
+      db.prepare(`
+        INSERT INTO pages (id, style_id, name, created_by, component_asset_ids, is_deleted, created_at, updated_at)
+        VALUES (@id, @style_id, @name, @created_by, @component_asset_ids, @is_deleted, @created_at, @updated_at)
+        ON CONFLICT(id) DO UPDATE SET
+          style_id = excluded.style_id,
+          name = excluded.name,
+          created_by = excluded.created_by,
+          component_asset_ids = excluded.component_asset_ids,
+          is_deleted = excluded.is_deleted,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at
       `).run(data);
     }
   }

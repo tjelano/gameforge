@@ -3,6 +3,13 @@ import { DatabaseConnection } from '@/lib/database';
 import { PageSchema, type Page } from '@/lib/database/schema';
 
 class PageServiceImpl {
+  /** Every page row, active and soft-deleted alike, across all styles. Used for Git export. */
+  async getAll(): Promise<Page[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare('SELECT * FROM pages ORDER BY created_at DESC').all();
+    return rows.map(row => PageSchema.parse(row));
+  }
+
   /** Active pages belonging to one Style Bible, newest first. */
   async getActivePagesForStyle(styleId: string): Promise<Page[]> {
     const db = DatabaseConnection.getInstance();

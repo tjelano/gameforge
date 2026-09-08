@@ -4,6 +4,13 @@ import { PresetSchema, type Preset, type PresetComponent } from '@/lib/database/
 import { styleService } from '@/lib/services/StyleService';
 
 class PresetServiceImpl {
+  /** Every preset row, active and soft-deleted alike. Used for Git export. */
+  async getAll(): Promise<Preset[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare('SELECT * FROM presets ORDER BY created_at DESC').all();
+    return rows.map(row => PresetSchema.parse(row));
+  }
+
   async getActivePresets(): Promise<Preset[]> {
     const db = DatabaseConnection.getInstance();
     const rows = db.prepare('SELECT * FROM presets WHERE is_deleted = 0 ORDER BY created_at DESC').all();

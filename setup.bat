@@ -11,6 +11,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+where git-lfs >nul 2>&1
+if errorlevel 1 (
+  echo ! git-lfs is not installed. .gitattributes tracks *.png/*.jpg/*.glb/*.gltf via LFS -
+  echo   without it, those files get committed as regular blobs instead of pointers,
+  echo   permanently bloating the repo. Install git-lfs ^(https://git-lfs.com^) first.
+) else (
+  git lfs install
+)
+
 if not exist ".git" (
   echo Not a git repository yet. Initializing...
   git init
