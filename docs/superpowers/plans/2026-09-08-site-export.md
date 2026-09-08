@@ -61,12 +61,27 @@ import { htmlToJsx } from '@/lib/services/siteExportDocument';
 describe('htmlToJsx', () => {
   it('converts a simple element with a class attribute to className referencing styles[...]', () => {
     const result = htmlToJsx('<button class="btn-primary">Buy now</button>');
-    expect(result).toBe('<button className={styles[\'btn-primary\']}>Buy now</button>');
+    // The styles[...] key comes from JSON.stringify, which always produces
+    // double-quoted output - this is the ONLY safe choice (see the
+    // "class name containing a quote" test below for why single-quoting
+    // by hand is unsafe).
+    expect(result).toBe('<button className={styles["btn-primary"]}>Buy now</button>');
   });
 
   it('rewrites multiple space-separated classes into a template literal of styles[...] lookups', () => {
     const result = htmlToJsx('<div class="card shadow">Hi</div>');
-    expect(result).toBe('<div className={`${styles[\'card\']} ${styles[\'shadow\']}`}>Hi</div>');
+    expect(result).toBe('<div className={`${styles["card"]} ${styles["shadow"]}`}>Hi</div>');
+  });
+
+  it('escapes a quote character inside a class name via JSON.stringify, not raw interpolation', () => {
+    // AI-generated component HTML is untrusted-shaped content -
+    // sanitizeComponentHtml allowlists attribute NAMES, not value
+    // content, so a quote character inside a class name is a real,
+    // reachable case, not hypothetical. Raw string interpolation here
+    // would let the value break out of the generated .tsx file's string
+    // literal boundary - JSON.stringify is the only safe choice.
+    const result = htmlToJsx(`<div class="foo'bar">x</div>`);
+    expect(result).toBe(`<div className={styles["foo'bar"]}>x</div>`);
   });
 
   it('maps the "for" attribute to htmlFor', () => {
@@ -74,9 +89,19 @@ describe('htmlToJsx', () => {
     expect(result).toBe('<label htmlFor={"email"}>Email</label>');
   });
 
-  it('emits a bare boolean attribute shorthand for an empty-string attribute value', () => {
+  it('emits a bare boolean attribute shorthand only for genuine HTML boolean attributes', () => {
     const result = htmlToJsx('<button disabled>Wait</button>');
     expect(result).toBe('<button disabled>Wait</button>');
+  });
+
+  it('does NOT treat an empty-string value on a non-boolean attribute as boolean shorthand', () => {
+    // <option value=""> is the standard "please select" placeholder
+    // pattern, and <input placeholder=""> is a real, reachable case -
+    // an empty-string VALUE is not the same thing as a boolean
+    // attribute's mere presence. Only genuine HTML boolean attributes
+    // (disabled, required, in this allowlist) get the bare shorthand.
+    expect(htmlToJsx('<option value="">Please select</option>')).toBe('<option value={""}>Please select</option>');
+    expect(htmlToJsx('<input placeholder="">')).toBe('<input placeholder={""} />');
   });
 
   it('self-closes void elements', () => {
@@ -95,9 +120,21 @@ describe('htmlToJsx', () => {
     expect(result).toBe('<p>{"Buy {now}"}</p>');
   });
 
+  it('escapes literal angle brackets in text content, which are otherwise invalid inside JSX text', () => {
+    // Confirmed by actually compiling equivalent raw JSX with tsc
+    // (--jsx react-jsx): an unescaped "<" produces TS1003 (Identifier
+    // expected) and an unescaped ">" produces TS1382 - text content is
+    // NOT restricted by sanitizeComponentHtml (only tags/attributes
+    // are), so LLM-generated component copy containing "<"/">" (e.g.
+    // "Price < $10", "See > for details") is a real, reachable case
+    // that would otherwise break the exported project's build.
+    expect(htmlToJsx('<p>Price is < 10 dollars</p>')).toBe('<p>{"Price is < 10 dollars"}</p>');
+    expect(htmlToJsx('<p>See > for details</p>')).toBe('<p>{"See > for details"}</p>');
+  });
+
   it('renders nested elements and preserves attributes on each level', () => {
     const result = htmlToJsx('<nav class="nav"><a href="/" class="link">Home</a></nav>');
-    expect(result).toBe('<nav className={styles[\'nav\']}><a href={"/"} className={styles[\'link\']}>Home</a></nav>');
+    expect(result).toBe('<nav className={styles["nav"]}><a href={"/"} className={styles["link"]}>Home</a></nav>');
   });
 
   it('renders multiple top-level sibling nodes joined with no separator', () => {
@@ -161,12 +198,35 @@ const ATTRIBUTE_NAME_MAP: Record<string, string> = {
 
 const VOID_ELEMENTS = new Set(['br', 'hr', 'input']);
 
+// Only these two attributes in componentSanitize.ts's ALLOWED_ATTRIBUTES
+// are genuine HTML boolean attributes (presence = true, regardless of
+// value). An empty-string VALUE on any other attribute (e.g.
+// <option value=""> or <input placeholder="">) is a real empty string,
+// not "attribute absent" - it must still render as `name={""}`, never
+// be silently treated as boolean shorthand.
+const BOOLEAN_ATTRIBUTES = new Set(['disabled', 'required']);
+
 function escapeJsxText(text: string): string {
-  if (!text.includes('{') && !text.includes('}')) return text;
+  // `{`/`}` would be misread as a JSX expression container. `<`/`>` are
+  // syntax errors in raw JSX text (confirmed by actually compiling
+  // equivalent JSX with tsc --jsx react-jsx: unescaped "<" -> TS1003,
+  // unescaped ">" -> TS1382) - text content is NOT restricted by
+  // sanitizeComponentHtml (only tags/attributes are), so LLM-generated
+  // component copy containing any of these four characters is a real,
+  // reachable case, not a hypothetical one.
+  if (!/[{}<>]/.test(text)) return text;
   return `{${JSON.stringify(text)}}`;
 }
 
 function renderClassAttribute(value: string): string {
+  // JSON.stringify is the only safe choice here, not raw interpolation -
+  // it always produces double-quoted output, which correctly handles a
+  // quote character inside a class name (a real, reachable case: this
+  // HTML is AI-generated, and sanitizeComponentHtml allowlists attribute
+  // NAMES, not value content). Do not "fix" this to produce
+  // single-quoted output to match some other convention - there is no
+  // safe way to hand-roll single-quote escaping here that JSON.stringify
+  // doesn't already give you for free.
   const classNames = value.split(/\s+/).filter(Boolean);
   if (classNames.length === 1) {
     return `className={styles[${JSON.stringify(classNames[0])}]}`;
@@ -179,7 +239,7 @@ function renderAttributes(attribs: Record<string, string>): string {
   return Object.entries(attribs).map(([name, value]) => {
     if (name === 'class') return renderClassAttribute(value);
     const jsxName = ATTRIBUTE_NAME_MAP[name] ?? name;
-    if (value === '') return jsxName; // boolean attribute shorthand, e.g. `disabled`
+    if (BOOLEAN_ATTRIBUTES.has(name) && value === '') return jsxName; // boolean shorthand, e.g. `disabled`
     // Wrapped as a JS string expression ({"..."}), not a bare
     // double-quoted JSX literal - JSX's plain-attribute-string escaping
     // is not the same as JS string escaping, so this guarantees correct
