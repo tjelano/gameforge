@@ -207,8 +207,7 @@ import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
-import { userService } from '@/lib/services/UserService';
-import { sessionService } from '@/lib/services/SessionService';
+import { seedSession } from './helpers/testSession';
 import { POST } from '@/app/api/generate/route';
 
 let tempRoot: string;
@@ -227,10 +226,9 @@ beforeEach(async () => {
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
 
-  const user = await userService.create({ name: `user-${randomUUID()}` });
-  const session = await sessionService.create(user.id);
-  cookieHeader = `session=${session.id}`;
-  const style = await styleService.create({ name: 'x', createdBy: user.id, parameters: '{}' });
+  const seeded = await seedSession();
+  cookieHeader = seeded.cookieHeader;
+  const style = await styleService.create({ name: 'x', createdBy: seeded.userId, parameters: '{}' });
   styleId = style.id;
 });
 
@@ -240,10 +238,13 @@ afterEach(async () => {
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
+// Matches this codebase's real existing pattern (see test/pagesRoute.test.ts) -
+// Cookie header, capital C, and seedSession()'s cookieHeader is already the
+// full "session=<token>" string.
 function req(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', cookie: cookieHeader },
+    headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
     body: JSON.stringify(body),
   });
 }
@@ -444,7 +445,7 @@ Note: `jobInput` is now built explicitly (field-by-field) instead of `{ ...input
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/generateRoute.test.ts`
-Expected: PASS (6 tests). If `sessionService`/cookie-based auth in the test doesn't match this codebase's real helper name, check `test/pagesRoute.test.ts`'s own auth setup for the exact current helper and mirror it exactly — do not guess a different auth pattern.
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: Commit**
 
