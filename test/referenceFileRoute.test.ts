@@ -38,6 +38,16 @@ describe('GET /api/references/[filename]', () => {
     expect(webpRes.headers.get('Content-Type')).toBe('image/webp');
   });
 
+  it('serves .jpeg as image/jpeg too, and an uppercase extension case-insensitively', async () => {
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'references', 'reference-4.jpeg'), Buffer.from('x'));
+    const jpegRes = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'reference-4.jpeg' }) });
+    expect(jpegRes.headers.get('Content-Type')).toBe('image/jpeg');
+
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'references', 'reference-5.PNG'), Buffer.from('x'));
+    const upperRes = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'reference-5.PNG' }) });
+    expect(upperRes.headers.get('Content-Type')).toBe('image/png');
+  });
+
   it('returns 404 for a missing file', async () => {
     const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'reference-missing.png' }) });
     expect(res.status).toBe(404);

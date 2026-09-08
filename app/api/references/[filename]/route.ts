@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 const CONTENT_TYPE_FOR_EXTENSION: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
   webp: 'image/webp',
 };
 
