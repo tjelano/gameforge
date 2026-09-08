@@ -37,10 +37,11 @@ text-prompt-only today, for all three generator types (theme, component, pixel-a
 - **No git sync for reference images.** They're working input, not a finished asset — matches
   jobs themselves, which are already local-only (`DATA_DIRS` in `GitService.ts` never included
   `data/jobs`).
-- **Cleanup**: reference images are covered by the same orphan-protection logic that already
-  guards in-flight job images (`AssetService.cleanupOrphanedImages()`'s existing
-  pending/processing/complete protection, per AGENTS.md's own noted convention) — a reference
-  image tied to a live job must not be deleted out from under it.
+- **Cleanup**: `AssetService.cleanupOrphanedIn()`'s real protection query (checked directly) is
+  `status IN ('pending', 'processing', 'complete')` — it does NOT protect `'failed'` jobs' files
+  today, for any existing job artifact. Reference images get protected under that exact same
+  condition, no special-casing for "failed" — consistent with how every other job-scoped file in
+  this app already behaves, not a new retention policy invented for this one feature.
 
 ## Design
 
@@ -53,25 +54,35 @@ text-prompt-only today, for all three generator types (theme, component, pixel-a
   `assetType` from the current asset, plus a reference note field.
 
 ### Request shape
-`GenerateSchema` in `app/api/generate/route.ts` already has a free-form `options:
-z.record(z.string(), z.unknown()).optional()` field. The new `referenceImage` key must NOT ride
-in under that untyped `z.unknown()` catch-all — an uploaded payload needs real server-side
-validation, not just the client-side file-picker checks (trivially bypassable by anyone calling
-the API directly). The route parses `options.referenceImage` through its own dedicated schema
-before it ever reaches `jobService.create()`:
+`referenceImage` is a new, dedicated TOP-LEVEL field on `GenerateSchema` — not nested inside the
+existing free-form `options: z.record(z.string(), z.unknown()).optional()` bag. `options` stays
+reserved for small structured job parameters (like the existing `pieces` key); `referenceImage`
+represents untrusted binary-ish data and deserves its own explicit schema and its own explicit
+handling, not a special-cased reach-into-an-untyped-catch-all:
 ```ts
 const ReferenceImageSchema = z.object({
   base64: z.string().max(<N>), // server-side size ceiling, exact N chosen at implementation time
   mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
 });
 ```
-Everything else in `options` (existing keys like `pieces`) stays under the current untyped
-catch-all — this tightening applies only to the new image payload, since it's the only key that
-represents untrusted binary-ish data rather than small structured job parameters.
-`JobService.create()` saves the validated base64 payload to
-`storage/references/<jobId>.<ext>` and stores the FILENAME (not the base64 blob) in
-`jobs.options`, keeping the DB row small — same "store a path, not a blob" convention every other
-image-bearing row in this schema already follows.
+`JobService.create()` today is a pure DB-row insert with no file-writing responsibility (checked
+directly — it never touches `storage/`) — this feature does not change that. The API route
+validates and writes the reference image to `storage/references/<jobId>.<ext>` BEFORE calling
+`jobService.create()`, then passes only the filename (not the base64 blob) into `options`, same
+"store a path, not a blob" convention every other image-bearing row in this schema follows. This
+means the file exists slightly before the job row is committed; if the (extremely unlikely,
+single-statement, already-Zod-validated) insert ever failed, the result is an orphaned file with
+no functional or security impact — accepted, not engineered around, matching how this codebase
+already doesn't wrap single-row inserts elsewhere (`StyleService.create()`, `PageService.create()`,
+etc.) in transactional rollback; that machinery is reserved for genuinely multi-step writes like
+`PresetService.applyPreset()`.
+
+**Where the image gets shown back to the user**: Approach B was chosen specifically so a user can
+see what reference they used and retry without re-uploading — that means it needs a new
+authenticated serving route, mirroring the existing sibling pattern
+(`app/api/images/[filename]/route.ts`, `app/api/themes/[filename]/route.ts`,
+`app/api/components/[filename]/route.ts`) rather than being served as a static file with no auth
+check.
 
 ### Generator changes
 - **`ClaudeApiThemeGenerator` / `ClaudeApiComponentGenerator`**: when a reference image is
@@ -79,29 +90,41 @@ image-bearing row in this schema already follows.
   content: [{ type: 'image', source: { type: 'base64', media_type, data } }, { type: 'text', text:
   fullPrompt }] }]` — a request-shape change only, no change to `tool_choice`/response parsing
   (both generators already force a single tool call; adding an image block doesn't affect that).
-- **`PixellabGenerator`**: when present, add `init_image` (+ a sensible default strength) to the
-  `create-image-pixflux` request body. Exact field name/encoding to be confirmed against
-  Pixellab's live OpenAPI spec during implementation (per the precedent noted above) — this spec
-  commits to the capability existing, not to an unverified exact payload shape.
+- **`PixellabGenerator`**: when present, add `init_image` to the `create-image-pixflux` request
+  body, plus an explicit `referenceStrength` (optional field on `ReferenceImageSchema`, sensible
+  default chosen at implementation time) rather than a hardcoded constant — a user attaching a
+  reference image will reasonably want some control over how strongly it's honored vs. the text
+  prompt, and this is a real, immediate need for the feature as shipped, not speculative future
+  flexibility. Exact `init_image` field name/encoding to be confirmed against Pixellab's live
+  OpenAPI spec during implementation (per the precedent noted above) — this spec commits to the
+  capability existing, not to an unverified exact payload shape.
 
 ### Regenerate-with-feedback context
-When creating a job via the new "Regenerate with changes" path, the pre-filled prompt includes
-the existing asset's current content (its stored theme tokens or component HTML, read the same
-way dedup-steering already reads existing theme assets for its "avoid these colors" context) so
-the model has both "here's what exists now" and "here's what I want changed," not just the raw
-image in isolation.
+For theme/component regeneration, the pre-filled prompt includes the existing asset's current
+content (its stored theme tokens or component HTML, read the same way dedup-steering already
+reads existing theme assets for its "avoid these colors" context at real production scale — these
+are small, bounded payloads, 8 short token fields or one component's HTML/CSS, nowhere near
+context-window territory) so the model has both "here's what exists now" and "here's what I want
+changed." For **sprite** regeneration, there is no meaningful text form of "the current sprite" —
+"based on the current asset" means passing the sprite's own current image as the `init_image`
+reference alongside the new note, not a text dump.
 
 ### Error handling
-- Unsupported file type or oversized image: rejected client-side before upload, same validation
-  layer as any other form input in this app.
+- Unsupported file type or oversized image: rejected both client-side (fast feedback) AND
+  server-side via `ReferenceImageSchema` (the real boundary — client-side alone is bypassable by
+  anyone calling the API directly).
 - Claude/Pixellab reject the image itself (bad format, content policy, etc.): the job fails with
   a clear error message, same failure path every other generation failure already uses — no new
   error-handling mechanism needed.
+- Reference image acceptance/rejection is logged with `console.error`-style context on failure,
+  matching this codebase's existing convention (see `SiteExporter.ts`'s catch blocks) — not a new
+  logging system, just following the pattern already used everywhere else in this app.
 
 ### Testing
 Same convention as every other service in this codebase: real temp SQLite + real temp files, not
 mocks (matches `test/gitServicePages.test.ts`, `test/siteExporter.test.ts`, etc.). New tests
-cover: the job-creation path persisting `referenceImage` into `options` correctly, the two
+cover: the route correctly writing the reference image file and persisting only its filename into
+`options`, the two
 generator classes building the right request shape when an image is present vs. absent, and
 `cleanupOrphanedImages()`-equivalent protection for a reference image tied to a live job.
 
