@@ -5,6 +5,7 @@ import { DatabaseConnection } from '@/lib/database';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
 import { AssetSchema, NineSliceMarginsSchema, type Asset, type NineSliceMargins } from '@/lib/database/schema';
+import { sanitizeComponentCss } from '@/lib/services/componentSanitize';
 
 class AssetServiceImpl {
   async create(input: {
@@ -63,6 +64,34 @@ class AssetServiceImpl {
       `SELECT * FROM assets WHERE style_id = ? AND output_kind = 'theme' AND is_deleted = 0 ORDER BY created_at DESC`
     ).all(styleId);
     return rows.map(row => AssetSchema.parse(row));
+  }
+
+  /**
+   * A style's most-recently-promoted theme's CSS, re-sanitized through the
+   * same boundary component CSS goes through. Theme CSS is validated by a
+   * completely separate pipeline (ThemeTokensSchema) at generation/edit
+   * time only, never re-checked at serve time the way component files now
+   * are - reusing sanitizeComponentCss here closes that gap. Returns null
+   * (no theme available) for any reason the theme can't be used: no
+   * styleId, no promoted theme, unreadable file, or failed sanitization.
+   * Shared by the component-serve route and the page-render route.
+   */
+  async loadThemeCssForStyle(styleId: string | null): Promise<string | null> {
+    if (!styleId) return null;
+    try {
+      const themes = await this.getActiveThemeAssetsForStyle(styleId);
+      if (themes.length === 0) return null;
+      const themeFilename = themes[0].image_path;
+      if (!themeFilename || themeFilename.includes('/') || themeFilename.includes('\\') || themeFilename.includes('..')) {
+        return null;
+      }
+      const themePath = path.join(getProjectRoot(), 'storage', 'themes', themeFilename);
+      const rawCss = await fsPromises.readFile(themePath, 'utf-8');
+      return sanitizeComponentCss(rawCss);
+    } catch (e) {
+      console.error(`Could not load theme CSS for style ${styleId}:`, e);
+      return null;
+    }
   }
 
   /** All active assets (any kind) for one style — powers the Style Bible Hub page. */
