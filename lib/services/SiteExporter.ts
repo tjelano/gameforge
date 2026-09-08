@@ -119,7 +119,7 @@ class SiteExporterImpl {
       }
       await fsPromises.writeFile(
         path.join(targetDir, 'app', 'globals.css'),
-        `@import "tailwindcss";\n\n${themeBlock}`
+        `@import "tailwindcss";\n\n${themeBlock}${this.buildThemeAliasBlock(themeBlock)}`
       );
 
       const slugs = this.buildPageSlugs(pages);
@@ -134,6 +134,7 @@ class SiteExporterImpl {
 
       await fsPromises.writeFile(path.join(targetDir, 'package.json'), this.buildPackageJson());
       await fsPromises.writeFile(path.join(targetDir, 'tsconfig.json'), this.buildTsConfig());
+      await fsPromises.writeFile(path.join(targetDir, 'postcss.config.mjs'), this.buildPostcssConfig());
     } catch (e) {
       console.error(`Failed to write exported site files to ${targetDir}:`, e);
       throw e;
@@ -236,6 +237,14 @@ ${elements}
 `;
   }
 
+  // Confirmed against Tailwind v4's own Next.js setup guide: @import
+  // "tailwindcss" alone does nothing without @tailwindcss/postcss wired
+  // into a postcss.config.mjs (see buildPostcssConfig below) - without
+  // it, Next.js never runs Tailwind's PostCSS transform at all, so the
+  // @theme block in globals.css passes through as literal, unrecognized
+  // CSS and every token in it is silently dropped by the browser.
+  // Confirmed by actually running the exported project and inspecting
+  // the served CSS, not just by reading Tailwind's docs.
   private buildPackageJson(): string {
     return JSON.stringify({
       name: 'exported-site',
@@ -257,8 +266,48 @@ ${elements}
         '@types/react': '^19.0.0',
         '@types/react-dom': '^19.0.0',
         '@types/node': '^24.0.0',
+        postcss: '^8.5.28',
+        '@tailwindcss/postcss': '^4.0.0',
       },
     }, null, 2);
+  }
+
+  private buildPostcssConfig(): string {
+    return `const config = {
+  plugins: {
+    '@tailwindcss/postcss': {},
+  },
+};
+
+export default config;
+`;
+  }
+
+  // tokensToTailwindTheme (themeExport/tailwindExporter.ts) is shared with
+  // the single-asset "download as Tailwind CSS" export route, which
+  // deliberately uses Tailwind's own idiomatic variable names
+  // (--color-background/--color-foreground/--spacing) so utilities like
+  // bg-background generate for a user pasting the file into their own
+  // Tailwind project - that contract has its own test
+  // (test/assetExportRoute.test.ts) and must not change here.
+  // But every real component's CSS (MockComponentGenerator.ts, and the
+  // LLM tool-schema description in ComponentGenerator.ts) references the
+  // PRE-EXISTING GameForge variable names instead: --color-bg, --color-fg,
+  // --space-unit (colorAccent/colorBorder/fontHeading/fontBody/radiusBase
+  // already match by coincidence). SiteExporter copies that component CSS
+  // into the exported project verbatim, unrenamed - so without this alias
+  // block, every exported component's background, text color, and
+  // padding/margin/gap silently resolve to nothing. Confirmed by actually
+  // exporting a themed style, running the exported project, and observing
+  // an unstyled page - not just by reading the two files side by side.
+  private buildThemeAliasBlock(themeBlock: string): string {
+    if (!themeBlock) return '';
+    return `:root {
+  --color-bg: var(--color-background);
+  --color-fg: var(--color-foreground);
+  --space-unit: var(--spacing);
+}
+`;
   }
 
   private buildTsConfig(): string {
