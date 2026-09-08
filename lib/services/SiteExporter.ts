@@ -62,8 +62,18 @@ interface ConvertedComponent {
   css: string;
 }
 
+// Mirrors the route's own Zod validation - re-checked here too so this
+// public method is safe regardless of caller (the route is the only
+// current caller, but a future direct caller - a script, a test, another
+// route - must not be able to bypass this and path-traverse via subdir).
+const SUBDIR_PATTERN = /^[a-z0-9-]+$/;
+
 class SiteExporterImpl {
-  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' }> {
+  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' }> {
+    if (!SUBDIR_PATTERN.test(subdir)) {
+      return { error: 'INVALID_SUBDIR' };
+    }
+
     const pagesNewestFirst = await pageService.getActivePagesForStyle(styleId);
     if (pagesNewestFirst.length === 0) {
       return { error: 'NOTHING_TO_EXPORT' };
@@ -77,8 +87,14 @@ class SiteExporterImpl {
     try {
       await fsPromises.access(targetDir);
       return { error: 'ALREADY_EXISTS' };
-    } catch {
-      // ENOENT is the expected, non-error case - the target doesn't exist yet.
+    } catch (e: any) {
+      // ENOENT is the expected, non-error case - the target doesn't
+      // exist yet. Anything else (e.g. EACCES - the path exists but is
+      // unreadable) is a real problem this must not silently proceed
+      // past, since that would lead to a much less clear failure later
+      // (a raw mkdir/writeFile error) instead of surfacing the real
+      // cause here.
+      if (e?.code !== 'ENOENT') throw e;
     }
 
     const componentsByAssetId = new Map<string, ConvertedComponent>();

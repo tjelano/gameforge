@@ -12,6 +12,7 @@ const SiteExportSchema = z.object({
 const ERROR_MESSAGES: Record<string, string> = {
   NOTHING_TO_EXPORT: 'This Style Bible has no pages to export.',
   ALREADY_EXISTS: 'That folder name is already used — pick another.',
+  INVALID_SUBDIR: 'subdir must contain only lowercase letters, numbers, and hyphens.',
 };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -22,7 +23,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const { id } = await params;
-    const input = SiteExportSchema.parse(await req.json());
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ success: false, error: 'Request body must be valid JSON' }, { status: 400 });
+    }
+    const input = SiteExportSchema.parse(body);
     const result = await siteExporter.exportSite(id, input.subdir);
 
     if ('error' in result) {

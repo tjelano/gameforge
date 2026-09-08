@@ -154,6 +154,17 @@ describe('siteExporter.exportSite', () => {
     expect(second).toEqual({ error: 'ALREADY_EXISTS' });
   });
 
+  it('rejects an unsafe subdir even when called directly, bypassing the route\'s own validation', async () => {
+    // exportSite is a public method on an exported singleton - the route
+    // is its only current caller, but a future direct caller (a script,
+    // a test, another route) must not be able to path-traverse via
+    // subdir just because the route's own Zod check was skipped.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    const result = await siteExporter.exportSite(style.id, '../escape');
+    expect(result).toEqual({ error: 'INVALID_SUBDIR' });
+  });
+
   it('writes a package.json with the pinned dependency versions and a package.json in the exported project', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });

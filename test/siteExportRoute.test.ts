@@ -83,4 +83,18 @@ describe('POST /api/styles/[id]/site-export', () => {
     const body = await res.json();
     expect(body.success).toBe(false);
   });
+
+  it('returns 400 (not 500) for a malformed JSON body', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const { cookieHeader } = await seedSession('Test User');
+    const req = new NextRequest('http://localhost/x', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: cookieHeader },
+      body: '{not valid json',
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: style.id }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
 });
