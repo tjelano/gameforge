@@ -66,6 +66,62 @@ describe('parseW3cTokensJson', () => {
     expect(result.tokens.radiusBase).toBe('4px');
   });
 
+  it('accepts a plain hex string as a color value, a common real-world format alongside the structured DTCG object shape', () => {
+    const doc = {
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        accent: { $type: 'color', $value: '#ff0000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.colorAccent).toBe('#ff0000');
+    expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
+  });
+
+  it('falls back to a later alias-matching candidate when an earlier one fails to convert', () => {
+    // Two tokens both alias to colorAccent's "accent" - the first one in
+    // tree order is malformed (a $value with no components), the second
+    // is valid. The valid one must still be found, not silently skipped
+    // just because it wasn't first.
+    const doc = {
+      colorGroupA: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb' } }, // malformed - no components
+      },
+      colorGroupB: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 1 } },
+      },
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.colorAccent).toBe('rgb(255, 0, 0)');
+  });
+
   it('rejects with a clear error listing exactly which roles could not be matched', () => {
     const partial = {
       color: {

@@ -50,6 +50,12 @@ function collectTokens(node: unknown, lastKey: string, out: FoundToken[], depth 
 }
 
 function colorTokenToCss(value: unknown): string | null {
+  // Many real-world exports use a plain hex string for $value even though
+  // the current DTCG spec's Color type is the structured
+  // {colorSpace, components, alpha} object GameForge's own exporter
+  // produces - accept both. ThemeTokensSchema's CSS_COLOR_RE already
+  // matches hex directly, so this can pass through unchanged.
+  if (typeof value === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(value)) return value;
   if (!value || typeof value !== 'object') return null;
   const v = value as { components?: unknown; alpha?: unknown };
   if (!Array.isArray(v.components) || v.components.length !== 3) return null;
@@ -99,12 +105,16 @@ export function parseW3cTokensJson(jsonText: string): ParseW3cTokensResult {
 
   for (const role of Object.keys(ROLE_ALIASES) as (keyof ThemeTokens)[]) {
     const { type, aliases } = ROLE_ALIASES[role];
-    const candidate = found.find(t => t.type === type && aliases.includes(t.key));
-    if (!candidate) {
-      missing.push(role);
-      continue;
+    // Try every alias-matching candidate, not just the first structural
+    // match - a file can legitimately have more than one token whose key
+    // matches an alias (e.g. two different "text" colors in different
+    // groups), and the first one found isn't necessarily convertible. Only
+    // give up once none of them produce valid CSS.
+    let css: string | null = null;
+    for (const candidate of found.filter(t => t.type === type && aliases.includes(t.key))) {
+      css = CONVERTERS[type](candidate.value);
+      if (css) break;
     }
-    const css = CONVERTERS[type](candidate.value);
     if (!css) {
       missing.push(role);
       continue;
