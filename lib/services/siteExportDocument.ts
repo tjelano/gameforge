@@ -39,7 +39,7 @@ const VOID_ELEMENTS = new Set(['br', 'hr', 'input']);
 // be silently treated as boolean shorthand.
 const BOOLEAN_ATTRIBUTES = new Set(['disabled', 'required']);
 
-function escapeJsxText(text: string): string {
+export function escapeJsxText(text: string): string {
   // `{`/`}` would be misread as a JSX expression container. `<`/`>` are
   // syntax errors in raw JSX text (confirmed by actually compiling
   // equivalent JSX with tsc --jsx react-jsx: unescaped "<" -> TS1003,

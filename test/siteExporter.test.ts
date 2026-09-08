@@ -128,4 +128,50 @@ describe('siteExporter.exportSite', () => {
     expect(pkg.dependencies.react).toBe('^19.1.0');
     expect(pkg.scripts.dev).toBe('next dev');
   });
+
+  it('produces a safe component filename/identifier for an asset_type containing spaces, punctuation, and a leading digit', async () => {
+    // asset_type is free text (a plain <input> in PresetForm.tsx, no
+    // allowlist) - "2-column footer" would naively pascal-case to
+    // "2ColumnFooter", an invalid JS identifier (leading digit), and a
+    // colon in the type (not exercised here, but the same code path)
+    // would silently vanish into an NTFS Alternate Data Stream on
+    // Windows instead of erroring. This test proves the digit-leading
+    // case is handled; the fix (stripping all non-alphanumerics +
+    // guarding a leading digit) covers both by construction.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await assetService.create({
+      styleId: style.id,
+      createdBy: 'user-1',
+      assetType: '2-column footer',
+      prompt: 'a footer',
+      imagePath: 'weird-type.html',
+      outputKind: 'component',
+    });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'weird-type.html'), COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const result = await siteExporter.exportSite(style.id, 'test-weird-type');
+    const ok = result as { targetDir: string };
+    const componentFiles = await fsPromises.readdir(path.join(ok.targetDir, 'components'));
+    const tsxFile = componentFiles.find(f => f.endsWith('.tsx'));
+    expect(tsxFile).toBeDefined();
+    // Must not start with a digit - a leading-digit filename/identifier
+    // is exactly the bug this test guards against.
+    expect(tsxFile).not.toMatch(/^[0-9]/);
+    const content = await fsPromises.readFile(path.join(ok.targetDir, 'components', tsxFile!), 'utf-8');
+    expect(content).not.toMatch(/export function [0-9]/);
+  });
+
+  it('escapes a page name containing angle brackets so it does not break the generated layout.tsx', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await pageService.create({ styleId: style.id, name: 'Pricing & <Support>', createdBy: 'user-1' });
+    const result = await siteExporter.exportSite(style.id, 'test-page-name-escape');
+    const ok = result as { targetDir: string };
+    const layoutContent = await fsPromises.readFile(path.join(ok.targetDir, 'app', 'layout.tsx'), 'utf-8');
+    // The raw, unescaped name must never appear as literal JSX text -
+    // it must be wrapped as a JS string expression instead.
+    expect(layoutContent).not.toContain('>Pricing & <Support></a>');
+    expect(layoutContent).toContain(JSON.stringify('Pricing & <Support>'));
+  });
 });

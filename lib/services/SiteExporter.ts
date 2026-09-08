@@ -7,7 +7,7 @@ import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
-import { htmlToJsx } from '@/lib/services/siteExportDocument';
+import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
 import type { Page, Asset } from '@/lib/database/schema';
 
 export interface SiteExportResult {
@@ -20,8 +20,28 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+// asset_type is free text typed by the user (PresetForm.tsx's "component
+// type" field is a plain <input>, not a dropdown) - it can contain
+// anything, including characters that are NOT safe in a JS identifier or
+// a Windows filename. Two real, verified failure modes if this only
+// stripped separator characters (a "-"/"_"/whitespace-only replace,
+// which was this plan's own earlier, buggy draft):
+//   1. A name starting with a digit after stripping (e.g. "2-column
+//      footer" -> "2ColumnFooter") produces an invalid JS identifier -
+//      confirmed with a real tsc compile: TS1003/TS1005/TS1351.
+//   2. A name containing a colon (e.g. "FAQ: how it works") is even
+//      worse on Windows (this project's own dev platform): a colon in a
+//      filename doesn't throw on write - NTFS silently treats it as an
+//      Alternate-Data-Stream separator, so fs.writeFile "succeeds" but
+//      creates a 0-byte file with the real content hidden in an
+//      invisible stream. Confirmed with a real fs.writeFileSync test.
+// The fix: strip EVERYTHING outside [A-Za-z0-9] (not just common
+// separators), and guard against a leading digit explicitly.
 function pascalCase(name: string): string {
-  return name.replace(/(^|[-_\s]+)([a-z0-9])/gi, (_m, _sep, ch) => ch.toUpperCase());
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const pascal = words.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('');
+  if (!pascal) return 'Component';
+  return /^[0-9]/.test(pascal) ? `C${pascal}` : pascal;
 }
 
 function componentName(asset: Asset): string {
@@ -172,9 +192,16 @@ ${component.jsx}
   }
 
   private buildLayoutFile(pages: Page[], slugs: string[]): string {
+    // page.name is free text (z.string().min(1), no character
+    // restriction - app/api/styles/[id]/pages/route.ts) and must be
+    // escaped the same way htmlToJsx escapes component text content: an
+    // unescaped "<"/">"/"{"/"}" in a page name is a real tsc syntax
+    // error (confirmed: TS17008 for an unclosed-looking "<Tag>" inside
+    // raw JSX text), and this codebase's own domain (game asset naming,
+    // e.g. "HP < 50%") makes such names plausible, not exotic.
     const links = pages.map((page, i) => {
       const href = i === 0 ? '/' : `/${slugs[i]}`;
-      return `        <a href="${href}">${page.name}</a>`;
+      return `        <a href="${href}">${escapeJsxText(page.name)}</a>`;
     }).join('\n');
     return `import './globals.css';
 
