@@ -17,6 +17,7 @@ const EXTENSION_FOR_MEDIA_TYPE: Record<ReferenceImagePayload['mediaType'], strin
 const MEDIA_TYPE_FOR_EXTENSION: Record<string, ReferenceImagePayload['mediaType']> = {
   png: 'image/png',
   jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
   webp: 'image/webp',
 };
 

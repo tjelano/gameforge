@@ -17,23 +17,15 @@ interface JobCardProps {
 export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardProps) {
   const canAct = job.status === 'complete' || job.status === 'failed';
 
-  const hasPieces = (() => {
+  const parsedOptions = (() => {
     try {
-      const pieces = JSON.parse(job.options).pieces;
-      return Array.isArray(pieces) && pieces.length > 0;
+      return JSON.parse(job.options);
     } catch {
-      return false;
+      return {};
     }
   })();
-
-  const referenceImageFilename = (() => {
-    try {
-      const filename = JSON.parse(job.options).referenceImageFilename;
-      return typeof filename === 'string' ? filename : null;
-    } catch {
-      return null;
-    }
-  })();
+  const hasPieces = Array.isArray(parsedOptions.pieces) && parsedOptions.pieces.length > 0;
+  const referenceImageFilename = typeof parsedOptions.referenceImageFilename === 'string' ? parsedOptions.referenceImageFilename : null;
 
   const [similarity, setSimilarity] = useState<{ flagged: boolean; similarTo?: string } | null>(null);
 

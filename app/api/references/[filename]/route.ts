@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ fil
     return NextResponse.json({ success: false, error: 'Invalid filename' }, { status: 400 });
   }
 
-  const ext = filename.split('.').pop() ?? '';
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
   const contentType = CONTENT_TYPE_FOR_EXTENSION[ext];
   if (!contentType) {
     return NextResponse.json({ success: false, error: 'Unsupported file type' }, { status: 400 });

@@ -127,17 +127,20 @@ export async function processJob(job: any): Promise<void> {
     typeof options.referenceImageFilename === 'string' ? options.referenceImageFilename : undefined
   );
   const referenceStrength = typeof options.referenceStrength === 'number' ? options.referenceStrength : undefined;
-  const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
 
   try {
     let result: { path: string };
     switch (job.output_kind) {
-      case 'theme':
+      case 'theme': {
+        const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
         result = await getThemeGenerator().generate(job.prompt, job.style_id, referenceImage ?? undefined, basedOnContent);
         break;
-      case 'component':
+      }
+      case 'component': {
+        const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
         result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent);
         break;
+      }
       case 'image': {
         const spriteReferenceImage = referenceImage ?? (await loadSpriteBasedOnImage(options.basedOnAssetId, job.id));
         result = sheetOptions
