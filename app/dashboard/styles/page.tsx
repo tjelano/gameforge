@@ -9,6 +9,10 @@ export default function StylesPage() {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
+  const [importName, setImportName] = useState('');
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -24,6 +28,38 @@ export default function StylesPage() {
       await refresh();
     } finally {
       setCreating(false);
+    }
+  }
+
+  function handleImportFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setImportFile(e.target.files?.[0] ?? null);
+    setImportError(null);
+  }
+
+  async function handleImport(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importName.trim() || !importFile || importing) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const tokensJson = await importFile.text();
+      const res = await fetch('/api/styles/import-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: importName.trim(), tokensJson }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setImportError(body.error ?? 'Import failed.');
+        return;
+      }
+      setImportName('');
+      setImportFile(null);
+      await refresh();
+    } catch {
+      setImportError('Could not reach the server.');
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -54,6 +90,26 @@ export default function StylesPage() {
         />
         <button className="btn btn-primary" type="submit" disabled={creating || !name.trim()}>
           {creating ? 'Creating…' : 'Create'}
+        </button>
+      </form>
+
+      <form className="card" onSubmit={handleImport} style={{ marginBottom: 32, maxWidth: 420 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Import from design tokens</div>
+        <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
+          Upload a W3C Design Tokens JSON file (the format most Figma-to-code plugins export) to seed a new
+          Style Bible from an existing design system.
+        </p>
+        <div className="field">
+          <label htmlFor="importName">New Style Bible name</label>
+          <input id="importName" value={importName} onChange={e => setImportName(e.target.value)} placeholder="Imported design" />
+        </div>
+        <div className="field">
+          <label htmlFor="importFile">Tokens JSON file</label>
+          <input id="importFile" type="file" accept="application/json,.json" onChange={handleImportFileChange} />
+        </div>
+        {importError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{importError}</p>}
+        <button className="btn btn-primary" type="submit" disabled={importing || !importName.trim() || !importFile}>
+          {importing ? 'Importing…' : 'Import'}
         </button>
       </form>
 
