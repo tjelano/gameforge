@@ -83,10 +83,16 @@ class SiteExporterImpl {
     // the nav lists pages in creation order.
     const pages: Page[] = [...pagesNewestFirst].reverse();
 
-    // Defensive - don't depend on setup.sh/setup.bat having created this
-    // parent dir already, matches GitService.ensureDirectoriesExist()'s
-    // own defensive mkdir pattern for storage/images etc.
-    await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'exports'), { recursive: true });
+    const exportsRootDir = path.join(getProjectRoot(), 'storage', 'exports');
+    try {
+      // Defensive - don't depend on setup.sh/setup.bat having created this
+      // parent dir already, matches GitService.ensureDirectoriesExist()'s
+      // own defensive mkdir pattern for storage/images etc.
+      await fsPromises.mkdir(exportsRootDir, { recursive: true });
+    } catch (e) {
+      console.error(`Failed to create the exports root directory ${exportsRootDir}:`, e);
+      throw e;
+    }
 
     const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
     try {
@@ -104,6 +110,7 @@ class SiteExporterImpl {
       // silently proceed past, since that would lead to a much less clear
       // failure later (a raw mkdir/writeFile error) instead of surfacing
       // the real cause here.
+      console.error(`Failed to create export target directory ${targetDir}:`, e);
       throw e;
     }
 
