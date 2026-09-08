@@ -93,6 +93,12 @@ describe('getThemeGenerator() provider selection', () => {
 
   it('throws a clear error when THEME_API_PROVIDER=cheaperinference but CHEAPERINFERENCE_API_KEY is missing', async () => {
     vi.stubEnv('THEME_API_PROVIDER', 'cheaperinference');
+    // Explicitly force "missing" rather than relying on ambient absence -
+    // a real CHEAPERINFERENCE_API_KEY may be set machine-wide (e.g. for the
+    // deepseek-review skill's own use of cheaperinference.com's separate
+    // OpenAI-compatible endpoint), and vi.unstubAllEnvs() only reverts vars
+    // vitest itself stubbed, not real process.env values from the host shell.
+    vi.stubEnv('CHEAPERINFERENCE_API_KEY', '');
     const { getThemeGenerator } = await import('@/lib/services/ThemeGenerator');
     expect(() => getThemeGenerator()).toThrow(/CHEAPERINFERENCE_API_KEY/);
   });

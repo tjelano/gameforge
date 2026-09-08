@@ -83,18 +83,28 @@ class SiteExporterImpl {
     // the nav lists pages in creation order.
     const pages: Page[] = [...pagesNewestFirst].reverse();
 
+    // Defensive - don't depend on setup.sh/setup.bat having created this
+    // parent dir already, matches GitService.ensureDirectoriesExist()'s
+    // own defensive mkdir pattern for storage/images etc.
+    await fsPromises.mkdir(path.join(getProjectRoot(), 'storage', 'exports'), { recursive: true });
+
     const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
     try {
-      await fsPromises.access(targetDir);
-      return { error: 'ALREADY_EXISTS' };
+      // A single atomic mkdir (non-recursive) IS the existence check - it
+      // either creates targetDir and we own it, or fails with EEXIST because
+      // someone else's request already created it. This closes a real race:
+      // the previous check (fsPromises.access, then a *recursive* mkdir much
+      // later) had a window where two concurrent exports of the same subdir
+      // could both pass the access check - recursive:true never throws EEXIST
+      // even if targetDir now exists - and interleave writes into one folder.
+      await fsPromises.mkdir(targetDir);
     } catch (e: any) {
-      // ENOENT is the expected, non-error case - the target doesn't
-      // exist yet. Anything else (e.g. EACCES - the path exists but is
-      // unreadable) is a real problem this must not silently proceed
-      // past, since that would lead to a much less clear failure later
-      // (a raw mkdir/writeFile error) instead of surfacing the real
-      // cause here.
-      if (e?.code !== 'ENOENT') throw e;
+      if (e?.code === 'EEXIST') return { error: 'ALREADY_EXISTS' };
+      // Anything else (e.g. EACCES) is a real problem this must not
+      // silently proceed past, since that would lead to a much less clear
+      // failure later (a raw mkdir/writeFile error) instead of surfacing
+      // the real cause here.
+      throw e;
     }
 
     const componentsByAssetId = new Map<string, ConvertedComponent>();

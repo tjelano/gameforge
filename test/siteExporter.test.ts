@@ -154,6 +154,21 @@ describe('siteExporter.exportSite', () => {
     expect(second).toEqual({ error: 'ALREADY_EXISTS' });
   });
 
+  it('never lets two concurrent exports of the same subdir both succeed (closes the mkdir TOCTOU race)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+
+    const [a, b] = await Promise.all([
+      siteExporter.exportSite(style.id, 'test-race'),
+      siteExporter.exportSite(style.id, 'test-race'),
+    ]);
+    const results = [a, b];
+    const successes = results.filter(r => !('error' in r));
+    const alreadyExists = results.filter(r => 'error' in r && r.error === 'ALREADY_EXISTS');
+    expect(successes).toHaveLength(1);
+    expect(alreadyExists).toHaveLength(1);
+  });
+
   it('rejects an unsafe subdir even when called directly, bypassing the route\'s own validation', async () => {
     // exportSite is a public method on an exported singleton - the route
     // is its only current caller, but a future direct caller (a script,

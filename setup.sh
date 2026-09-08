@@ -10,6 +10,14 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
+if command -v git-lfs >/dev/null 2>&1; then
+  git lfs install
+else
+  echo "⚠️  git-lfs is not installed. .gitattributes tracks *.png/*.jpg/*.glb/*.gltf via LFS —"
+  echo "    without it, those files get committed as regular blobs instead of pointers,"
+  echo "    permanently bloating the repo. Install git-lfs (https://git-lfs.com) first."
+fi
+
 if [ ! -d .git ]; then
   echo "⚠️  Not a git repository yet. Initializing..."
   git init
