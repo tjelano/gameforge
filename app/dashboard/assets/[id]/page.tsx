@@ -139,6 +139,75 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     setNewState('');
   }
 
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+  const [regenerateNote, setRegenerateNote] = useState('');
+  const [regenerateImage, setRegenerateImage] = useState<{ base64: string; mediaType: string } | null>(null);
+  const [regenerateImageError, setRegenerateImageError] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateStatus, setRegenerateStatus] = useState<string | null>(null);
+
+  const REGEN_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+  const REGEN_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+  function handleRegenerateFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setRegenerateImage(null);
+      setRegenerateImageError(null);
+      return;
+    }
+    if (!REGEN_ALLOWED_TYPES.includes(file.type)) {
+      setRegenerateImageError('Only PNG, JPEG, or WebP images are supported.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > REGEN_MAX_FILE_BYTES) {
+      setRegenerateImageError('Image must be under 5MB.');
+      e.target.value = '';
+      return;
+    }
+    setRegenerateImageError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(',')[1] ?? '';
+      setRegenerateImage({ base64, mediaType: file.type });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleRegenerate() {
+    if (!asset || regenerating || !regenerateNote.trim()) return;
+    setRegenerating(true);
+    setRegenerateStatus(null);
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          styleId: asset.style_id,
+          assetType: asset.asset_type,
+          prompt: regenerateNote.trim(),
+          outputKind: asset.output_kind,
+          basedOnAssetId: asset.id,
+          ...(regenerateImage ? { referenceImage: regenerateImage } : {}),
+        }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        setRegenerateStatus('Queued — check the Generate page\'s live queue.');
+        setRegenerateNote('');
+        setRegenerateImage(null);
+      } else {
+        setRegenerateStatus(body.error ?? 'Could not queue regeneration.');
+      }
+    } catch {
+      setRegenerateStatus('Could not reach the server.');
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
   async function handleCopy(part: 'html' | 'css') {
     if (!asset?.image_path) return;
     setCopyStatus(null);
@@ -280,6 +349,44 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
             update, so a copy that only lived inside the modal would never actually be seen). */}
         {!showDrivePicker && shareStatus && <p style={{ marginTop: 8, fontSize: 13, color: 'var(--ink-dim)' }}>{shareStatus}</p>}
       </div>
+
+      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+        <button className="btn" onClick={() => setShowRegenerateModal(true)}>
+          Regenerate with changes
+        </button>
+      </div>
+
+      {showRegenerateModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div className="card" style={{ width: 480 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <strong>Regenerate with changes</strong>
+              <button className="btn" onClick={() => setShowRegenerateModal(false)}>Cancel</button>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 12 }}>
+              Creates a new job based on this asset — the original is never changed.
+            </p>
+            <div className="field">
+              <label htmlFor="regenerateNote">What do you want changed?</label>
+              <textarea
+                id="regenerateNote"
+                value={regenerateNote}
+                onChange={e => setRegenerateNote(e.target.value)}
+                placeholder="make the accent color brighter"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="regenerateImage">Reference image (optional)</label>
+              <input id="regenerateImage" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleRegenerateFileChange} />
+              {regenerateImageError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 4 }}>{regenerateImageError}</p>}
+            </div>
+            {regenerateStatus && <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 12 }}>{regenerateStatus}</p>}
+            <button className="btn btn-primary" onClick={handleRegenerate} disabled={regenerating || !regenerateNote.trim()}>
+              {regenerating ? 'Queuing…' : 'Queue regeneration'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
         <button className="btn" onClick={handleDelete} disabled={deleting}>
