@@ -152,4 +152,13 @@ describe('GET /api/pages/[id]/render', () => {
     const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
     expect(res.headers.get('Content-Disposition')).toBeNull();
   });
+
+  it('with ?download=0 or any value other than "1", does not set Content-Disposition', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    const resZero = await GET(new NextRequest('http://localhost/x?download=0'), { params: Promise.resolve({ id: page.id }) });
+    expect(resZero.headers.get('Content-Disposition')).toBeNull();
+    const resOther = await GET(new NextRequest('http://localhost/x?download=foo'), { params: Promise.resolve({ id: page.id }) });
+    expect(resOther.headers.get('Content-Disposition')).toBeNull();
+  });
 });

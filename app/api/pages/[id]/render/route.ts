@@ -55,7 +55,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       'Content-Type': 'text/html',
       'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:;",
     };
-    if (req.nextUrl.searchParams.get('download')) {
+    if (req.nextUrl.searchParams.get('download') === '1') {
       const baseName = slugify(page.name) || 'page';
       headers['Content-Disposition'] = `attachment; filename="${baseName}.html"`;
     }
