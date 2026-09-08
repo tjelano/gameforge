@@ -29,6 +29,11 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   const [deletingPageId, setDeletingPageId] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
 
+  const [exportSubdir, setExportSubdir] = useState('my-site');
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<{ pagesExported: number; componentsExported: number; targetDir: string } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -194,6 +199,31 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     }
   }
 
+  async function handleExportSite(e: React.FormEvent) {
+    e.preventDefault();
+    if (exporting || !exportSubdir.trim()) return;
+    setExporting(true);
+    setExportError(null);
+    setExportResult(null);
+    try {
+      const res = await fetch(`/api/styles/${id}/site-export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subdir: exportSubdir.trim() }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        setExportResult(body.data);
+      } else {
+        setExportError(body.error ?? 'Export failed.');
+      }
+    } catch {
+      setExportError('Could not reach the server.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function buildPresetPrefill(): Partial<PresetFormValue> {
     const themeAssets = assets.filter(a => a.output_kind === 'theme');
     const componentAssets = assets.filter(a => a.output_kind === 'component');
@@ -352,6 +382,33 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
               );
             })}
           </div>
+        )}
+      </div>
+
+      <div className="card" style={{ maxWidth: 420, marginBottom: 20 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Export site</h2>
+        <p style={{ fontSize: 12, color: 'var(--ink-faint)', marginBottom: 12 }}>
+          Writes a real Next.js + Tailwind project to <code>storage/exports/</code> containing every
+          Page in this Style Bible, ready for <code>npm install &amp;&amp; npm run dev</code>.
+        </p>
+        <form onSubmit={handleExportSite} style={{ display: 'flex', gap: 10 }}>
+          <input
+            value={exportSubdir}
+            onChange={e => setExportSubdir(e.target.value)}
+            placeholder="my-site"
+            style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
+          />
+          <button className="btn btn-primary" type="submit" disabled={exporting || !exportSubdir.trim()}>
+            {exporting ? 'Exporting…' : 'Export'}
+          </button>
+        </form>
+        {exportError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 10 }}>{exportError}</p>}
+        {exportResult && (
+          <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 10 }}>
+            Exported {exportResult.pagesExported} page{exportResult.pagesExported === 1 ? '' : 's'} and{' '}
+            {exportResult.componentsExported} component{exportResult.componentsExported === 1 ? '' : 's'} to{' '}
+            <code>{exportResult.targetDir}</code>.
+          </p>
         )}
       </div>
 

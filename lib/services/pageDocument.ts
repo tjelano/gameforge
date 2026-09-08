@@ -23,7 +23,16 @@ export interface PageComponentTokens {
 // walkRules-based rewrite likely mangles @keyframes frame selectors (e.g.
 // `0%`/`100%`) the same way, though that's not confirmed - revisit either
 // case only if it ever becomes reachable in practice.
-function scopeComponentCss(css: string, scopeClass: string): string {
+//
+// Exported (not just used internally) because SiteExporter.ts's CSS
+// Modules integration needs the exact same prefix-every-selector
+// technique for a different reason: Next's CSS Modules compiler runs in
+// "pure" mode, which rejects any selector with no local class (confirmed
+// by actually running Next's own vendored postcss-modules-local-by-default
+// plugin against a bare `button {...}` rule) - prefixing every selector
+// with a real local class is what makes ANY component CSS, including a
+// bare-tag/universal/pseudo-class rule, satisfy that constraint.
+export function scopeComponentCss(css: string, scopeClass: string): string {
   const root = postcss.parse(css);
   root.walkRules((rule) => {
     rule.selector = rule.selectors.map(s => `.${scopeClass} ${s}`).join(', ');
