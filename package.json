@@ -17,6 +17,7 @@
     "@googleapis/drive": "^22.0.0",
     "better-sqlite3": "^13.0.3",
     "google-auth-library": "10.5.0",
+    "htmlparser2": "^12.0.0",
     "next": "^16.3.4",
     "postcss": "^8.5.28",
     "postcss-value-parser": "^4.2.0",
