@@ -26,6 +26,15 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
     }
   })();
 
+  const referenceImageFilename = (() => {
+    try {
+      const filename = JSON.parse(job.options).referenceImageFilename;
+      return typeof filename === 'string' ? filename : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const [similarity, setSimilarity] = useState<{ flagged: boolean; similarTo?: string } | null>(null);
 
   // The worker runs a batch's jobs concurrently, so the first candidate to
@@ -113,6 +122,15 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
             <span className="badge" title={similarity.similarTo} style={{ color: 'var(--reject)' }}>
               Similar to {similarity.similarTo}
             </span>
+          )}
+          {referenceImageFilename && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/api/references/${referenceImageFilename}`}
+              alt="Reference image used for this generation"
+              title="Reference image used for this generation"
+              style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
+            />
           )}
         </div>
         <div style={{ fontSize: 14, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
