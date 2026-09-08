@@ -238,7 +238,7 @@ class AssetServiceImpl {
       (db.prepare(`
         SELECT json_extract(options, '$.referenceImageFilename') AS filename FROM jobs
         WHERE json_valid(options)
-        AND json_extract(options, '$.referenceImageFilename') IS NOT NULL
+        AND json_type(options, '$.referenceImageFilename') = 'text'
         AND status IN ('pending', 'processing', 'complete')
       `).all() as { filename: string }[])
         .map(row => row.filename)

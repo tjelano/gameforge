@@ -84,4 +84,20 @@ describe('AssetService.cleanupOrphanedReferences', () => {
     const removed = await assetService.cleanupOrphanedReferences();
     expect(removed).toBe(1);
   });
+
+  it('removes a file whose protecting job has a non-string referenceImageFilename (valid JSON, wrong type - json_type guard, not just json_valid)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const job = await jobService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'x',
+    });
+    // Valid JSON overall, but referenceImageFilename is a number, not a
+    // string - json_extract would happily return 123 here, which could
+    // never .has()-match a real filename string anyway, but the point is
+    // this row must not be treated as protecting reference-d.png.
+    DatabaseConnection.getInstance().prepare(`UPDATE jobs SET options = '{"referenceImageFilename": 123}' WHERE id = ?`).run(job.id);
+    await writeReferenceFile('reference-d.png');
+
+    const removed = await assetService.cleanupOrphanedReferences();
+    expect(removed).toBe(1);
+  });
 });
