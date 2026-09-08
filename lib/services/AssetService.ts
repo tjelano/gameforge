@@ -237,7 +237,8 @@ class AssetServiceImpl {
     const activeReferencePaths = new Set(
       (db.prepare(`
         SELECT json_extract(options, '$.referenceImageFilename') AS filename FROM jobs
-        WHERE json_extract(options, '$.referenceImageFilename') IS NOT NULL
+        WHERE json_valid(options)
+        AND json_extract(options, '$.referenceImageFilename') IS NOT NULL
         AND status IN ('pending', 'processing', 'complete')
       `).all() as { filename: string }[])
         .map(row => row.filename)

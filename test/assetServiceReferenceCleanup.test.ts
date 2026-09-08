@@ -68,4 +68,20 @@ describe('AssetService.cleanupOrphanedReferences', () => {
     const removed = await assetService.cleanupOrphanedReferences();
     expect(removed).toBe(1);
   });
+
+  it('does not throw when a job row has malformed options JSON (json_extract would otherwise error on invalid JSON)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const job = await jobService.create({
+      styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'x',
+    });
+    // Simulate a corrupted row directly - jobService.create() always writes
+    // valid JSON, so this is the only way to get a malformed value into the
+    // column for this test, matching worker.ts's own explicit handling of
+    // exactly this case (a job whose options fails JSON.parse).
+    DatabaseConnection.getInstance().prepare(`UPDATE jobs SET options = 'not valid json {' WHERE id = ?`).run(job.id);
+    await writeReferenceFile('reference-c.png');
+
+    const removed = await assetService.cleanupOrphanedReferences();
+    expect(removed).toBe(1);
+  });
 });
