@@ -56,7 +56,7 @@ Create `test/siteExportDocument.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { htmlToJsx, globalizeBareSelectors } from '@/lib/services/siteExportDocument';
+import { htmlToJsx } from '@/lib/services/siteExportDocument';
 
 describe('htmlToJsx', () => {
   it('converts a simple element with a class attribute to className referencing styles[...]', () => {
@@ -174,43 +174,29 @@ describe('htmlToJsx', () => {
   });
 });
 
-describe('globalizeBareSelectors', () => {
-  it('wraps a bare tag selector in :global(...) so CSS Modules pure mode accepts it', () => {
-    // Next's own CSS Modules loader (postcss-modules-local-by-default,
-    // mode: 'pure') rejects any selector with no local class -
-    // confirmed by actually running that exact loader against `button
-    // {...}`. sanitizeComponentCss validates functions/at-rules but
-    // never selectors, so this is a real, reachable case for
-    // LLM-generated component CSS.
-    const result = globalizeBareSelectors('button { color: red; }');
-    expect(result).toBe(':global(button) { color: red; }');
-  });
-
-  it('leaves a selector with a real local class untouched', () => {
-    const result = globalizeBareSelectors('.btn { color: red; }');
-    expect(result).toBe('.btn { color: red; }');
-  });
-
-  it('wraps only the bare part of a mixed selector list, leaving the class-bearing part untouched', () => {
-    const result = globalizeBareSelectors('a:hover, .btn { color: red; }');
-    expect(result).toBe(':global(a:hover), .btn { color: red; }');
-  });
-
-  it('treats an id selector as global, matching how htmlToJsx emits id unchanged (not rewritten to styles[...])', () => {
-    // Unlike `class`, htmlToJsx never rewrites `id` to reference the
-    // CSS-Module-scoped styles object - it stays the literal, unhashed
-    // string. An #id rule must therefore stay GLOBAL too, or CSS
-    // Modules would hash it to a name the rendered element never has.
-    const result = globalizeBareSelectors('#submit { color: red; }');
-    expect(result).toBe(':global(#submit) { color: red; }');
-  });
-
-  it('wraps a universal selector and a pseudo-element selector', () => {
-    expect(globalizeBareSelectors('* { margin: 0; }')).toBe(':global(*) { margin: 0; }');
-    expect(globalizeBareSelectors(':root { color: red; }')).toBe(':global(:root) { color: red; }');
-  });
-});
 ```
+
+**Correction, replacing an earlier, broken attempt at this fix**: an
+earlier version of this plan tried wrapping bare selectors in
+`:global(...)` (e.g. `:global(button) {...}`). This was verified BROKEN
+by actually running Next's own vendored `postcss-modules-local-by-default`
+plugin (`mode: 'pure'`) against it: `:global(...)` explicitly marks its
+contents as NOT local, so a selector wrapped ENTIRELY in `:global()` still
+has zero local selectors, which is exactly what pure mode rejects — the
+identical error as the unwrapped original. The actual fix (verified with
+multiple real compiler runs, not theorized) is prefixing every selector
+with a REAL local wrapper class, reusing the exact technique already
+shipped and proven in `lib/services/pageDocument.ts`'s `scopeComponentCss`
+(now exported from there specifically for this reuse) — see Task 2's
+corrected `convertComponent`/`buildComponentFile` below for how this is
+wired through a real wrapper DOM element. No new pure-unit tests are
+added to THIS file for the scoping logic itself, since `scopeComponentCss`
+already has its own tests in `test/pageDocument.test.ts` and this task
+does not change that function's behavior — Task 2's own test suite (see
+below) gets a new INTEGRATION test that runs the actually-generated CSS
+through the real CSS Modules compiler, which is what would have caught
+the `:global()` mistake immediately instead of only checking string
+equality against a hand-written (and wrong) expectation.
 
 - [ ] **Step 2b: Run tests to verify they fail**
 
@@ -239,7 +225,6 @@ Create `lib/services/siteExportDocument.ts`:
 // reference text.
 
 import { parseDocument } from 'htmlparser2';
-import postcss from 'postcss';
 
 interface ParsedNode {
   type: string;
@@ -331,29 +316,6 @@ function renderAttributes(attribs: Record<string, string>): string {
   }).join(' ');
 }
 
-// CSS Modules (both webpack's css-loader and Next 16's Turbopack default)
-// compile in "pure" mode, which REJECTS any selector with no local class
-// (confirmed by actually running Next's own vendored
-// postcss-modules-local-by-default plugin in mode:'pure': `button {...}`,
-// `a:hover {...}`, `*{...}`, and `:root{...}` all fail; `.btn`, `.nav a`,
-// `.card:hover` all pass). sanitizeComponentCss validates functions and
-// at-rules but never selectors, so an LLM-emitted bare-tag/universal/
-// pseudo-class rule with no class reaches here unchanged and would break
-// the exported project's build with an opaque CSS-loader error the user
-// can't fix from inside GameForge. Also handles `id` selectors the same
-// way (as global, not local): htmlToJsx emits `id={"..."}` as the raw,
-// unmodified string (unlike `class`, which gets rewritten to reference
-// the CSS-Module-scoped `styles[...]` object) - so an `#id` rule must
-// stay a GLOBAL selector to keep matching the literal, un-hashed id
-// CSS Modules would otherwise apply to it.
-export function globalizeBareSelectors(css: string): string {
-  const root = postcss.parse(css);
-  root.walkRules((rule) => {
-    rule.selector = rule.selectors.map(s => (/\.[A-Za-z_-]/.test(s) ? s : `:global(${s})`)).join(', ');
-  });
-  return root.toString();
-}
-
 function renderNode(node: ParsedNode): string {
   if (node.type === 'text') {
     return escapeJsxText(node.data ?? '');
@@ -414,6 +376,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import postcss from 'postcss';
+// Next's own vendored CSS Modules compiler - the exact one next dev/next
+// build use. Imported here specifically so this test suite can prove
+// generated CSS actually passes real compilation, not just a
+// hand-written string-equality assertion (which is exactly what let an
+// earlier, broken version of the selector-scoping fix pass its own
+// tests while still failing for real - see the correction note earlier
+// in this plan's Task 1 section for the full story).
+import localByDefault from 'next/dist/compiled/postcss-modules-local-by-default';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
@@ -586,6 +557,37 @@ describe('siteExporter.exportSite', () => {
     expect(layoutContent).not.toContain('>Pricing & <Support></a>');
     expect(layoutContent).toContain(JSON.stringify('Pricing & <Support>'));
   });
+
+  it('generates CSS that actually passes Next.js CSS Modules pure-mode compilation for a bare-selector component', async () => {
+    // This is the exact class of bug a hand-written string-equality unit
+    // test cannot catch: an earlier version of this fix wrapped bare
+    // selectors in :global(...), which passed its OWN hand-written
+    // string-equality test while still failing real compilation
+    // (:global() marks its contents non-local, so the rule still has
+    // zero local selectors - pure mode's actual requirement). This test
+    // runs the ACTUAL generated CSS through Next's own vendored
+    // compiler - the same one next dev/next build use - so a regression
+    // of this exact mistake fails here immediately, not silently.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const bareSelectorDoc = '<!DOCTYPE html><html><head><style>button { color: red; } a:hover { text-decoration: underline; }</style></head><body><button>Go</button></body></html>';
+    const component = await makeComponentAsset(style.id, 'bare.html', bareSelectorDoc);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([component.id]) });
+
+    const result = await siteExporter.exportSite(style.id, 'test-pure-mode');
+    const ok = result as { targetDir: string };
+    const componentFiles = await fsPromises.readdir(path.join(ok.targetDir, 'components'));
+    const cssFile = componentFiles.find(f => f.endsWith('.module.css'));
+    expect(cssFile).toBeDefined();
+    const generatedCss = await fsPromises.readFile(path.join(ok.targetDir, 'components', cssFile!), 'utf-8');
+
+    // If this throws, the test fails - no try/catch, no expect() wrapper
+    // needed, an async test that rejects fails on its own.
+    const compiled = await postcss([localByDefault({ mode: 'pure' })]).process(generatedCss, { from: undefined });
+    // Confirms real scoping happened too, not just "didn't throw" (which
+    // could trivially pass on empty input).
+    expect(compiled.css).toContain(':local(.root)');
+  });
 });
 ```
 
@@ -608,8 +610,15 @@ import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
-import { htmlToJsx, escapeJsxText, globalizeBareSelectors } from '@/lib/services/siteExportDocument';
+import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
+import { scopeComponentCss } from '@/lib/services/pageDocument';
 import type { Page, Asset } from '@/lib/database/schema';
+
+// The literal CSS-Module class name every component's wrapper element
+// carries - a fixed, predictable name is fine since it's scoped to that
+// one component's own .module.css file (no cross-component collision
+// risk; CSS Modules hashes it uniquely per file regardless).
+const COMPONENT_SCOPE_CLASS = 'root';
 
 export interface SiteExportResult {
   pagesExported: number;
@@ -758,13 +767,27 @@ class SiteExporterImpl {
       const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
       const tokens = parseComponentHtml(document);
       const html = sanitizeComponentHtml(tokens.html);
-      // globalizeBareSelectors runs AFTER sanitization (it needs real,
-      // trusted CSS to parse) and BEFORE this CSS is ever written to a
-      // .module.css file - CSS Modules compile in "pure" mode, which
-      // rejects any selector with no local class, and this is the fix
-      // for that (see the function's own comment for the real,
-      // verified failure mode this closes).
-      const css = globalizeBareSelectors(sanitizeComponentCss(tokens.css));
+      // scopeComponentCss runs AFTER sanitization (it needs real, trusted
+      // CSS to parse) and BEFORE this CSS is ever written to a
+      // .module.css file. Next's CSS Modules compiler runs in "pure"
+      // mode, which REJECTS any selector with no local class (confirmed
+      // by actually running Next's own vendored
+      // postcss-modules-local-by-default plugin: `button{}`, `a:hover{}`,
+      // `*{}`, `:root{}` all fail; `.btn`, `.nav a` pass) -
+      // sanitizeComponentCss validates functions/at-rules but never
+      // selectors, so an LLM-emitted bare-tag/universal/pseudo-class rule
+      // reaches here unchanged and would otherwise break the exported
+      // project's build. Prefixing every selector with a real local
+      // class (this function, reused unchanged from Page Composer's
+      // already-shipped, already-tested scoping logic) is the ONLY
+      // verified-working fix - wrapping bare selectors in `:global(...)`
+      // does NOT work (confirmed by actually running the same real
+      // compiler against that approach: :global() explicitly marks its
+      // contents non-local, so the rule still has zero local selectors
+      // and still fails identically). buildComponentFile below wraps the
+      // component's JSX in a real element carrying this same scope
+      // class, matching what this CSS now expects to be nested under.
+      const css = scopeComponentCss(sanitizeComponentCss(tokens.css), COMPONENT_SCOPE_CLASS);
       return { asset, componentName: componentName(asset), jsx: htmlToJsx(html), css };
     } catch (e) {
       console.error(`Failed to convert component asset ${assetId} for export, skipping:`, e);
@@ -773,13 +796,21 @@ class SiteExporterImpl {
   }
 
   private buildComponentFile(component: ConvertedComponent): string {
+    // Wraps in a real element (not a bare Fragment) carrying the same
+    // scope class scopeComponentCss prefixed every selector in this
+    // component's CSS with - the wrapper is what makes ".root button"
+    // (etc.) actually match something in the rendered DOM. A <div> is a
+    // safe, neutral choice regardless of the component's own top-level
+    // tag (nav/button/section/...): it adds no semantics of its own and
+    // doesn't hide the wrapped element's own semantics from assistive
+    // tech (e.g. a wrapped <nav> is still a real nav landmark).
     return `import styles from './${component.componentName}.module.css';
 
 export function ${component.componentName}() {
   return (
-    <>
+    <div className={styles.${COMPONENT_SCOPE_CLASS}}>
 ${component.jsx}
-    </>
+    </div>
   );
 }
 `;
