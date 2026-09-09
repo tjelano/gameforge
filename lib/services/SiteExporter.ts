@@ -167,9 +167,13 @@ class SiteExporterImpl {
               fsPromises.readFile(cssPath, 'utf-8'),
             ]);
             onDiskHash = hashContent(tsx + '\n' + css);
-          } catch {
-            // Files don't exist on disk (e.g. deleted by hand) - nothing to
-            // preserve, safe to write fresh below.
+          } catch (e: any) {
+            // ENOENT (files don't exist on disk, e.g. deleted by hand) is
+            // the expected case - nothing to preserve, safe to write fresh
+            // below. Anything else (e.g. EACCES) must not vanish silently.
+            if (e?.code !== 'ENOENT') {
+              console.error(`Failed to read on-disk component ${component.componentName} for hand-edit check:`, e);
+            }
           }
           if (onDiskHash !== null && onDiskHash !== priorEntry.contentHash) {
             skippedComponents.push(component.componentName);
