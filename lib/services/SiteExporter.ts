@@ -9,6 +9,7 @@ import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
 import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
 import { scopeComponentCss } from '@/lib/services/pageDocument';
+import { hashContent, writeManifest, type ExportManifest } from '@/lib/services/ExportManifest';
 import type { Page, Asset } from '@/lib/database/schema';
 
 // The literal CSS-Module class name every component's wrapper element
@@ -162,19 +163,50 @@ class SiteExporterImpl {
         `@import "tailwindcss";\n\n${themeBlock}${this.buildThemeAliasBlock(themeBlock)}`
       );
 
+      const manifestPages: ExportManifest['pages'] = [];
+
       const slugs = this.buildPageSlugs(pages);
       await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
-      await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), this.buildPageFile(pages[0], pageComponentNames[0], components));
+
+      const homePageFile = this.buildPageFile(pages[0], pageComponentNames[0], components);
+      await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), homePageFile);
+      manifestPages.push({
+        id: pages[0].id,
+        name: pages[0].name,
+        slug: slugs[0],
+        componentAssetIds: JSON.parse(pages[0].component_asset_ids),
+        pageFileHash: hashContent(homePageFile),
+      });
 
       for (let i = 1; i < pages.length; i++) {
         const pageDir = path.join(targetDir, 'app', slugs[i]);
         await fsPromises.mkdir(pageDir, { recursive: true });
-        await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), this.buildPageFile(pages[i], pageComponentNames[i], components));
+        const pageFile = this.buildPageFile(pages[i], pageComponentNames[i], components);
+        await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), pageFile);
+        manifestPages.push({
+          id: pages[i].id,
+          name: pages[i].name,
+          slug: slugs[i],
+          componentAssetIds: JSON.parse(pages[i].component_asset_ids),
+          pageFileHash: hashContent(pageFile),
+        });
       }
 
       await fsPromises.writeFile(path.join(targetDir, 'package.json'), this.buildPackageJson());
       await fsPromises.writeFile(path.join(targetDir, 'tsconfig.json'), this.buildTsConfig());
       await fsPromises.writeFile(path.join(targetDir, 'postcss.config.mjs'), this.buildPostcssConfig());
+
+      const manifest: ExportManifest = {
+        styleId,
+        exportedAt: Date.now(),
+        pages: manifestPages,
+        components: components.map(c => ({
+          assetId: c.asset.id,
+          componentName: c.componentName,
+          contentHash: hashContent(this.buildComponentFile(c) + '\n' + c.css),
+        })),
+      };
+      await writeManifest(targetDir, manifest);
     } catch (e) {
       console.error(`Failed to write exported site files to ${targetDir}:`, e);
       throw e;
@@ -293,7 +325,8 @@ ${links}
     const usedComponents = allComponents.filter(c => componentNames.includes(c.componentName));
     const imports = usedComponents.map(c => `import { ${c.componentName} } from '@/components/${c.componentName}';`).join('\n');
     const elements = componentNames.map(name => `      <${name} />`).join('\n');
-    return `${imports}
+    return `// gameforge-page-id: ${page.id}
+${imports}
 
 export default function Page() {
   return (

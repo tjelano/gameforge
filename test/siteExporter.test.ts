@@ -316,4 +316,27 @@ describe('siteExporter.exportSite', () => {
     // could trivially pass on empty input).
     expect(compiled.css).toContain(':local(.root)');
   });
+
+  it('embeds a page-id comment in every exported page.tsx and writes a manifest', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const result = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);
+
+    const pageFile = await fsPromises.readFile(path.join(result.targetDir, 'app', 'page.tsx'), 'utf-8');
+    expect(pageFile).toContain(`// gameforge-page-id: ${page.id}`);
+
+    const manifestRaw = await fsPromises.readFile(path.join(result.targetDir, 'gameforge-manifest.json'), 'utf-8');
+    const manifest = JSON.parse(manifestRaw);
+    expect(manifest.styleId).toBe(style.id);
+    expect(manifest.pages).toHaveLength(1);
+    expect(manifest.pages[0].id).toBe(page.id);
+    expect(manifest.pages[0].componentAssetIds).toEqual([asset.id]);
+    expect(manifest.components).toHaveLength(1);
+    expect(manifest.components[0].assetId).toBe(asset.id);
+    expect(typeof manifest.components[0].contentHash).toBe('string');
+  });
 });
