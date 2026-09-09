@@ -34,6 +34,18 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   const [exportResult, setExportResult] = useState<{ pagesExported: number; componentsExported: number; targetDir: string } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  const [syncSubdir, setSyncSubdir] = useState('my-site');
+  const [syncing, setSyncing] = useState(false);
+  const [syncDiff, setSyncDiff] = useState<{
+    newPages: { slug: string; name: string; componentAssetIds: string[] }[];
+    deletedPageIds: string[];
+    pageOrderChanges: { pageId: string; newComponentAssetIds: string[] }[];
+    handEditedComponentAssetIds: string[];
+    droppedDeletedAssetIds: string[];
+  } | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [applyingSync, setApplyingSync] = useState(false);
+
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -224,6 +236,54 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     }
   }
 
+  async function handlePreviewSync() {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncDiff(null);
+    try {
+      const res = await fetch(`/api/styles/${id}/export-sync/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subdir: syncSubdir }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setSyncError(body.error ?? 'Could not compute changes.');
+        return;
+      }
+      setSyncDiff(body.data);
+    } catch {
+      setSyncError('Could not reach the server.');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleApplySync() {
+    if (applyingSync) return;
+    setApplyingSync(true);
+    setSyncError(null);
+    try {
+      const res = await fetch(`/api/styles/${id}/export-sync/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subdir: syncSubdir }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setSyncError(body.error ?? 'Could not apply changes.');
+        return;
+      }
+      setSyncDiff(null);
+      await refreshPages();
+    } catch {
+      setSyncError('Could not reach the server.');
+    } finally {
+      setApplyingSync(false);
+    }
+  }
+
   function buildPresetPrefill(): Partial<PresetFormValue> {
     const themeAssets = assets.filter(a => a.output_kind === 'theme');
     const componentAssets = assets.filter(a => a.output_kind === 'component');
@@ -411,6 +471,57 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
             {exportResult.componentsExported} component{exportResult.componentsExported === 1 ? '' : 's'} to{' '}
             <code>{exportResult.targetDir}</code>.
           </p>
+        )}
+      </div>
+
+      <div className="card" style={{ maxWidth: 560, marginBottom: 20 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Sync from export</h2>
+        <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
+          Check an exported project for hand-made changes (new pages, reordered or edited components)
+          and bring the structural ones back into this Style Bible.
+        </p>
+        <div className="field">
+          <label htmlFor="sync-subdir">Export folder name</label>
+          <input id="sync-subdir" value={syncSubdir} onChange={e => setSyncSubdir(e.target.value)} />
+        </div>
+        <button className="btn" onClick={handlePreviewSync} disabled={syncing}>
+          {syncing ? 'Checking…' : 'Check for changes'}
+        </button>
+        {syncError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 8 }}>{syncError}</p>}
+
+        {syncDiff && (
+          <div style={{ marginTop: 16 }}>
+            {syncDiff.newPages.length === 0 && syncDiff.deletedPageIds.length === 0 &&
+             syncDiff.pageOrderChanges.length === 0 && syncDiff.handEditedComponentAssetIds.length === 0 &&
+             syncDiff.droppedDeletedAssetIds.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--ink-dim)' }}>No changes found.</p>
+            ) : (
+              <>
+                {syncDiff.newPages.map(p => (
+                  <p key={p.slug} style={{ fontSize: 13 }}>New page: <strong>{p.name}</strong> ({p.componentAssetIds.length} component{p.componentAssetIds.length === 1 ? '' : 's'})</p>
+                ))}
+                {syncDiff.deletedPageIds.map(pid => (
+                  <p key={pid} style={{ fontSize: 13 }}>Page removed on disk, will be deleted here too.</p>
+                ))}
+                {syncDiff.pageOrderChanges.map(c => (
+                  <p key={c.pageId} style={{ fontSize: 13 }}>Component order changed on a page.</p>
+                ))}
+                {syncDiff.handEditedComponentAssetIds.map(aid => (
+                  <p key={aid} style={{ fontSize: 13 }}>
+                    A component looks hand-edited — <a href={`/dashboard/assets/${aid}`}>open it</a> to paste the new markup in.
+                  </p>
+                ))}
+                {syncDiff.droppedDeletedAssetIds.length > 0 && (
+                  <p style={{ fontSize: 13, color: 'var(--ink-dim)' }}>
+                    {syncDiff.droppedDeletedAssetIds.length} reference{syncDiff.droppedDeletedAssetIds.length === 1 ? '' : 's'} to an already-deleted component will be dropped.
+                  </p>
+                )}
+                <button className="btn btn-primary" onClick={handleApplySync} disabled={applyingSync} style={{ marginTop: 8 }}>
+                  {applyingSync ? 'Applying…' : 'Apply structural changes'}
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
 
