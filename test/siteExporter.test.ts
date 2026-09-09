@@ -145,13 +145,21 @@ describe('siteExporter.exportSite', () => {
     expect(result).toEqual({ error: 'NOTHING_TO_EXPORT' });
   });
 
-  it('returns ALREADY_EXISTS if the target subdir already exists', async () => {
+  it('re-exports into the same subdir for the same style even with zero components (no manifest components entries to compare against)', async () => {
+    // Was originally "returns ALREADY_EXISTS if the target subdir already
+    // exists" - that contract intentionally changed: re-exporting into a
+    // directory GameForge itself created for this exact style is now
+    // allowed (see the "re-exports into an existing directory..." test
+    // below), so the same-style/same-subdir case must now succeed instead
+    // of erroring. This still guards a distinct edge case: zero components
+    // means an empty existingManifest.components array, so the write loop's
+    // priorEntry lookup must not throw/misbehave on that.
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     const first = await siteExporter.exportSite(style.id, 'test-dup');
     expect(first).not.toHaveProperty('error');
     const second = await siteExporter.exportSite(style.id, 'test-dup');
-    expect(second).toEqual({ error: 'ALREADY_EXISTS' });
+    expect(second).not.toHaveProperty('error');
   });
 
   it('never lets two concurrent exports of the same subdir both succeed (closes the mkdir TOCTOU race)', async () => {
@@ -338,5 +346,70 @@ describe('siteExporter.exportSite', () => {
     expect(manifest.components).toHaveLength(1);
     expect(manifest.components[0].assetId).toBe(asset.id);
     expect(typeof manifest.components[0].contentHash).toBe('string');
+  });
+
+  it('re-exports into an existing directory when its manifest matches the same style', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const first = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
+
+    const second = await siteExporter.exportSite(style.id, 'my-site');
+    expect('error' in second).toBe(false);
+  });
+
+  it('still refuses ALREADY_EXISTS when the existing directory has no GameForge manifest', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+
+    const exportsDir = path.join(tempRoot, 'storage', 'exports', 'not-gameforges');
+    await fsPromises.mkdir(exportsDir, { recursive: true });
+    await fsPromises.writeFile(path.join(exportsDir, 'readme.txt'), 'someone else\'s directory');
+
+    const result = await siteExporter.exportSite(style.id, 'not-gameforges');
+    expect(result).toEqual({ error: 'ALREADY_EXISTS' });
+  });
+
+  it('still refuses ALREADY_EXISTS when the existing directory\'s manifest belongs to a different style', async () => {
+    const styleA = await styleService.create({ name: 'a', createdBy: 'user-1', parameters: '{}' });
+    const styleB = await styleService.create({ name: 'b', createdBy: 'user-1', parameters: '{}' });
+    await makeComponentAsset(styleA.id, 'a.html', COMPONENT_DOC);
+    await makeComponentAsset(styleB.id, 'b.html', COMPONENT_DOC);
+    await pageService.create({ styleId: styleA.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.create({ styleId: styleB.id, name: 'Home', createdBy: 'user-1' });
+
+    const first = await siteExporter.exportSite(styleA.id, 'shared-name');
+    if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
+
+    const second = await siteExporter.exportSite(styleB.id, 'shared-name');
+    expect(second).toEqual({ error: 'ALREADY_EXISTS' });
+  });
+
+  it('skips overwriting a component file that was hand-edited since the last export, and reports it', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const first = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
+
+    // Simulate a hand-edit: find the component's .tsx file and change it.
+    const componentsDir = path.join(first.targetDir, 'components');
+    const [componentFile] = (await fsPromises.readdir(componentsDir)).filter(f => f.endsWith('.tsx'));
+    const componentPath = path.join(componentsDir, componentFile);
+    const original = await fsPromises.readFile(componentPath, 'utf-8');
+    await fsPromises.writeFile(componentPath, original + '\n// hand-edited\n');
+
+    const second = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in second) throw new Error(`Unexpected export error: ${second.error}`);
+    expect(second.skippedComponents).toHaveLength(1);
+
+    const afterReExport = await fsPromises.readFile(componentPath, 'utf-8');
+    expect(afterReExport).toContain('// hand-edited');
   });
 });

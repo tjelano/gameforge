@@ -9,7 +9,7 @@ import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
 import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
 import { scopeComponentCss } from '@/lib/services/pageDocument';
-import { hashContent, writeManifest, type ExportManifest } from '@/lib/services/ExportManifest';
+import { hashContent, readManifest, writeManifest, type ExportManifest } from '@/lib/services/ExportManifest';
 import type { Page, Asset } from '@/lib/database/schema';
 
 // The literal CSS-Module class name every component's wrapper element
@@ -22,6 +22,7 @@ export interface SiteExportResult {
   pagesExported: number;
   componentsExported: number;
   targetDir: string;
+  skippedComponents: string[];
 }
 
 function slugify(name: string): string {
@@ -96,6 +97,7 @@ class SiteExporterImpl {
     }
 
     const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
+    let existingManifest: ExportManifest | null = null;
     try {
       // A single atomic mkdir (non-recursive) IS the existence check - it
       // either creates targetDir and we own it, or fails with EEXIST because
@@ -106,13 +108,22 @@ class SiteExporterImpl {
       // even if targetDir now exists - and interleave writes into one folder.
       await fsPromises.mkdir(targetDir);
     } catch (e: any) {
-      if (e?.code === 'EEXIST') return { error: 'ALREADY_EXISTS' };
-      // Anything else (e.g. EACCES) is a real problem this must not
-      // silently proceed past, since that would lead to a much less clear
-      // failure later (a raw mkdir/writeFile error) instead of surfacing
-      // the real cause here.
-      console.error(`Failed to create export target directory ${targetDir}:`, e);
-      throw e;
+      if (e?.code !== 'EEXIST') {
+        // Anything else (e.g. EACCES) is a real problem this must not
+        // silently proceed past, since that would lead to a much less clear
+        // failure later (a raw mkdir/writeFile error) instead of surfacing
+        // the real cause here.
+        console.error(`Failed to create export target directory ${targetDir}:`, e);
+        throw e;
+      }
+      // The directory already exists - this is only a legitimate re-export if
+      // it's one GameForge made for this exact style. Anything else (an
+      // unrelated directory, or another style's export reusing this subdir
+      // name) must not be silently written into.
+      existingManifest = await readManifest(targetDir);
+      if (!existingManifest || existingManifest.styleId !== styleId) {
+        return { error: 'ALREADY_EXISTS' };
+      }
     }
 
     const componentsByAssetId = new Map<string, ConvertedComponent>();
@@ -133,12 +144,38 @@ class SiteExporterImpl {
     }
 
     const components = [...componentsByAssetId.values()];
+    const skippedComponents: string[] = [];
 
     try {
       await fsPromises.mkdir(path.join(targetDir, 'app'), { recursive: true });
       await fsPromises.mkdir(path.join(targetDir, 'components'), { recursive: true });
 
       for (const component of components) {
+        const priorEntry = existingManifest?.components.find(c => c.assetId === component.asset.id);
+        // A hand-edit is detected by comparing the CURRENT ON-DISK file against
+        // what the manifest last recorded as GameForge's own expected content
+        // for this component - not against what we're about to write now. If
+        // they differ, someone changed the file since the last export/sync and
+        // it must not be silently overwritten.
+        if (priorEntry) {
+          const tsxPath = path.join(targetDir, 'components', `${component.componentName}.tsx`);
+          const cssPath = path.join(targetDir, 'components', `${component.componentName}.module.css`);
+          let onDiskHash: string | null = null;
+          try {
+            const [tsx, css] = await Promise.all([
+              fsPromises.readFile(tsxPath, 'utf-8'),
+              fsPromises.readFile(cssPath, 'utf-8'),
+            ]);
+            onDiskHash = hashContent(tsx + '\n' + css);
+          } catch {
+            // Files don't exist on disk (e.g. deleted by hand) - nothing to
+            // preserve, safe to write fresh below.
+          }
+          if (onDiskHash !== null && onDiskHash !== priorEntry.contentHash) {
+            skippedComponents.push(component.componentName);
+            continue;
+          }
+        }
         await fsPromises.writeFile(
           path.join(targetDir, 'components', `${component.componentName}.tsx`),
           this.buildComponentFile(component)
@@ -212,7 +249,7 @@ class SiteExporterImpl {
       throw e;
     }
 
-    return { pagesExported: pages.length, componentsExported: components.length, targetDir };
+    return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents };
   }
 
   private async convertComponent(assetId: string, pageId: string): Promise<ConvertedComponent | null> {
