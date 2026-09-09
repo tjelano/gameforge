@@ -502,6 +502,33 @@ describe('parseW3cTokensJson', () => {
     expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
   });
 
+  it('quotes a digit-leading font-family name, which would otherwise tokenize as a number rather than an identifier', () => {
+    const doc = {
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        accent: { $type: 'color', $value: '#ff0000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        // "3270" has no spaces or quote characters - quoteFontName's other
+        // checks would leave it unquoted - but an unquoted CSS ident can't
+        // start with a digit, so it would break the custom property.
+        heading: { $type: 'fontFamily', $value: '3270' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.fontHeading).toBe("'3270'");
+    expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
+  });
+
   it('does not crash on a pathologically deeply-nested (but validly-parsed) JSON document', () => {
     // A ~5,000-level-deep object crashes a naive unbounded-recursion walker
     // with a real RangeError (verified directly) - this must resolve to a

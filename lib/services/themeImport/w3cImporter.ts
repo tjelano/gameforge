@@ -89,7 +89,12 @@ function colorTokenToCss(value: unknown): string | null {
 function quoteFontName(name: string): string | null {
   const hasSingleQuote = name.includes("'");
   const hasDoubleQuote = name.includes('"');
-  if (!name.includes(' ') && !hasSingleQuote && !hasDoubleQuote) return name;
+  // An unquoted CSS ident can't start with a digit (or a hyphen followed by
+  // a digit) - a font literally named "3270" tokenizes as a number, not an
+  // identifier, silently breaking the whole custom-property declaration
+  // even though nothing else about the name needs quoting.
+  const startsLikeANumber = /^-?\d/.test(name);
+  if (!name.includes(' ') && !hasSingleQuote && !hasDoubleQuote && !startsLikeANumber) return name;
   if (hasSingleQuote && hasDoubleQuote) return null;
   return hasSingleQuote ? `"${name}"` : `'${name}'`;
 }
