@@ -5,6 +5,7 @@ import path from 'path';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
+import { assetService } from '@/lib/services/AssetService';
 import { PUT as updateAsset } from '@/app/api/assets/[id]/route';
 
 let tempRoot: string;
@@ -69,16 +70,12 @@ describe('PUT /api/assets/[id] — 9-slice margins and states', () => {
   });
 });
 
-describe('PUT /api/assets/[id] — edited_externally', () => {
+describe('AssetService.update() — edited_externally', () => {
   it('sets edited_externally to 1 when patched with true', async () => {
-    const res = await updateAsset(
-      putRequest({ editedExternally: true }),
-      { params: Promise.resolve({ id: ASSET_ID }) }
-    );
-    const body = await res.json();
+    const updated = await assetService.update(ASSET_ID, { editedExternally: true });
 
-    expect(body.success).toBe(true);
-    expect(body.data.edited_externally).toBe(1);
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(1);
   });
 
   it('sets edited_externally to 0 when patched with false', async () => {
@@ -86,14 +83,10 @@ describe('PUT /api/assets/[id] — edited_externally', () => {
     // First set it to 1
     db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
 
-    const res = await updateAsset(
-      putRequest({ editedExternally: false }),
-      { params: Promise.resolve({ id: ASSET_ID }) }
-    );
-    const body = await res.json();
+    const updated = await assetService.update(ASSET_ID, { editedExternally: false });
 
-    expect(body.success).toBe(true);
-    expect(body.data.edited_externally).toBe(0);
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(0);
   });
 
   it('preserves edited_externally when not included in patch', async () => {
@@ -102,29 +95,21 @@ describe('PUT /api/assets/[id] — edited_externally', () => {
     db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
 
     // Update with a different field, omitting editedExternally
-    const res = await updateAsset(
-      putRequest({ prompt: 'Updated prompt' }),
-      { params: Promise.resolve({ id: ASSET_ID }) }
-    );
-    const body = await res.json();
+    const updated = await assetService.update(ASSET_ID, { prompt: 'Updated prompt' });
 
-    expect(body.success).toBe(true);
-    expect(body.data.edited_externally).toBe(1); // Should still be 1
-    expect(body.data.prompt).toBe('Updated prompt');
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(1); // Should still be 1
+    expect(updated!.prompt).toBe('Updated prompt');
   });
 
   it('does not reset edited_externally when updating other fields', async () => {
     const db = DatabaseConnection.getInstance();
     db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
 
-    const res = await updateAsset(
-      putRequest({ assetType: 'input' }),
-      { params: Promise.resolve({ id: ASSET_ID }) }
-    );
-    const body = await res.json();
+    const updated = await assetService.update(ASSET_ID, { assetType: 'input' });
 
-    expect(body.success).toBe(true);
-    expect(body.data.edited_externally).toBe(1); // Should still be 1
-    expect(body.data.asset_type).toBe('input');
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(1); // Should still be 1
+    expect(updated!.asset_type).toBe('input');
   });
 });
