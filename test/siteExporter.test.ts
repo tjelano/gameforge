@@ -60,6 +60,21 @@ async function makeComponentAsset(styleId: string, filename: string, document: s
 
 const COMPONENT_DOC = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><button class="btn">Go</button></body></html>';
 
+// <img> is deliberately excluded from componentSanitize's ALLOWED_TAGS, so
+// this is the reliable "sanitizer would strip this" payload — and the exact
+// case reverse-sync's trustAsEdited path exists for.
+const IMG_COMPONENT_DOC = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+  + '<body><div class="hero"><img src="/hero.png" alt="Hero"></div></body></html>';
+
+async function exportedComponentTsx(styleId: string, subdir: string): Promise<string> {
+  const result = await siteExporter.exportSite(styleId, subdir);
+  if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);
+  const componentFiles = await fsPromises.readdir(path.join(result.targetDir, 'components'));
+  const tsxFile = componentFiles.find(f => f.endsWith('.tsx'));
+  expect(tsxFile).toBeDefined();
+  return fsPromises.readFile(path.join(result.targetDir, 'components', tsxFile!), 'utf-8');
+}
+
 async function makeThemeAsset(styleId: string, filename: string) {
   const css = tokensToCss({
     colorBackground: '#1a1420',
@@ -427,5 +442,57 @@ describe('siteExporter.exportSite', () => {
 
     const afterReExport = await fsPromises.readFile(componentPath, 'utf-8');
     expect(afterReExport).toContain('// hand-edited');
+  });
+
+  it('exports a component marked edited_externally with its hand-edited HTML intact', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_COMPONENT_DOC);
+    await assetService.update(asset.id, { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const tsx = await exportedComponentTsx(style.id, 'test-trusted-export');
+    expect(tsx).toContain('<img');
+    expect(tsx).toContain('/hero.png');
+  });
+
+  it('still sanitizes an exported component when the asset is not marked edited_externally', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'untrusted.html', IMG_COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const tsx = await exportedComponentTsx(style.id, 'test-untrusted-export');
+    expect(tsx).not.toContain('<img');
+    expect(tsx).not.toContain('/hero.png');
+  });
+
+  it('still scopes CSS and converts JSX for an edited_externally component — those are format conversions, not sanitization', async () => {
+    // The regression guard for Part D's delicate bit: skipping sanitization
+    // must NOT also skip scopeComponentCss/htmlToJsx, or the exported
+    // project fails Next's CSS Modules pure-mode build and emits `class=`
+    // instead of `className=`.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const bareSelectorDoc = '<!DOCTYPE html><html><head><style>button { color: red; }</style></head>'
+      + '<body><button class="btn">Go</button><img src="/hero.png"></body></html>';
+    const asset = await makeComponentAsset(style.id, 'trusted-bare.html', bareSelectorDoc);
+    await assetService.update(asset.id, { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const result = await siteExporter.exportSite(style.id, 'test-trusted-conversions');
+    if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);
+    const componentFiles = await fsPromises.readdir(path.join(result.targetDir, 'components'));
+
+    const tsxFile = componentFiles.find(f => f.endsWith('.tsx'));
+    const tsx = await fsPromises.readFile(path.join(result.targetDir, 'components', tsxFile!), 'utf-8');
+    expect(tsx).toContain('<img');
+    expect(tsx).toContain('className={styles["btn"]}');
+    expect(tsx).not.toContain('class="btn"');
+
+    const cssFile = componentFiles.find(f => f.endsWith('.module.css'));
+    const generatedCss = await fsPromises.readFile(path.join(result.targetDir, 'components', cssFile!), 'utf-8');
+    const compiled = await postcss([localByDefault({ mode: 'pure' })]).process(generatedCss, { from: undefined });
+    expect(compiled.css).toContain(':local(.root)');
   });
 });

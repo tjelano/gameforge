@@ -39,9 +39,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         }
         const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
         const tokens = parseComponentHtml(document);
+        // An asset marked `edited_externally` already had its trust decision
+        // made at WRITE time (PATCH .../component with trustAsEdited) — skip
+        // only the sanitize calls for that case, same as the component-serve
+        // and export routes. composePageHtml still scopes and reassembles
+        // this content unconditionally either way.
+        const trusted = asset.edited_externally === 1;
         items.push({
-          html: sanitizeComponentHtml(tokens.html),
-          css: sanitizeComponentCss(tokens.css),
+          html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
+          css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),
         });
       } catch (e) {
         console.error(`Failed to load component asset ${assetId} for page ${id}, skipping:`, e);

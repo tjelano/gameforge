@@ -34,6 +34,9 @@ afterEach(async () => {
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
+const IMG_DOC = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+  + '<body><div class="hero"><img src="/hero.png" alt="Hero"></div></body></html>';
+
 async function makeComponentAsset(styleId: string, filename: string, document: string, assetType = 'button') {
   await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', filename), document);
   return assetService.create({
@@ -136,6 +139,37 @@ describe('GET /api/pages/[id]/render', () => {
     } finally {
       consoleSpy.mockRestore();
     }
+  });
+
+  it('renders hand-edited content intact when the component asset is marked edited_externally', async () => {
+    // <img> is deliberately excluded from componentSanitize's ALLOWED_TAGS,
+    // so it is the reliable "sanitizer strips this" payload — and the exact
+    // case reverse-sync's trustAsEdited path exists for. Without the trust
+    // check this route stripped it back out on every page preview/download.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_DOC);
+    await assetService.update(asset.id, { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<img');
+    expect(body).toContain('/hero.png');
+  });
+
+  it('still sanitizes the same content when the component asset is not marked edited_externally', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'untrusted.html', IMG_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('<img');
+    expect(body).not.toContain('/hero.png');
   });
 
   it('with ?download=1, sets Content-Disposition to attachment with a slugified filename', async () => {

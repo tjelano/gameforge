@@ -113,3 +113,18 @@ describe('AssetService.update() — edited_externally', () => {
     expect(updated!.asset_type).toBe('input');
   });
 });
+
+describe('AssetService.getByImagePath()', () => {
+  it('returns the matching asset when one exists with that image_path', async () => {
+    const asset = await assetService.getByImagePath('inv.png');
+
+    expect(asset).not.toBeNull();
+    expect(asset!.id).toBe(ASSET_ID);
+  });
+
+  it('returns null when no asset has that image_path', async () => {
+    const asset = await assetService.getByImagePath('does-not-exist.png');
+
+    expect(asset).toBeNull();
+  });
+});

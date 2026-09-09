@@ -119,6 +119,12 @@ class AssetServiceImpl {
     return row ? AssetSchema.parse(row) : null;
   }
 
+  async getByImagePath(imagePath: string): Promise<Asset | null> {
+    const db = DatabaseConnection.getInstance();
+    const row = db.prepare('SELECT * FROM assets WHERE image_path = ?').get(imagePath);
+    return row ? AssetSchema.parse(row) : null;
+  }
+
   async getPage(limit: number, offset: number): Promise<Asset[]> {
     const db = DatabaseConnection.getInstance();
     const rows = db.prepare(

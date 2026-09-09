@@ -415,7 +415,13 @@ class SiteExporterImpl {
       }
       const document = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', filename), 'utf-8');
       const tokens = parseComponentHtml(document);
-      const html = sanitizeComponentHtml(tokens.html);
+      // An asset marked `edited_externally` already had its trust decision
+      // made at WRITE time (PATCH .../component with trustAsEdited) — skip
+      // only the sanitize calls for that case. scopeComponentCss/htmlToJsx
+      // below still run unconditionally on whatever html/css result: they're
+      // required format conversions for the export target, not sanitization.
+      const trusted = asset.edited_externally === 1;
+      const html = trusted ? tokens.html : sanitizeComponentHtml(tokens.html);
       // scopeComponentCss runs AFTER sanitization (it needs real, trusted
       // CSS to parse) and BEFORE this CSS is ever written to a
       // .module.css file. Next's CSS Modules compiler runs in "pure"
@@ -436,7 +442,7 @@ class SiteExporterImpl {
       // and still fails identically). buildComponentFile below wraps the
       // component's JSX in a real element carrying this same scope
       // class, matching what this CSS now expects to be nested under.
-      const css = scopeComponentCss(sanitizeComponentCss(tokens.css), COMPONENT_SCOPE_CLASS);
+      const css = scopeComponentCss(trusted ? tokens.css : sanitizeComponentCss(tokens.css), COMPONENT_SCOPE_CLASS);
       return { asset, componentName: componentName(asset), jsx: htmlToJsx(html), css };
     } catch (e) {
       console.error(`Failed to convert component asset ${assetId} for export, skipping:`, e);

@@ -41,14 +41,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
   // <script> or event handler if it bypassed those paths — unlike themes
   // or images, which are structurally incapable of carrying executable
   // content.
+  //
+  // Exception: an asset the user explicitly marked `edited_externally`
+  // (via PATCH /api/assets/[id]/component with trustAsEdited) already had
+  // its trust decision made and reviewed at WRITE time — re-sanitizing it
+  // here would silently strip the hand-edited content right back out on
+  // every reload. Skip only the sanitize calls for that case; parsing and
+  // reassembly still run unconditionally either way.
   let safeDocument: string;
   try {
     const tokens = parseComponentHtml(data);
     const styleId = req.nextUrl.searchParams.get('styleId');
     const themeCss = await assetService.loadThemeCssForStyle(styleId);
+    const asset = await assetService.getByImagePath(filename);
+    const trusted = asset?.edited_externally === 1;
     safeDocument = combineComponentHtml({
-      html: sanitizeComponentHtml(tokens.html),
-      css: sanitizeComponentCss(tokens.css),
+      html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
+      css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),
     }, themeCss ?? undefined);
   } catch (e) {
     console.error(`Component ${filename} failed re-sanitization at serve time:`, e);
