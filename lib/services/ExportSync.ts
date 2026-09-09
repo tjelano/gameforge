@@ -170,9 +170,12 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
       if (onDiskHash !== component.contentHash) {
         handEditedComponentAssetIds.push(component.assetId);
       }
-    } catch {
-      // Component files missing entirely - not treated as a hand-edit here;
-      // it will simply no longer appear in any page's tag scan above.
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') {
+        console.error(`Failed to read on-disk component files for ${component.componentName}:`, e);
+      }
+      // Missing entirely (ENOENT) is not treated as a hand-edit here; it
+      // will simply no longer appear in any page's tag scan above.
     }
   }
 
