@@ -340,30 +340,37 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
         </>
       )}
 
-      {asset.output_kind === 'component' && componentTokens && (
+      {asset.output_kind === 'component' && asset.image_path && (componentTokens || componentSaveError) && (
         <div className="card" style={{ maxWidth: 560, marginTop: 16 }}>
           <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Edit markup</h2>
-          {asset.edited_externally === 1 && (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 8 }}>
-              This component currently holds hand-edited code, imported outside GameForge&apos;s usual validation.
-            </p>
+          {!componentTokens && componentSaveError && (
+            <p style={{ color: 'var(--reject)', fontSize: 13 }}>{componentSaveError}</p>
           )}
-          <div className="field">
-            <label htmlFor="component-html">HTML</label>
-            <textarea id="component-html" value={componentTokens.html} onChange={e => setComponentTokens({ ...componentTokens, html: e.target.value })} rows={8} />
-          </div>
-          <div className="field">
-            <label htmlFor="component-css">CSS</label>
-            <textarea id="component-css" value={componentTokens.css} onChange={e => setComponentTokens({ ...componentTokens, css: e.target.value })} rows={8} />
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 12 }}>
-            <input type="checkbox" checked={trustAsEdited} onChange={e => setTrustAsEdited(e.target.checked)} />
-            Trust this as my own edited code (skips validation — use this when pasting in markup you hand-edited outside GameForge)
-          </label>
-          {componentSaveError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{componentSaveError}</p>}
-          <button className="btn btn-primary" onClick={handleSaveComponent} disabled={savingComponent}>
-            {savingComponent ? 'Saving…' : 'Save'}
-          </button>
+          {componentTokens && (
+            <>
+              {asset.edited_externally === 1 && (
+                <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 8 }}>
+                  This component currently holds hand-edited code, imported outside GameForge&apos;s usual validation.
+                </p>
+              )}
+              <div className="field">
+                <label htmlFor="component-html">HTML</label>
+                <textarea id="component-html" value={componentTokens.html} onChange={e => setComponentTokens({ ...componentTokens, html: e.target.value })} rows={8} />
+              </div>
+              <div className="field">
+                <label htmlFor="component-css">CSS</label>
+                <textarea id="component-css" value={componentTokens.css} onChange={e => setComponentTokens({ ...componentTokens, css: e.target.value })} rows={8} />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 12 }}>
+                <input type="checkbox" checked={trustAsEdited} onChange={e => setTrustAsEdited(e.target.checked)} />
+                Trust this as my own edited code (skips validation — use this when pasting in markup you hand-edited outside GameForge)
+              </label>
+              {componentSaveError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{componentSaveError}</p>}
+              <button className="btn btn-primary" onClick={handleSaveComponent} disabled={savingComponent}>
+                {savingComponent ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )}
         </div>
       )}
 
