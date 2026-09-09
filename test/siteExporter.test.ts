@@ -172,9 +172,13 @@ describe('siteExporter.exportSite', () => {
     ]);
     const results = [a, b];
     const successes = results.filter(r => !('error' in r));
-    const alreadyExists = results.filter(r => 'error' in r && r.error === 'ALREADY_EXISTS');
+    // Task 5's export lock is now the first concurrency gate - it's acquired
+    // before the targetDir mkdir this test used to race on ever runs, so the
+    // losing call fails there with EXPORT_IN_PROGRESS instead of reaching
+    // the mkdir race and getting ALREADY_EXISTS.
+    const inProgress = results.filter(r => 'error' in r && r.error === 'EXPORT_IN_PROGRESS');
     expect(successes).toHaveLength(1);
-    expect(alreadyExists).toHaveLength(1);
+    expect(inProgress).toHaveLength(1);
   });
 
   it('rejects an unsafe subdir even when called directly, bypassing the route\'s own validation', async () => {

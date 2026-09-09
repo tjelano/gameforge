@@ -18,6 +18,95 @@ import type { Page, Asset } from '@/lib/database/schema';
 // risk; CSS Modules hashes it uniquely per file regardless).
 const COMPONENT_SCOPE_CLASS = 'root';
 
+const LOCK_STALE_MS = 2 * 60 * 1000; // no heartbeat for this long => treat as crashed
+const HEARTBEAT_INTERVAL_MS = 30 * 1000;
+
+interface ExportLock {
+  release(): Promise<void>;
+}
+
+async function writeHeartbeat(lockDir: string): Promise<void> {
+  await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(Date.now()));
+}
+
+async function isLockStale(lockDir: string): Promise<boolean> {
+  try {
+    const raw = await fsPromises.readFile(path.join(lockDir, 'heartbeat'), 'utf-8');
+    const last = Number(raw);
+    return !Number.isFinite(last) || Date.now() - last > LOCK_STALE_MS;
+  } catch {
+    // Lock directory exists but no heartbeat file yet (a narrow window right
+    // after another process's mkdir, before its first writeHeartbeat call) -
+    // not stale, just brand new. Treating this as stale would defeat the
+    // lock during that window.
+    return false;
+  }
+}
+
+/**
+ * Atomically claims a stale lock by renaming it away first - remove-then-mkdir
+ * is NOT atomic as a unit and lets two contenders both "win" a stale lock at
+ * once. Only the contender whose rename succeeds may proceed to create a
+ * fresh lock; a second contender's rename fails with ENOENT (the path is
+ * already gone) and it must back off normally.
+ */
+async function tryRecoverStaleLock(lockDir: string): Promise<boolean> {
+  const garbageDir = `${lockDir}.stale.${process.pid}`;
+  try {
+    await fsPromises.rename(lockDir, garbageDir);
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') return false;
+    throw e;
+  }
+  fsPromises.rm(garbageDir, { recursive: true, force: true }).catch(e => {
+    console.error(`Failed to clean up stale export lock remnant ${garbageDir}:`, e);
+  });
+  return true;
+}
+
+async function acquireExportLock(exportsRootDir: string, subdir: string): Promise<ExportLock> {
+  const locksDir = path.join(exportsRootDir, '.locks');
+  await fsPromises.mkdir(locksDir, { recursive: true });
+  const lockDir = path.join(locksDir, `${subdir}.lock`);
+
+  async function tryClaim(): Promise<boolean> {
+    try {
+      await fsPromises.mkdir(lockDir);
+      return true;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+      return false;
+    }
+  }
+
+  let claimed = await tryClaim();
+  if (!claimed && await isLockStale(lockDir)) {
+    if (await tryRecoverStaleLock(lockDir)) {
+      claimed = await tryClaim();
+    }
+  }
+  if (!claimed) {
+    throw new Error('EXPORT_IN_PROGRESS');
+  }
+
+  await writeHeartbeat(lockDir);
+  const heartbeatTimer = setInterval(() => {
+    writeHeartbeat(lockDir).catch(e => console.error(`Failed to refresh export lock heartbeat for ${subdir}:`, e));
+  }, HEARTBEAT_INTERVAL_MS);
+  heartbeatTimer.unref();
+
+  return {
+    async release() {
+      clearInterval(heartbeatTimer);
+      try {
+        await fsPromises.rm(lockDir, { recursive: true, force: true });
+      } catch (e) {
+        console.error(`Failed to remove export lock directory ${lockDir}:`, e);
+      }
+    },
+  };
+}
+
 export interface SiteExportResult {
   pagesExported: number;
   componentsExported: number;
@@ -71,19 +160,10 @@ interface ConvertedComponent {
 const SUBDIR_PATTERN = /^[a-z0-9-]+$/;
 
 class SiteExporterImpl {
-  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' }> {
+  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' | 'EXPORT_IN_PROGRESS' }> {
     if (!SUBDIR_PATTERN.test(subdir)) {
       return { error: 'INVALID_SUBDIR' };
     }
-
-    const pagesNewestFirst = await pageService.getActivePagesForStyle(styleId);
-    if (pagesNewestFirst.length === 0) {
-      return { error: 'NOTHING_TO_EXPORT' };
-    }
-    // getActivePagesForStyle returns newest-first (ORDER BY created_at
-    // DESC) - reverse to oldest-first so pages[0] is the home page and
-    // the nav lists pages in creation order.
-    const pages: Page[] = [...pagesNewestFirst].reverse();
 
     const exportsRootDir = path.join(getProjectRoot(), 'storage', 'exports');
     try {
@@ -96,164 +176,185 @@ class SiteExporterImpl {
       throw e;
     }
 
-    const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
-    let existingManifest: ExportManifest | null = null;
+    let lock: ExportLock;
     try {
-      // A single atomic mkdir (non-recursive) IS the existence check - it
-      // either creates targetDir and we own it, or fails with EEXIST because
-      // someone else's request already created it. This closes a real race:
-      // the previous check (fsPromises.access, then a *recursive* mkdir much
-      // later) had a window where two concurrent exports of the same subdir
-      // could both pass the access check - recursive:true never throws EEXIST
-      // even if targetDir now exists - and interleave writes into one folder.
-      await fsPromises.mkdir(targetDir);
+      lock = await acquireExportLock(exportsRootDir, subdir);
     } catch (e: any) {
-      if (e?.code !== 'EEXIST') {
-        // Anything else (e.g. EACCES) is a real problem this must not
-        // silently proceed past, since that would lead to a much less clear
-        // failure later (a raw mkdir/writeFile error) instead of surfacing
-        // the real cause here.
-        console.error(`Failed to create export target directory ${targetDir}:`, e);
-        throw e;
-      }
-      // The directory already exists - this is only a legitimate re-export if
-      // it's one GameForge made for this exact style. Anything else (an
-      // unrelated directory, or another style's export reusing this subdir
-      // name) must not be silently written into.
-      existingManifest = await readManifest(targetDir);
-      if (!existingManifest || existingManifest.styleId !== styleId) {
-        return { error: 'ALREADY_EXISTS' };
-      }
-    }
-
-    const componentsByAssetId = new Map<string, ConvertedComponent>();
-    const pageComponentNames: string[][] = [];
-
-    for (const page of pages) {
-      const assetIds = JSON.parse(page.component_asset_ids) as string[];
-      const namesForThisPage: string[] = [];
-      for (const assetId of assetIds) {
-        if (!componentsByAssetId.has(assetId)) {
-          const converted = await this.convertComponent(assetId, page.id);
-          if (!converted) continue;
-          componentsByAssetId.set(assetId, converted);
-        }
-        namesForThisPage.push(componentsByAssetId.get(assetId)!.componentName);
-      }
-      pageComponentNames.push(namesForThisPage);
-    }
-
-    const components = [...componentsByAssetId.values()];
-    const skippedComponents: string[] = [];
-
-    try {
-      await fsPromises.mkdir(path.join(targetDir, 'app'), { recursive: true });
-      await fsPromises.mkdir(path.join(targetDir, 'components'), { recursive: true });
-
-      for (const component of components) {
-        const priorEntry = existingManifest?.components.find(c => c.assetId === component.asset.id);
-        // A hand-edit is detected by comparing the CURRENT ON-DISK file against
-        // what the manifest last recorded as GameForge's own expected content
-        // for this component - not against what we're about to write now. If
-        // they differ, someone changed the file since the last export/sync and
-        // it must not be silently overwritten.
-        if (priorEntry) {
-          const tsxPath = path.join(targetDir, 'components', `${component.componentName}.tsx`);
-          const cssPath = path.join(targetDir, 'components', `${component.componentName}.module.css`);
-          let onDiskHash: string | null = null;
-          try {
-            const [tsx, css] = await Promise.all([
-              fsPromises.readFile(tsxPath, 'utf-8'),
-              fsPromises.readFile(cssPath, 'utf-8'),
-            ]);
-            onDiskHash = hashContent(tsx + '\n' + css);
-          } catch (e: any) {
-            // ENOENT (files don't exist on disk, e.g. deleted by hand) is
-            // the expected case - nothing to preserve, safe to write fresh
-            // below. Anything else (e.g. EACCES) must not vanish silently.
-            if (e?.code !== 'ENOENT') {
-              console.error(`Failed to read on-disk component ${component.componentName} for hand-edit check:`, e);
-            }
-          }
-          if (onDiskHash !== null && onDiskHash !== priorEntry.contentHash) {
-            skippedComponents.push(component.componentName);
-            continue;
-          }
-        }
-        await fsPromises.writeFile(
-          path.join(targetDir, 'components', `${component.componentName}.tsx`),
-          this.buildComponentFile(component)
-        );
-        await fsPromises.writeFile(
-          path.join(targetDir, 'components', `${component.componentName}.module.css`),
-          component.css
-        );
-      }
-
-      const themeCss = await assetService.loadThemeCssForStyle(styleId);
-      let themeBlock = '';
-      if (themeCss) {
-        try {
-          themeBlock = tokensToTailwindTheme(parseThemeCss(themeCss));
-        } catch (e) {
-          console.error(`Could not convert theme CSS to Tailwind theme for style ${styleId}, exporting without it:`, e);
-        }
-      }
-      await fsPromises.writeFile(
-        path.join(targetDir, 'app', 'globals.css'),
-        `@import "tailwindcss";\n\n${themeBlock}${this.buildThemeAliasBlock(themeBlock)}`
-      );
-
-      const manifestPages: ExportManifest['pages'] = [];
-
-      const slugs = this.buildPageSlugs(pages);
-      await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
-
-      const homePageFile = this.buildPageFile(pages[0], pageComponentNames[0], components);
-      await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), homePageFile);
-      manifestPages.push({
-        id: pages[0].id,
-        name: pages[0].name,
-        slug: slugs[0],
-        componentAssetIds: JSON.parse(pages[0].component_asset_ids),
-        pageFileHash: hashContent(homePageFile),
-      });
-
-      for (let i = 1; i < pages.length; i++) {
-        const pageDir = path.join(targetDir, 'app', slugs[i]);
-        await fsPromises.mkdir(pageDir, { recursive: true });
-        const pageFile = this.buildPageFile(pages[i], pageComponentNames[i], components);
-        await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), pageFile);
-        manifestPages.push({
-          id: pages[i].id,
-          name: pages[i].name,
-          slug: slugs[i],
-          componentAssetIds: JSON.parse(pages[i].component_asset_ids),
-          pageFileHash: hashContent(pageFile),
-        });
-      }
-
-      await fsPromises.writeFile(path.join(targetDir, 'package.json'), this.buildPackageJson());
-      await fsPromises.writeFile(path.join(targetDir, 'tsconfig.json'), this.buildTsConfig());
-      await fsPromises.writeFile(path.join(targetDir, 'postcss.config.mjs'), this.buildPostcssConfig());
-
-      const manifest: ExportManifest = {
-        styleId,
-        exportedAt: Date.now(),
-        pages: manifestPages,
-        components: components.map(c => ({
-          assetId: c.asset.id,
-          componentName: c.componentName,
-          contentHash: hashContent(this.buildComponentFile(c) + '\n' + c.css),
-        })),
-      };
-      await writeManifest(targetDir, manifest);
-    } catch (e) {
-      console.error(`Failed to write exported site files to ${targetDir}:`, e);
+      if (e?.message === 'EXPORT_IN_PROGRESS') return { error: 'EXPORT_IN_PROGRESS' };
       throw e;
     }
 
-    return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents };
+    try {
+      const pagesNewestFirst = await pageService.getActivePagesForStyle(styleId);
+      if (pagesNewestFirst.length === 0) {
+        return { error: 'NOTHING_TO_EXPORT' };
+      }
+      // getActivePagesForStyle returns newest-first (ORDER BY created_at
+      // DESC) - reverse to oldest-first so pages[0] is the home page and
+      // the nav lists pages in creation order.
+      const pages: Page[] = [...pagesNewestFirst].reverse();
+
+      const targetDir = path.join(getProjectRoot(), 'storage', 'exports', subdir);
+      let existingManifest: ExportManifest | null = null;
+      try {
+        // A single atomic mkdir (non-recursive) IS the existence check - it
+        // either creates targetDir and we own it, or fails with EEXIST because
+        // someone else's request already created it. This closes a real race:
+        // the previous check (fsPromises.access, then a *recursive* mkdir much
+        // later) had a window where two concurrent exports of the same subdir
+        // could both pass the access check - recursive:true never throws EEXIST
+        // even if targetDir now exists - and interleave writes into one folder.
+        await fsPromises.mkdir(targetDir);
+      } catch (e: any) {
+        if (e?.code !== 'EEXIST') {
+          // Anything else (e.g. EACCES) is a real problem this must not
+          // silently proceed past, since that would lead to a much less clear
+          // failure later (a raw mkdir/writeFile error) instead of surfacing
+          // the real cause here.
+          console.error(`Failed to create export target directory ${targetDir}:`, e);
+          throw e;
+        }
+        // The directory already exists - this is only a legitimate re-export if
+        // it's one GameForge made for this exact style. Anything else (an
+        // unrelated directory, or another style's export reusing this subdir
+        // name) must not be silently written into.
+        existingManifest = await readManifest(targetDir);
+        if (!existingManifest || existingManifest.styleId !== styleId) {
+          return { error: 'ALREADY_EXISTS' };
+        }
+      }
+
+      const componentsByAssetId = new Map<string, ConvertedComponent>();
+      const pageComponentNames: string[][] = [];
+
+      for (const page of pages) {
+        const assetIds = JSON.parse(page.component_asset_ids) as string[];
+        const namesForThisPage: string[] = [];
+        for (const assetId of assetIds) {
+          if (!componentsByAssetId.has(assetId)) {
+            const converted = await this.convertComponent(assetId, page.id);
+            if (!converted) continue;
+            componentsByAssetId.set(assetId, converted);
+          }
+          namesForThisPage.push(componentsByAssetId.get(assetId)!.componentName);
+        }
+        pageComponentNames.push(namesForThisPage);
+      }
+
+      const components = [...componentsByAssetId.values()];
+      const skippedComponents: string[] = [];
+
+      try {
+        await fsPromises.mkdir(path.join(targetDir, 'app'), { recursive: true });
+        await fsPromises.mkdir(path.join(targetDir, 'components'), { recursive: true });
+
+        for (const component of components) {
+          const priorEntry = existingManifest?.components.find(c => c.assetId === component.asset.id);
+          // A hand-edit is detected by comparing the CURRENT ON-DISK file against
+          // what the manifest last recorded as GameForge's own expected content
+          // for this component - not against what we're about to write now. If
+          // they differ, someone changed the file since the last export/sync and
+          // it must not be silently overwritten.
+          if (priorEntry) {
+            const tsxPath = path.join(targetDir, 'components', `${component.componentName}.tsx`);
+            const cssPath = path.join(targetDir, 'components', `${component.componentName}.module.css`);
+            let onDiskHash: string | null = null;
+            try {
+              const [tsx, css] = await Promise.all([
+                fsPromises.readFile(tsxPath, 'utf-8'),
+                fsPromises.readFile(cssPath, 'utf-8'),
+              ]);
+              onDiskHash = hashContent(tsx + '\n' + css);
+            } catch (e: any) {
+              // ENOENT (files don't exist on disk, e.g. deleted by hand) is
+              // the expected case - nothing to preserve, safe to write fresh
+              // below. Anything else (e.g. EACCES) must not vanish silently.
+              if (e?.code !== 'ENOENT') {
+                console.error(`Failed to read on-disk component ${component.componentName} for hand-edit check:`, e);
+              }
+            }
+            if (onDiskHash !== null && onDiskHash !== priorEntry.contentHash) {
+              skippedComponents.push(component.componentName);
+              continue;
+            }
+          }
+          await fsPromises.writeFile(
+            path.join(targetDir, 'components', `${component.componentName}.tsx`),
+            this.buildComponentFile(component)
+          );
+          await fsPromises.writeFile(
+            path.join(targetDir, 'components', `${component.componentName}.module.css`),
+            component.css
+          );
+        }
+
+        const themeCss = await assetService.loadThemeCssForStyle(styleId);
+        let themeBlock = '';
+        if (themeCss) {
+          try {
+            themeBlock = tokensToTailwindTheme(parseThemeCss(themeCss));
+          } catch (e) {
+            console.error(`Could not convert theme CSS to Tailwind theme for style ${styleId}, exporting without it:`, e);
+          }
+        }
+        await fsPromises.writeFile(
+          path.join(targetDir, 'app', 'globals.css'),
+          `@import "tailwindcss";\n\n${themeBlock}${this.buildThemeAliasBlock(themeBlock)}`
+        );
+
+        const manifestPages: ExportManifest['pages'] = [];
+
+        const slugs = this.buildPageSlugs(pages);
+        await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
+
+        const homePageFile = this.buildPageFile(pages[0], pageComponentNames[0], components);
+        await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), homePageFile);
+        manifestPages.push({
+          id: pages[0].id,
+          name: pages[0].name,
+          slug: slugs[0],
+          componentAssetIds: JSON.parse(pages[0].component_asset_ids),
+          pageFileHash: hashContent(homePageFile),
+        });
+
+        for (let i = 1; i < pages.length; i++) {
+          const pageDir = path.join(targetDir, 'app', slugs[i]);
+          await fsPromises.mkdir(pageDir, { recursive: true });
+          const pageFile = this.buildPageFile(pages[i], pageComponentNames[i], components);
+          await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), pageFile);
+          manifestPages.push({
+            id: pages[i].id,
+            name: pages[i].name,
+            slug: slugs[i],
+            componentAssetIds: JSON.parse(pages[i].component_asset_ids),
+            pageFileHash: hashContent(pageFile),
+          });
+        }
+
+        await fsPromises.writeFile(path.join(targetDir, 'package.json'), this.buildPackageJson());
+        await fsPromises.writeFile(path.join(targetDir, 'tsconfig.json'), this.buildTsConfig());
+        await fsPromises.writeFile(path.join(targetDir, 'postcss.config.mjs'), this.buildPostcssConfig());
+
+        const manifest: ExportManifest = {
+          styleId,
+          exportedAt: Date.now(),
+          pages: manifestPages,
+          components: components.map(c => ({
+            assetId: c.asset.id,
+            componentName: c.componentName,
+            contentHash: hashContent(this.buildComponentFile(c) + '\n' + c.css),
+          })),
+        };
+        await writeManifest(targetDir, manifest);
+      } catch (e) {
+        console.error(`Failed to write exported site files to ${targetDir}:`, e);
+        throw e;
+      }
+
+      return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents };
+    } finally {
+      await lock.release();
+    }
   }
 
   private async convertComponent(assetId: string, pageId: string): Promise<ConvertedComponent | null> {
