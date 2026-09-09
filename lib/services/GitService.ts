@@ -132,9 +132,14 @@ class GitServiceImpl {
       // (DATA_DIRS above). Writing it here would FK-fail on any machine
       // that doesn't happen to have that job locally, aborting the whole
       // import. nine_slice_margins/states are portable and still synced.
+      // edited_externally is deliberately never imported either (forced to 0
+      // below): trusting a component enough to serve it unsanitized is a
+      // machine-local decision, made only via PATCH /api/assets/[id]/component
+      // and never via sync, so a git pull can't grant that trust to content
+      // nobody on this machine reviewed.
       db.prepare(`
         INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, nine_slice_margins, states, output_kind, edited_externally)
-        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states, @output_kind, @edited_externally)
+        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states, @output_kind, 0)
         ON CONFLICT(id) DO UPDATE SET
           style_id = excluded.style_id,
           created_by = excluded.created_by,
@@ -146,7 +151,7 @@ class GitServiceImpl {
           nine_slice_margins = excluded.nine_slice_margins,
           states = excluded.states,
           output_kind = excluded.output_kind,
-          edited_externally = excluded.edited_externally
+          edited_externally = 0
       `).run(data);
     }
 

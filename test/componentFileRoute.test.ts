@@ -216,6 +216,9 @@ describe('GET /api/components/[filename]', () => {
     const body = await res.text();
     expect(body).not.toContain('<img');
     expect(body).not.toContain('/hero.png');
+    // Proves the <img> was SANITIZED OUT, not that the whole component was
+    // dropped — the surrounding allowed markup is still served.
+    expect(body).toContain('class="hero"');
   });
 
   it('still strips the same content when no asset row matches the filename at all', async () => {

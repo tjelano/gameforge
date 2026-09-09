@@ -236,6 +236,9 @@ describe('GET /api/assets/[id]/export', () => {
     const body = await res.text();
     expect(body).not.toContain('<img');
     expect(body).not.toContain('/hero.png');
+    // Proves the <img> was SANITIZED OUT, not that the whole component was
+    // dropped — the surrounding allowed markup is still in the download.
+    expect(body).toContain('class="hero"');
   });
 
   it('returns 500 when the component file is missing on disk', async () => {

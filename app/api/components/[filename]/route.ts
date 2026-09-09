@@ -54,7 +54,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
     const styleId = req.nextUrl.searchParams.get('styleId');
     const themeCss = await assetService.loadThemeCssForStyle(styleId);
     const asset = await assetService.getByImagePath(filename);
-    const trusted = asset?.edited_externally === 1;
+    // output_kind is checked too, matching the other read paths: only a
+    // component-type asset can grant trust to a component file, never a
+    // theme/image row that happens to share this image_path.
+    const trusted = asset?.output_kind === 'component' && asset.edited_externally === 1;
     safeDocument = combineComponentHtml({
       html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
       css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),

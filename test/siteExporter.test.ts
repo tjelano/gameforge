@@ -465,6 +465,9 @@ describe('siteExporter.exportSite', () => {
     const tsx = await exportedComponentTsx(style.id, 'test-untrusted-export');
     expect(tsx).not.toContain('<img');
     expect(tsx).not.toContain('/hero.png');
+    // Proves the <img> was SANITIZED OUT, not that the whole component was
+    // dropped — the surrounding allowed markup still made it into the export.
+    expect(tsx).toContain('className={styles["hero"]}');
   });
 
   it('still scopes CSS and converts JSX for an edited_externally component — those are format conversions, not sanitization', async () => {
