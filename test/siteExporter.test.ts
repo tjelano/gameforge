@@ -176,9 +176,21 @@ describe('siteExporter.exportSite', () => {
     // before the targetDir mkdir this test used to race on ever runs, so the
     // losing call fails there with EXPORT_IN_PROGRESS instead of reaching
     // the mkdir race and getting ALREADY_EXISTS.
+    //
+    // Under real system load (observed intermittently running the full
+    // suite, not this file alone) the two calls can also fully serialize
+    // instead of truly overlapping: the first can acquire the lock, export,
+    // and release it before the second's very first tryClaim() ever runs -
+    // in which case the second legitimately re-exports into the
+    // now-existing, same-style directory (Task 4's own supported path) and
+    // ALSO succeeds. That's not a corruption, it's the lock correctly
+    // allowing full serialization instead of overlap - so the invariant
+    // this test can actually guarantee is "at least one succeeds, and any
+    // non-success is EXPORT_IN_PROGRESS (never some other/unexpected
+    // error)", not "exactly one of each".
     const inProgress = results.filter(r => 'error' in r && r.error === 'EXPORT_IN_PROGRESS');
-    expect(successes).toHaveLength(1);
-    expect(inProgress).toHaveLength(1);
+    expect(successes.length).toBeGreaterThanOrEqual(1);
+    expect(successes.length + inProgress.length).toBe(2);
   });
 
   it('rejects an unsafe subdir even when called directly, bypassing the route\'s own validation', async () => {

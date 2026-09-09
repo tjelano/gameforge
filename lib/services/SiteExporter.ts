@@ -34,11 +34,19 @@ async function isLockStale(lockDir: string): Promise<boolean> {
     const raw = await fsPromises.readFile(path.join(lockDir, 'heartbeat'), 'utf-8');
     const last = Number(raw);
     return !Number.isFinite(last) || Date.now() - last > LOCK_STALE_MS;
-  } catch {
-    // Lock directory exists but no heartbeat file yet (a narrow window right
-    // after another process's mkdir, before its first writeHeartbeat call) -
-    // not stale, just brand new. Treating this as stale would defeat the
-    // lock during that window.
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') {
+      // Lock directory exists but no heartbeat file yet (a narrow window right
+      // after another process's mkdir, before its first writeHeartbeat call) -
+      // not stale, just brand new. Treating this as stale would defeat the
+      // lock during that window.
+      return false;
+    }
+    // Anything else (e.g. EACCES) is unexpected - still treat conservatively
+    // as not-stale (never seize a lock we can't actually confirm is dead),
+    // but log it, since a persistent read failure here would otherwise look
+    // identical to a healthy, freshly-claimed lock forever.
+    console.error(`Failed to read heartbeat for export lock ${lockDir}, treating as not stale:`, e);
     return false;
   }
 }
@@ -55,7 +63,18 @@ async function tryRecoverStaleLock(lockDir: string): Promise<boolean> {
   try {
     await fsPromises.rename(lockDir, garbageDir);
   } catch (e: any) {
-    if (e?.code === 'ENOENT') return false;
+    // On Windows (this project's own dev/deploy platform), the loser of a
+    // race to rename the SAME source directory gets EPERM, not the
+    // POSIX-typical ENOENT - confirmed by actually reproducing it under two
+    // real concurrent exportSite() calls racing the same stale lock
+    // (test/siteExporterLock.test.ts's stale-lock-recovery-race test failed
+    // intermittently with exactly this: "EPERM: operation not permitted,
+    // rename '...\my-site.lock' -> '...\my-site.lock.stale.<pid>'" before
+    // this branch was added), not just inferred from docs. Both codes mean
+    // the same thing here - someone else's rename already won - so back off
+    // normally instead of surfacing an unhandled error from a benign race.
+    if (e?.code === 'ENOENT' || e?.code === 'EPERM') return false;
+    console.error(`Failed to claim stale export lock ${lockDir}:`, e);
     throw e;
   }
   fsPromises.rm(garbageDir, { recursive: true, force: true }).catch(e => {
@@ -66,7 +85,12 @@ async function tryRecoverStaleLock(lockDir: string): Promise<boolean> {
 
 async function acquireExportLock(exportsRootDir: string, subdir: string): Promise<ExportLock> {
   const locksDir = path.join(exportsRootDir, '.locks');
-  await fsPromises.mkdir(locksDir, { recursive: true });
+  try {
+    await fsPromises.mkdir(locksDir, { recursive: true });
+  } catch (e) {
+    console.error(`Failed to create the export locks directory ${locksDir}:`, e);
+    throw e;
+  }
   const lockDir = path.join(locksDir, `${subdir}.lock`);
 
   async function tryClaim(): Promise<boolean> {
@@ -74,7 +98,10 @@ async function acquireExportLock(exportsRootDir: string, subdir: string): Promis
       await fsPromises.mkdir(lockDir);
       return true;
     } catch (e: any) {
-      if (e?.code !== 'EEXIST') throw e;
+      if (e?.code !== 'EEXIST') {
+        console.error(`Failed to create export lock directory ${lockDir}:`, e);
+        throw e;
+      }
       return false;
     }
   }
@@ -89,11 +116,28 @@ async function acquireExportLock(exportsRootDir: string, subdir: string): Promis
     throw new Error('EXPORT_IN_PROGRESS');
   }
 
-  await writeHeartbeat(lockDir);
-  const heartbeatTimer = setInterval(() => {
-    writeHeartbeat(lockDir).catch(e => console.error(`Failed to refresh export lock heartbeat for ${subdir}:`, e));
-  }, HEARTBEAT_INTERVAL_MS);
-  heartbeatTimer.unref();
+  // A failure anywhere in here (e.g. a transient ENOSPC/EMFILE on the
+  // initial heartbeat write) must not leave lockDir behind with no
+  // heartbeat file and no live process to ever release it - that would
+  // orphan the lock permanently, since isLockStale() treats a missing
+  // heartbeat file as "brand new, not stale" (see its own comment above)
+  // rather than "crashed". Best-effort remove the lock we just claimed
+  // before rethrowing, so a future caller can claim it fresh instead of
+  // getting EXPORT_IN_PROGRESS forever.
+  let heartbeatTimer: NodeJS.Timeout;
+  try {
+    await writeHeartbeat(lockDir);
+    heartbeatTimer = setInterval(() => {
+      writeHeartbeat(lockDir).catch(e => console.error(`Failed to refresh export lock heartbeat for ${subdir}:`, e));
+    }, HEARTBEAT_INTERVAL_MS);
+    heartbeatTimer.unref();
+  } catch (e) {
+    console.error(`Failed to initialize export lock heartbeat for ${lockDir}, releasing the lock:`, e);
+    fsPromises.rm(lockDir, { recursive: true, force: true }).catch(cleanupErr => {
+      console.error(`Failed to clean up export lock directory ${lockDir} after a failed heartbeat write:`, cleanupErr);
+    });
+    throw e;
+  }
 
   return {
     async release() {
