@@ -68,3 +68,63 @@ describe('PUT /api/assets/[id] — 9-slice margins and states', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('PUT /api/assets/[id] — edited_externally', () => {
+  it('sets edited_externally to 1 when patched with true', async () => {
+    const res = await updateAsset(
+      putRequest({ editedExternally: true }),
+      { params: Promise.resolve({ id: ASSET_ID }) }
+    );
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    expect(body.data.edited_externally).toBe(1);
+  });
+
+  it('sets edited_externally to 0 when patched with false', async () => {
+    const db = DatabaseConnection.getInstance();
+    // First set it to 1
+    db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
+
+    const res = await updateAsset(
+      putRequest({ editedExternally: false }),
+      { params: Promise.resolve({ id: ASSET_ID }) }
+    );
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    expect(body.data.edited_externally).toBe(0);
+  });
+
+  it('preserves edited_externally when not included in patch', async () => {
+    const db = DatabaseConnection.getInstance();
+    // Set it to 1 initially
+    db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
+
+    // Update with a different field, omitting editedExternally
+    const res = await updateAsset(
+      putRequest({ prompt: 'Updated prompt' }),
+      { params: Promise.resolve({ id: ASSET_ID }) }
+    );
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    expect(body.data.edited_externally).toBe(1); // Should still be 1
+    expect(body.data.prompt).toBe('Updated prompt');
+  });
+
+  it('does not reset edited_externally when updating other fields', async () => {
+    const db = DatabaseConnection.getInstance();
+    db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
+
+    const res = await updateAsset(
+      putRequest({ assetType: 'input' }),
+      { params: Promise.resolve({ id: ASSET_ID }) }
+    );
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    expect(body.data.edited_externally).toBe(1); // Should still be 1
+    expect(body.data.asset_type).toBe('input');
+  });
+});

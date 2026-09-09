@@ -157,4 +157,43 @@ describe('GitService.importFromJson() persists every current schema field, not j
     const row = db.prepare('SELECT states FROM assets WHERE id = ?').get(ASSET_ID) as any;
     expect(JSON.parse(row.states)).toEqual(['hover', 'pressed', 'disabled']);
   });
+
+  it('persists edited_externally on an asset through import and re-import', async () => {
+    const EDITED_ASSET_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+    // Write an asset JSON with edited_externally: 1
+    await fsPromises.writeFile(
+      path.join(tempRoot, 'data', 'assets', `asset-${EDITED_ASSET_ID}.json`),
+      JSON.stringify({
+        id: EDITED_ASSET_ID, style_id: ORIGINAL_STYLE_ID, created_by: 'user-1', asset_type: 'input',
+        prompt: 'Edited', image_path: 'edited.png', created_at: 4000, is_deleted: 0,
+        source_job_id: null,
+        nine_slice_margins: null,
+        states: JSON.stringify([]),
+        edited_externally: 1,
+      })
+    );
+
+    await gitService.importFromJson();
+
+    const db = DatabaseConnection.getInstance();
+    const row = db.prepare('SELECT edited_externally FROM assets WHERE id = ?').get(EDITED_ASSET_ID) as any;
+    expect(row.edited_externally).toBe(1);
+
+    // Simulate a re-import (ON CONFLICT DO UPDATE) where edited_externally changes to 0
+    await fsPromises.writeFile(
+      path.join(tempRoot, 'data', 'assets', `asset-${EDITED_ASSET_ID}.json`),
+      JSON.stringify({
+        id: EDITED_ASSET_ID, style_id: ORIGINAL_STYLE_ID, created_by: 'user-1', asset_type: 'input',
+        prompt: 'Edited', image_path: 'edited.png', created_at: 4000, is_deleted: 0,
+        source_job_id: null,
+        nine_slice_margins: null,
+        states: JSON.stringify([]),
+        edited_externally: 0,
+      })
+    );
+    await gitService.importFromJson();
+
+    const updatedRow = db.prepare('SELECT edited_externally FROM assets WHERE id = ?').get(EDITED_ASSET_ID) as any;
+    expect(updatedRow.edited_externally).toBe(0);
+  });
 });

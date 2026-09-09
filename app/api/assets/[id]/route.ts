@@ -21,6 +21,7 @@ const UpdateAssetSchema = z.object({
   assetType: z.string().min(1).optional(),
   nineSliceMargins: NineSliceMarginsSchema.nullable().optional(),
   states: z.array(z.string()).optional(),
+  editedExternally: z.boolean().optional(),
 });
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
