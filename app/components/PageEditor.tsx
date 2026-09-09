@@ -5,6 +5,7 @@ import { useState } from 'react';
 import type { Asset } from '@/lib/database/schema';
 
 export interface PageEditorProps {
+  styleId: string; // for the "Suggest layout" AI call
   availableComponents: Asset[]; // active 'component' assets for this Style Bible, already fetched by the caller
   initialName?: string;
   initialComponentAssetIds?: string[];
@@ -14,6 +15,7 @@ export interface PageEditorProps {
 }
 
 export function PageEditor({
+  styleId,
   availableComponents,
   initialName,
   initialComponentAssetIds,
@@ -24,6 +26,8 @@ export function PageEditor({
   const [name, setName] = useState(initialName ?? '');
   const [componentAssetIds, setComponentAssetIds] = useState<string[]>(initialComponentAssetIds ?? []);
   const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   function toggleComponent(assetId: string) {
     setComponentAssetIds(ids =>
@@ -60,6 +64,29 @@ export function PageEditor({
     }
   }
 
+  async function handleSuggestLayout() {
+    if (suggesting || !name.trim() || availableComponents.length === 0) return;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const res = await fetch(`/api/styles/${styleId}/pages/suggest-layout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageName: name.trim() }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setSuggestError(body.error ?? 'Could not suggest a layout.');
+        return;
+      }
+      setComponentAssetIds(body.data.componentAssetIds);
+    } catch {
+      setSuggestError('Could not reach the server.');
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   const componentsById = new Map(availableComponents.map(a => [a.id, a]));
 
   return (
@@ -67,6 +94,21 @@ export function PageEditor({
       <div className="field">
         <label htmlFor="page-name">Name</label>
         <input id="page-name" value={name} onChange={e => setName(e.target.value)} />
+      </div>
+
+      <div>
+        <button
+          type="button"
+          className="btn"
+          onClick={handleSuggestLayout}
+          disabled={suggesting || !name.trim() || availableComponents.length === 0}
+        >
+          {suggesting ? 'Suggesting…' : 'Suggest layout'}
+        </button>
+        <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>
+          Picks and orders components for a page named &ldquo;{name.trim() || '...'}&rdquo;, replacing the current selection below.
+        </p>
+        {suggestError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 4 }}>{suggestError}</p>}
       </div>
 
       <div>

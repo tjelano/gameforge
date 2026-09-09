@@ -333,6 +333,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
         ) : (
           <div style={{ marginBottom: 16 }}>
             <PageEditor
+              styleId={id}
               availableComponents={assets.filter(a => a.output_kind === 'component')}
               onSubmit={handleCreatePage}
               submitLabel="Create Page"
@@ -350,6 +351,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
                 return (
                   <div key={p.id} style={{ gridColumn: '1 / -1' }}>
                     <PageEditor
+                      styleId={id}
                       availableComponents={assets.filter(a => a.output_kind === 'component')}
                       initialName={p.name}
                       initialComponentAssetIds={JSON.parse(p.component_asset_ids)}
