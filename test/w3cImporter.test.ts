@@ -548,3 +548,26 @@ describe('parseW3cTokensJson', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('ThemeTokensSchema (shared boundary, not importer-specific)', () => {
+  const VALID = {
+    colorBackground: '#ffffff',
+    colorForeground: '#000000',
+    colorAccent: '#ff0000',
+    colorBorder: '#cccccc',
+    fontHeading: 'Georgia',
+    fontBody: 'Helvetica',
+    spaceUnit: '8px',
+    radiusBase: '4px',
+  };
+
+  it('rejects a hex color with a non-standard length (5 or 7 digits), not just the importer', () => {
+    // The importer's own local hex check is tighter than this schema was -
+    // this proves the schema itself (used by every OTHER theme producer:
+    // ClaudeApiThemeGenerator, the seed mappers, the live theme edit route)
+    // now enforces the same real CSS constraint, not just the importer.
+    expect(() => ThemeTokensSchema.parse({ ...VALID, colorAccent: '#12345' })).toThrow();
+    expect(() => ThemeTokensSchema.parse({ ...VALID, colorAccent: '#1234567' })).toThrow();
+    expect(() => ThemeTokensSchema.parse({ ...VALID, colorAccent: '#ff0000' })).not.toThrow();
+  });
+});
