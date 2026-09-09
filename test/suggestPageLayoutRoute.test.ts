@@ -105,26 +105,35 @@ describe('POST /api/styles/[id]/pages/suggest-layout', () => {
   });
 
   it('returns a 500 (not a crash) when the underlying suggester throws', async () => {
-    vi.doMock('@/lib/services/PageLayoutSuggester', async () => {
-      const actual = await vi.importActual<typeof import('@/lib/services/PageLayoutSuggester')>('@/lib/services/PageLayoutSuggester');
-      return {
-        ...actual,
-        getPageLayoutSuggester: () => ({
-          suggest: async () => { throw new Error('upstream boom'); },
-        }),
-      };
-    });
-    vi.resetModules();
-    const { POST: freshPost } = await import('@/app/api/styles/[id]/pages/suggest-layout/route');
+    // try/finally so a failed assertion (or setup step) still unmocks the
+    // module - otherwise a mock left in place here (this file's module
+    // registry, from vi.resetModules() below) could silently affect any
+    // test added later in this file, producing a confusing failure
+    // unrelated to what that later test actually checks.
+    try {
+      vi.doMock('@/lib/services/PageLayoutSuggester', async () => {
+        const actual = await vi.importActual<typeof import('@/lib/services/PageLayoutSuggester')>('@/lib/services/PageLayoutSuggester');
+        return {
+          ...actual,
+          getPageLayoutSuggester: () => ({
+            suggest: async () => { throw new Error('upstream boom'); },
+          }),
+        };
+      });
+      vi.resetModules();
+      const { POST: freshPost } = await import('@/app/api/styles/[id]/pages/suggest-layout/route');
 
-    const { cookieHeader, userId } = await seedSession();
-    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
-    await assetService.create({
-      styleId: style.id, createdBy: userId, assetType: 'navbar', prompt: 'A navbar', imagePath: 'navbar.html', outputKind: 'component',
-    });
+      const { cookieHeader, userId } = await seedSession();
+      const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+      await assetService.create({
+        styleId: style.id, createdBy: userId, assetType: 'navbar', prompt: 'A navbar', imagePath: 'navbar.html', outputKind: 'component',
+      });
 
-    const res = await freshPost(req({ pageName: 'Home' }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
-    expect(res.status).toBe(500);
-    vi.doUnmock('@/lib/services/PageLayoutSuggester');
+      const res = await freshPost(req({ pageName: 'Home' }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
+      expect(res.status).toBe(500);
+    } finally {
+      vi.doUnmock('@/lib/services/PageLayoutSuggester');
+      vi.resetModules();
+    }
   });
 });
