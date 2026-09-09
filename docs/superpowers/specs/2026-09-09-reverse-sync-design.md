@@ -132,9 +132,19 @@ forward one, so the design deliberately avoids taking it on:
   explicit apply" shape already used by Suggest Layout.
 - **UI**: a "Sync from export" section on the Style Hub page (`app/dashboard/styles/[id]/page.tsx`)
   next to the existing Export section, using the same subdir textbox. Shows the diff for review
-  before Apply. A component flagged hand-edited links to its existing edit page with a banner
-  prompting a manual paste of the new HTML/CSS, with an explicit "trust this as my own edited
-  code" confirmation (since it skips sanitization for that specific paste).
+  before Apply.
+- **New: a promoted-component-asset edit capability** (discovered missing during implementation
+  planning — corrected here since the spec originally assumed it already existed). GameForge has
+  no way today to directly edit a PROMOTED component asset's HTML/CSS: the only existing
+  HTML/CSS-editing flow (`PATCH /api/jobs/[id]/component`, `edit-component` job page) only works
+  on a Job before promotion. A component flagged hand-edited by sync needs somewhere to paste its
+  new markup into, so this design adds a small, new, asset-scoped equivalent: `PATCH
+  /api/assets/[id]/component` (mirrors the existing job-level route's shape: `{ html, css }`, plus
+  one new field `trustAsEdited: boolean`) and a matching edit page/section. When `trustAsEdited` is
+  false (the default — an ordinary edit, not a paste-back), the route sanitizes as always, exactly
+  like every other component-writing path in this app. When `trustAsEdited` is true (the
+  paste-back case, gated by an explicit "trust this as my own edited code" checkbox in the UI),
+  sanitization is skipped for that write and `edited_externally` is set to 1.
 
 ### Acknowledged, not fixed: `componentName()`'s 6-hex-char truncation
 
@@ -165,9 +175,10 @@ with no corresponding behavior change.
    Nothing written yet.
 4. User reviews, clicks Apply → `apply` writes only Page changes (create/update/soft-delete). Never
    touches component asset content.
-5. For each hand-edited component, user is linked to its edit page to manually paste in the new
-   HTML/CSS. That asset gets `edited_externally = 1` and a persistent UI badge; sanitization is
-   skipped for that specific paste.
+5. For each hand-edited component, user is linked to its (new) edit page to manually paste in the
+   new HTML/CSS with the "trust this as my own edited code" box checked. That asset gets
+   `edited_externally = 1` and a persistent UI badge; sanitization is skipped for that specific
+   write.
 6. Next re-export refreshes the manifest with new hashes. Any component whose on-disk file still
    doesn't match the (now-updated, if synced) asset content is skipped-and-reported again.
 
@@ -177,14 +188,17 @@ with no corresponding behavior change.
 - `assets`: one new nullable column, `edited_externally` (0/1, same shape as the existing
   `is_deleted` flag). Needs a new migration following this codebase's existing numbered-migration
   pattern.
-  - **Lifecycle**: `edited_externally` reflects whether the asset's CURRENT stored content came
-    from an external hand-edit rather than GameForge's own generation pipeline. It is SET to 1 the
-    moment a paste-back is confirmed (the content just brought in unambiguously IS
-    externally-sourced) and stays 1 until GameForge's own generator next produces fresh content for
-    that asset (a full regenerate) — not cleared by the mere passage of time or by a later sync.
-    Sanitization is skipped only for that specific paste-back write, not permanently for the asset
-    id — a subsequent normal token-editor save still goes through sanitization as always, since the
-    editor only ever tweaks values already inside already-sanitized markup.
+  - **Lifecycle** (corrected during implementation planning — the original wording assumed
+    "regenerate" clears it, but this app's regenerate-with-feedback flow, per its own design spec,
+    never overwrites an existing promoted asset's file; it always creates a separate new job/asset,
+    so an existing asset's stored content is never touched by regeneration at all): `edited_
+    externally` reflects whether the asset's CURRENT stored content came from an external hand-edit
+    rather than passing through sanitization. It is SET to 1 the moment a paste-back is confirmed
+    via the new asset-component-edit route with `trustAsEdited: true` (see Architecture — the
+    content just brought in unambiguously IS externally-sourced and unsanitized), and CLEARED to 0
+    the next time that SAME route is used with `trustAsEdited: false` (an ordinary edit, sanitized
+    like any other write) — not cleared by the mere passage of time, by a later sync, or by
+    regeneration (regeneration never revisits an existing asset's file at all).
 - No new table for the manifest — it's a per-export-directory file, not database state. Since a
   style can have multiple named export directories, sync takes the same `subdir` input Export
   already uses (no separate picker).
@@ -221,8 +235,13 @@ with no corresponding behavior change.
   diff-shaped data in its request body; `apply` updates Page rows correctly; `apply` never touches
   asset content; a component's own reference-order change and its hash-mismatch flag are
   independent (a component can be simultaneously reordered on a page AND flagged hand-edited).
-- `edited_externally`: set on a confirmed paste-back; a subsequent normal token-editor save still
-  sanitizes as before; only a fresh AI regeneration clears the flag.
+- `edited_externally`: set to 1 on a confirmed paste-back (`trustAsEdited: true`) with sanitization
+  skipped for that write; a subsequent ordinary save through the same route
+  (`trustAsEdited: false`) sanitizes as always AND clears the flag back to 0.
+- New `PATCH /api/assets/[id]/component` route: 404 on an unknown/non-component asset; sanitizes
+  and rejects unsafe HTML/CSS when `trustAsEdited` is false or omitted, exactly like the existing
+  job-level route; skips sanitization and sets `edited_externally = 1` when `trustAsEdited` is
+  true; writes the file via `combineComponentHtml` either way.
 
 ## Adversarial review trail (DeepSeek, 5 rounds, APPROVED)
 
@@ -259,3 +278,21 @@ correctness is subtle enough to be worth this many passes:
   atomic rename-to-claim step before recovery.
 - **Round 5**: confirmed the atomic rename-claim closes the gap with no remaining material
   findings. VERDICT: APPROVED.
+
+## Correction made during implementation planning
+
+Grounding for the plan (reading `app/dashboard/assets/[id]/page.tsx` and the existing
+`PATCH /api/jobs/[id]/component` route) found two things this approved design got wrong, neither
+caught by DeepSeek since it never saw those specific files:
+
+1. **No edit page exists for a promoted component asset today.** The only existing HTML/CSS-edit
+   flow works on a Job before promotion. The "banner links to its existing edit page" line in the
+   UI section was wrong — there's no such page to link to. Fixed by adding one new, small
+   capability to this same plan: `PATCH /api/assets/[id]/component` + a matching edit UI, mirroring
+   the existing job-level route's shape (see Architecture above).
+2. **Regeneration never clears `edited_externally`.** The original lifecycle wording assumed "a
+   fresh AI regeneration" clears the flag, but this app's regenerate-with-feedback flow (per its
+   own design spec) never overwrites an existing promoted asset's file — it always creates a
+   separate new job/asset. Nothing would ever have cleared the flag as originally written. Fixed:
+   the flag now clears when the new edit route (added per #1) is used WITHOUT `trustAsEdited`,
+   which re-sanitizes and rewrites the file — an achievable, real clearing path.
