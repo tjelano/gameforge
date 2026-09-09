@@ -61,12 +61,12 @@ function colorTokenToCss(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as { components?: unknown; alpha?: unknown };
   if (!Array.isArray(v.components) || v.components.length !== 3) return null;
-  // Non-finite components (NaN/Infinity from a malformed or adversarial
-  // value) must fail conversion outright, not silently clamp into a
-  // truthy-but-wrong color - a truthy return here stops the caller's
-  // candidate-fallback loop from trying a later, valid alias match.
-  const channels = v.components.map(c => Number(c));
-  if (channels.some(c => !Number.isFinite(c))) return null;
+  // Explicitly type-checked rather than coerced with Number(): a component
+  // of null, '', or false would otherwise coerce to a finite 0 via
+  // Number(), silently producing an unintended color instead of failing
+  // conversion - same reasoning as the alpha check below.
+  if (!v.components.every(c => typeof c === 'number' && Number.isFinite(c))) return null;
+  const channels = v.components as number[];
   const [r, g, b] = channels.map(c => Math.round(Math.max(0, Math.min(1, c)) * 255));
   // Explicitly type-checked rather than coerced with Number(): v.alpha === null
   // (or false, or '') would otherwise coerce to a finite, in-range 0, silently
@@ -79,24 +79,29 @@ function colorTokenToCss(value: unknown): string | null {
   return alpha === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// A bare (unquoted) CSS family-name is only valid as a sequence of plain
+// idents - a space-separated multi-word name is fine unquoted ("Times New
+// Roman"), but any quote character never is, with or without a space
+// ("O'Brien" unquoted is a CSS parse error, not just "Rock'n'Roll One").
+// Returns null when the name mixes both quote types, since neither can
+// safely wrap it - the caller must treat that as a failed conversion so
+// its fallback loop can try a later candidate.
+function quoteFontName(name: string): string | null {
+  const hasSingleQuote = name.includes("'");
+  const hasDoubleQuote = name.includes('"');
+  if (!name.includes(' ') && !hasSingleQuote && !hasDoubleQuote) return name;
+  if (hasSingleQuote && hasDoubleQuote) return null;
+  return hasSingleQuote ? `"${name}"` : `'${name}'`;
+}
+
 function fontFamilyTokenToCss(value: unknown): string | null {
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') return quoteFontName(value);
   if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
     const quoted: string[] = [];
     for (const name of value) {
-      if (!name.includes(' ')) {
-        quoted.push(name);
-        continue;
-      }
-      const hasSingleQuote = name.includes("'");
-      const hasDoubleQuote = name.includes('"');
-      // A name with both quote types can't be safely wrapped in either -
-      // fail the whole conversion so the caller's fallback loop can try a
-      // later candidate, rather than emitting CSS with an unescaped quote
-      // that closes the family name early (e.g. wrapping "Rock'n'Roll One"
-      // in single quotes produces 'Rock'n'Roll One', invalid CSS).
-      if (hasSingleQuote && hasDoubleQuote) return null;
-      quoted.push(hasSingleQuote ? `"${name}"` : `'${name}'`);
+      const q = quoteFontName(name);
+      if (q === null) return null;
+      quoted.push(q);
     }
     return quoted.join(', ');
   }

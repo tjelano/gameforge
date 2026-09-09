@@ -401,6 +401,72 @@ describe('parseW3cTokensJson', () => {
     expect(result.success).toBe(false);
   });
 
+  it('falls back past a color candidate with a non-number component (null, string, boolean), rather than coercing it to a false 0', () => {
+    const doc = {
+      colorGroupA: {
+        // Each of these coerces via Number() to a finite, in-range 0 or 1 -
+        // must be rejected explicitly by type, not silently treated as a
+        // real channel value.
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [null, 0, 0], alpha: 1 } },
+      },
+      colorGroupB: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: ['', 0, 0], alpha: 1 } },
+      },
+      colorGroupC: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [true, 0, 0], alpha: 1 } },
+      },
+      colorGroupD: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 1 } },
+      },
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.colorAccent).toBe('rgb(255, 0, 0)');
+  });
+
+  it('quotes a single-string (non-array) font-family value that needs it, instead of emitting it raw', () => {
+    const doc = {
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        accent: { $type: 'color', $value: '#ff0000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        // A single-string $value (not an array) is valid per the DTCG spec
+        // too - both the space (needs quoting to stay valid CSS) and the
+        // apostrophe (never valid unquoted, with or without a space) cases
+        // must be handled here, not just in the array branch.
+        heading: { $type: 'fontFamily', $value: 'Playfair Display' },
+        body: { $type: 'fontFamily', $value: "O'Brien" },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.fontHeading).toBe("'Playfair Display'");
+    expect(result.tokens.fontBody).toBe(`"O'Brien"`);
+    expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
+  });
+
   it('does not crash on a pathologically deeply-nested (but validly-parsed) JSON document', () => {
     // A ~5,000-level-deep object crashes a naive unbounded-recursion walker
     // with a real RangeError (verified directly) - this must resolve to a
