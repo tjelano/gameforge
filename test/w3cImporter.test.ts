@@ -90,6 +90,69 @@ describe('parseW3cTokensJson', () => {
     expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
   });
 
+  it('falls back past a hex color candidate with a non-standard length (5 or 7 digits), rather than accepting invalid CSS', () => {
+    const doc = {
+      colorGroupA: {
+        accent: { $type: 'color', $value: '#12345' }, // 5 hex digits - not valid CSS
+      },
+      colorGroupB: {
+        accent: { $type: 'color', $value: '#1234567' }, // 7 hex digits - not valid CSS
+      },
+      colorGroupC: {
+        accent: { $type: 'color', $value: '#ff0000' },
+      },
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.colorAccent).toBe('#ff0000');
+  });
+
+  it('falls back past a font-family candidate whose name mixes single and double quotes, rather than emitting an unescaped quote', () => {
+    const doc = {
+      fontGroupA: {
+        // Wrapping this in either quote style alone breaks the CSS string -
+        // must fail conversion and let the fallback loop try the next
+        // candidate below.
+        heading: { $type: 'fontFamily', $value: [`Rock'n'Roll "One"`] },
+      },
+      fontGroupB: {
+        heading: { $type: 'fontFamily', $value: [`Rock'n'Roll One`] }, // single quote only - valid once wrapped in double quotes
+      },
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        accent: { $type: 'color', $value: '#ff0000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.fontHeading).toBe(`"Rock'n'Roll One"`);
+    expect(() => ThemeTokensSchema.parse(result.tokens)).not.toThrow();
+  });
+
   it('falls back to a later alias-matching candidate when an earlier one fails to convert', () => {
     // Two tokens both alias to colorAccent's "accent" - the first one in
     // tree order is malformed (a $value with no components), the second

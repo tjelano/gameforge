@@ -55,7 +55,9 @@ function colorTokenToCss(value: unknown): string | null {
   // {colorSpace, components, alpha} object GameForge's own exporter
   // produces - accept both. ThemeTokensSchema's CSS_COLOR_RE already
   // matches hex directly, so this can pass through unchanged.
-  if (typeof value === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(value)) return value;
+  // Only the 4 valid CSS hex lengths (#rgb, #rgba, #rrggbb, #rrggbbaa) -
+  // 5 and 7 hex digits parse to nothing in real CSS.
+  if (typeof value === 'string' && /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value)) return value;
   if (!value || typeof value !== 'object') return null;
   const v = value as { components?: unknown; alpha?: unknown };
   if (!Array.isArray(v.components) || v.components.length !== 3) return null;
@@ -80,7 +82,23 @@ function colorTokenToCss(value: unknown): string | null {
 function fontFamilyTokenToCss(value: unknown): string | null {
   if (typeof value === 'string') return value;
   if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
-    return value.map(name => (name.includes(' ') ? `'${name}'` : name)).join(', ');
+    const quoted: string[] = [];
+    for (const name of value) {
+      if (!name.includes(' ')) {
+        quoted.push(name);
+        continue;
+      }
+      const hasSingleQuote = name.includes("'");
+      const hasDoubleQuote = name.includes('"');
+      // A name with both quote types can't be safely wrapped in either -
+      // fail the whole conversion so the caller's fallback loop can try a
+      // later candidate, rather than emitting CSS with an unescaped quote
+      // that closes the family name early (e.g. wrapping "Rock'n'Roll One"
+      // in single quotes produces 'Rock'n'Roll One', invalid CSS).
+      if (hasSingleQuote && hasDoubleQuote) return null;
+      quoted.push(hasSingleQuote ? `"${name}"` : `'${name}'`);
+    }
+    return quoted.join(', ');
   }
   return null;
 }
