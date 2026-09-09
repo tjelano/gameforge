@@ -133,8 +133,8 @@ class GitServiceImpl {
       // that doesn't happen to have that job locally, aborting the whole
       // import. nine_slice_margins/states are portable and still synced.
       db.prepare(`
-        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, nine_slice_margins, states, output_kind)
-        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states, @output_kind)
+        INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, nine_slice_margins, states, output_kind, edited_externally)
+        VALUES (@id, @style_id, @created_by, @asset_type, @prompt, @image_path, @created_at, @is_deleted, @nine_slice_margins, @states, @output_kind, @edited_externally)
         ON CONFLICT(id) DO UPDATE SET
           style_id = excluded.style_id,
           created_by = excluded.created_by,
@@ -145,7 +145,8 @@ class GitServiceImpl {
           is_deleted = excluded.is_deleted,
           nine_slice_margins = excluded.nine_slice_margins,
           states = excluded.states,
-          output_kind = excluded.output_kind
+          output_kind = excluded.output_kind,
+          edited_externally = excluded.edited_externally
       `).run(data);
     }
 

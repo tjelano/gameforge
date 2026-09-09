@@ -36,6 +36,7 @@ export const AssetSchema = z.object({
   nine_slice_margins: z.string().nullable(),
   states: z.string(),
   output_kind: OutputKindSchema.default('image'),
+  edited_externally: z.union([z.literal(0), z.literal(1)]).default(0),
 });
 export type Asset = z.infer<typeof AssetSchema>;
 

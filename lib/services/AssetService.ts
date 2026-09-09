@@ -31,6 +31,7 @@ class AssetServiceImpl {
     assetType?: string;
     nineSliceMargins?: NineSliceMargins | null;
     states?: string[];
+    editedExternally?: boolean;
   }): Promise<Asset | null> {
     const existing = await this.getById(id);
     if (!existing) return null;
@@ -40,12 +41,14 @@ class AssetServiceImpl {
       ? (patch.nineSliceMargins === null ? null : JSON.stringify(NineSliceMarginsSchema.parse(patch.nineSliceMargins)))
       : existing.nine_slice_margins;
     const states = patch.states !== undefined ? JSON.stringify(patch.states) : existing.states;
+    const editedExternally = patch.editedExternally !== undefined ? (patch.editedExternally ? 1 : 0) : existing.edited_externally;
 
-    db.prepare('UPDATE assets SET prompt = ?, asset_type = ?, nine_slice_margins = ?, states = ? WHERE id = ?').run(
+    db.prepare('UPDATE assets SET prompt = ?, asset_type = ?, nine_slice_margins = ?, states = ?, edited_externally = ? WHERE id = ?').run(
       patch.prompt ?? existing.prompt,
       patch.assetType ?? existing.asset_type,
       nineSliceMargins,
       states,
+      editedExternally,
       id
     );
     return this.getById(id);
