@@ -122,6 +122,99 @@ describe('parseW3cTokensJson', () => {
     expect(result.tokens.colorAccent).toBe('rgb(255, 0, 0)');
   });
 
+  it('falls back past a color candidate with an out-of-range alpha or non-finite component, rather than getting stuck on it', () => {
+    const doc = {
+      colorGroupA: {
+        // Truthy-shaped but invalid: alpha out of the 0-1 range, and a
+        // NaN-producing component. Neither should be treated as "found" -
+        // both must fall through to the valid candidate below.
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 5 } },
+      },
+      colorGroupB: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: ['not-a-number', 0, 0], alpha: 1 } },
+      },
+      colorGroupC: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 1 } },
+      },
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.colorAccent).toBe('rgb(255, 0, 0)');
+  });
+
+  it('falls back past a dimension candidate with an unsupported unit, rather than getting stuck on it', () => {
+    const doc = {
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        accent: { $type: 'color', $value: '#ff0000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      sizeGroupA: {
+        spacing: { $type: 'dimension', $value: { value: 50, unit: '%' } }, // unsupported unit
+      },
+      sizeGroupB: {
+        spacing: { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+      },
+      dimension: {
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.spaceUnit).toBe('8px');
+  });
+
+  it('falls back past a color candidate whose alpha is null (or another non-number type), rather than coercing it to a false 0', () => {
+    const doc = {
+      colorGroupA: {
+        // null coerces via Number(null) === 0, a finite in-range value -
+        // must be rejected explicitly by type, not silently treated as
+        // fully-transparent (alpha 0).
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: null } },
+      },
+      colorGroupB: {
+        accent: { $type: 'color', $value: { colorSpace: 'srgb', components: [1, 0, 0], alpha: 1 } },
+      },
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      dimension: {
+        'space-unit': { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.colorAccent).toBe('rgb(255, 0, 0)');
+  });
+
   it('rejects with a clear error listing exactly which roles could not be matched', () => {
     const partial = {
       color: {

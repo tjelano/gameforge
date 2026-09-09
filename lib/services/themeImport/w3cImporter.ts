@@ -5,7 +5,7 @@ import { ThemeTokensSchema, type ThemeTokens } from '@/lib/services/themeTokens'
 // deeply-nested JSON document overflows the call stack: verified a ~30KB
 // payload nesting ~5,000 levels crashes collectTokens's naive recursion
 // with an uncaught RangeError, which the route would then report as a 500
-// instead of the 400 this is actually is.
+// instead of the 400 this actually is.
 const MAX_TREE_DEPTH = 64;
 
 // Aliases matched against a token's own key (last path segment), normalized
@@ -59,8 +59,21 @@ function colorTokenToCss(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as { components?: unknown; alpha?: unknown };
   if (!Array.isArray(v.components) || v.components.length !== 3) return null;
-  const [r, g, b] = v.components.map(c => Math.round(Math.max(0, Math.min(1, Number(c))) * 255));
-  const alpha = typeof v.alpha === 'number' ? v.alpha : 1;
+  // Non-finite components (NaN/Infinity from a malformed or adversarial
+  // value) must fail conversion outright, not silently clamp into a
+  // truthy-but-wrong color - a truthy return here stops the caller's
+  // candidate-fallback loop from trying a later, valid alias match.
+  const channels = v.components.map(c => Number(c));
+  if (channels.some(c => !Number.isFinite(c))) return null;
+  const [r, g, b] = channels.map(c => Math.round(Math.max(0, Math.min(1, c)) * 255));
+  // Explicitly type-checked rather than coerced with Number(): v.alpha === null
+  // (or false, or '') would otherwise coerce to a finite, in-range 0, silently
+  // producing a fully-transparent color instead of failing conversion.
+  let alpha = 1;
+  if (v.alpha !== undefined) {
+    if (typeof v.alpha !== 'number' || !Number.isFinite(v.alpha) || v.alpha < 0 || v.alpha > 1) return null;
+    alpha = v.alpha;
+  }
   return alpha === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -72,10 +85,17 @@ function fontFamilyTokenToCss(value: unknown): string | null {
   return null;
 }
 
+const ALLOWED_DIMENSION_UNITS = new Set(['px', 'rem', 'em']);
+
 function dimensionTokenToCss(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as { value?: unknown; unit?: unknown };
-  if (typeof v.value !== 'number' || typeof v.unit !== 'string') return null;
+  // An unsupported unit (e.g. "%", "vh") or a non-finite value must fail
+  // conversion outright, not return a truthy-but-doomed string - same
+  // reasoning as colorTokenToCss: this lets the caller's candidate-
+  // fallback loop try a later, valid alias match instead of getting stuck.
+  if (typeof v.value !== 'number' || !Number.isFinite(v.value)) return null;
+  if (typeof v.unit !== 'string' || !ALLOWED_DIMENSION_UNITS.has(v.unit)) return null;
   return `${v.value}${v.unit}`;
 }
 
