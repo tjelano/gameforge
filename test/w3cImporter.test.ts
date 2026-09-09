@@ -247,6 +247,41 @@ describe('parseW3cTokensJson', () => {
     expect(result.tokens.spaceUnit).toBe('8px');
   });
 
+  it('falls back past a dimension candidate that is negative or too large for CSS_LENGTH_RE, rather than rejecting the whole import', () => {
+    const doc = {
+      color: {
+        background: { $type: 'color', $value: '#ffffff' },
+        foreground: { $type: 'color', $value: '#000000' },
+        accent: { $type: 'color', $value: '#ff0000' },
+        border: { $type: 'color', $value: '#cccccc' },
+      },
+      font: {
+        heading: { $type: 'fontFamily', $value: 'Georgia' },
+        body: { $type: 'fontFamily', $value: 'Helvetica' },
+      },
+      sizeGroupA: {
+        // Both a real number and an allowed unit - a truthy string from
+        // dimensionTokenToCss's earlier checks alone - but CSS_LENGTH_RE
+        // (and so ThemeTokensSchema) rejects a negative value and a value
+        // >= 1000 outright.
+        spacing: { $type: 'dimension', $value: { value: -5, unit: 'px' } },
+      },
+      sizeGroupB: {
+        spacing: { $type: 'dimension', $value: { value: 1000, unit: 'px' } },
+      },
+      sizeGroupC: {
+        spacing: { $type: 'dimension', $value: { value: 8, unit: 'px' } },
+      },
+      dimension: {
+        'radius-base': { $type: 'dimension', $value: { value: 4, unit: 'px' } },
+      },
+    };
+    const result = parseW3cTokensJson(JSON.stringify(doc));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.tokens.spaceUnit).toBe('8px');
+  });
+
   it('falls back past a color candidate whose alpha is null (or another non-number type), rather than coercing it to a false 0', () => {
     const doc = {
       colorGroupA: {

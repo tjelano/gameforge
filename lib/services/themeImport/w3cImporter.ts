@@ -1,4 +1,4 @@
-import { ThemeTokensSchema, type ThemeTokens } from '@/lib/services/themeTokens';
+import { ThemeTokensSchema, CSS_LENGTH_RE, type ThemeTokens } from '@/lib/services/themeTokens';
 
 // No real W3C tokens file nests anywhere close to this deep - this exists
 // purely as a DoS guard. Without it, an adversarial (but validly-parsed)
@@ -119,7 +119,15 @@ function dimensionTokenToCss(value: unknown): string | null {
   // fallback loop try a later, valid alias match instead of getting stuck.
   if (typeof v.value !== 'number' || !Number.isFinite(v.value)) return null;
   if (typeof v.unit !== 'string' || !ALLOWED_DIMENSION_UNITS.has(v.unit)) return null;
-  return `${v.value}${v.unit}`;
+  const css = `${v.value}${v.unit}`;
+  // A negative value, a value >= 1000, or one that renders in exponential
+  // notation (e.g. an adversarially large/small number) all produce a
+  // truthy string here that CSS_LENGTH_RE - and so ThemeTokensSchema -
+  // will still reject. Check it now against the same regex the schema
+  // uses, so a doomed candidate fails conversion instead of consuming the
+  // role and rejecting the whole import even when a later, valid
+  // alias-matching candidate exists.
+  return CSS_LENGTH_RE.test(css) ? css : null;
 }
 
 const CONVERTERS: Record<string, (value: unknown) => string | null> = {
