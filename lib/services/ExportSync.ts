@@ -222,6 +222,24 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
       const onDiskHash = hashContent(tsx + '\n' + css);
       if (onDiskHash !== component.contentHash) {
         handEditedComponentAssetIds.push(component.assetId);
+        continue;
+      }
+      if (component.handEdited) {
+        // The export still matches the manifest's ACCEPTED hand-edit baseline
+        // (SiteExporter correctly stopped overwriting it - see Task 16), but
+        // "accepted" only means the file on disk is safe from being clobbered.
+        // It does NOT mean the user has actually pasted this content back into
+        // the GameForge asset yet - that is a completely separate, explicit
+        // action (PATCH /api/assets/[id]/component with trustAsEdited: true).
+        // Keep reminding the user until the asset itself reflects that trust
+        // decision, using edited_externally as the one true signal for "this
+        // has been reconciled" - a hash comparison across the two different
+        // formats (exported JSX/CSS-Modules vs. the asset's raw HTML/CSS) is
+        // not meaningful here.
+        const asset = await assetService.getById(component.assetId);
+        if (!asset || asset.edited_externally !== 1) {
+          handEditedComponentAssetIds.push(component.assetId);
+        }
       }
     } catch (e: any) {
       if (e?.code !== 'ENOENT') {

@@ -359,6 +359,90 @@ describe('computeSyncDiff', () => {
     expect(result.diff.handEditedComponentAssetIds).toEqual([comp.id]);
   });
 
+  it('keeps reporting an accepted hand-edit baseline until the asset is marked reconciled (edited_externally)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+
+    await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
+    const tsx = 'export function HeroAAA111() { return <div />; }';
+    const css = '.root {}';
+    await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.tsx'), tsx);
+    await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.module.css'), css);
+
+    // Manifest records the ACCEPTED hand-edit baseline (Task 16) - on-disk
+    // hash matches contentHash - but the asset itself has not been marked
+    // reconciled (edited_externally still 0).
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [comp.id], pageFileHash: 'irrelevant' }],
+      components: [{ assetId: comp.id, componentName: 'HeroAAA111', contentHash: hashContent(tsx + '\n' + css), handEdited: true }],
+    });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'page.tsx'), pageFileContent(page.id, '      <HeroAAA111 />'));
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Notification must keep firing - the user has not yet reconciled this
+    // hand-edit into the dashboard asset, even though the hash now matches.
+    expect(result.diff.handEditedComponentAssetIds).toEqual([comp.id]);
+  });
+
+  it('stops reporting an accepted hand-edit once the asset is marked reconciled (edited_externally = 1)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
+    await assetService.update(comp.id, { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+
+    await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
+    const tsx = 'export function HeroAAA111() { return <div />; }';
+    const css = '.root {}';
+    await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.tsx'), tsx);
+    await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.module.css'), css);
+
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [comp.id], pageFileHash: 'irrelevant' }],
+      components: [{ assetId: comp.id, componentName: 'HeroAAA111', contentHash: hashContent(tsx + '\n' + css), handEdited: true }],
+    });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'page.tsx'), pageFileContent(page.id, '      <HeroAAA111 />'));
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // User has explicitly reconciled the hand-edit into the dashboard asset -
+    // the notification correctly stops.
+    expect(result.diff.handEditedComponentAssetIds).toEqual([]);
+  });
+
+  it('does not report an ordinary (never-hand-edited) component regardless of edited_externally', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+
+    await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
+    const tsx = 'export function HeroAAA111() { return <div />; }';
+    const css = '.root {}';
+    await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.tsx'), tsx);
+    await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.module.css'), css);
+
+    // handEdited is absent (ordinary, freshly-generated entry) and hashes match.
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [comp.id], pageFileHash: 'irrelevant' }],
+      components: [{ assetId: comp.id, componentName: 'HeroAAA111', contentHash: hashContent(tsx + '\n' + css) }],
+    });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'page.tsx'), pageFileContent(page.id, '      <HeroAAA111 />'));
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.handEditedComponentAssetIds).toEqual([]);
+  });
+
   it('drops a component reference whose asset was soft-deleted after export, and reports it', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const compA = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'navbar', prompt: 'nav', imagePath: 'a.html', outputKind: 'component' });
