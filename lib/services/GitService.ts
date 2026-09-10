@@ -10,6 +10,7 @@ import { userService } from '@/lib/services/UserService';
 import { presetService } from '@/lib/services/PresetService';
 import { pageService } from '@/lib/services/PageService';
 import { storageDirFor } from '@/lib/services/shared/assetSafety';
+import { hashContent } from '@/lib/services/ExportManifest';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
 import { StyleSchema, AssetSchema, UserSchema, PresetSchema, PageSchema } from '@/lib/database/schema';
 
@@ -254,6 +255,59 @@ class GitServiceImpl {
     }
   }
 
+  /**
+   * importFromJson() force-resets edited_externally to 0 on every asset it
+   * imports, which closes a real hole: a hostile git history could otherwise
+   * ship a malicious component file plus an asset row claiming it was
+   * hand-reviewed, and every puller would then serve it unsanitized. The side
+   * effect is that a routine pull()/resolveConflicts() also strips trust from
+   * THIS machine's own untouched components. These two helpers put it back —
+   * but only when the component file's bytes prove nothing actually changed:
+   * snapshot the hashes while the working tree is still purely local, re-check
+   * after the import, restore only on an exact match. A file the pull genuinely
+   * changed hashes differently and correctly stays untrusted until re-reviewed.
+   *
+   * `skipPaths` (repo-relative, forward slashes) excludes files git already
+   * reports as changed — needed by resolveConflicts(), where the merge has
+   * already been applied to the working tree before we get a look at it.
+   */
+  private async snapshotTrustedComponentHashes(skipPaths?: Set<string>): Promise<Map<string, string>> {
+    const db = DatabaseConnection.getInstance();
+    const trustedRows = db.prepare(
+      `SELECT id, image_path FROM assets WHERE edited_externally = 1 AND output_kind = 'component' AND image_path IS NOT NULL`
+    ).all() as { id: string; image_path: string }[];
+
+    const preHashes = new Map<string, string>();
+    for (const row of trustedRows) {
+      if (skipPaths?.has(`storage/components/${row.image_path}`)) continue;
+      try {
+        const content = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', row.image_path), 'utf-8');
+        preHashes.set(row.id, hashContent(content));
+      } catch (e: any) {
+        // A missing file is expected here (cleanup removed it, or it was never
+        // written): there's nothing to compare after the import, so
+        // importFromJson()'s force-to-0 stands, which is the safe fallback.
+        if (e.code !== 'ENOENT') console.error(`Failed to hash trusted component ${row.image_path} before import:`, e);
+      }
+    }
+    return preHashes;
+  }
+
+  private async restoreTrustForUnchangedComponents(preHashes: Map<string, string>): Promise<void> {
+    for (const [assetId, preHash] of preHashes) {
+      const asset = await assetService.getById(assetId);
+      if (!asset || asset.is_deleted || asset.output_kind !== 'component' || !asset.image_path) continue;
+      try {
+        const content = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', asset.image_path), 'utf-8');
+        if (hashContent(content) === preHash) {
+          await assetService.update(assetId, { editedExternally: true });
+        }
+      } catch (e: any) {
+        if (e.code !== 'ENOENT') console.error(`Failed to re-check trusted component ${asset.image_path} after import:`, e);
+      }
+    }
+  }
+
   private async assertNoConflictMarkers(): Promise<void> {
     for (const dir of DATA_DIRS) {
       const dirPath = path.join(getProjectRoot(), dir);
@@ -291,9 +345,16 @@ class GitServiceImpl {
       }
     }
 
+    // Snapshot BEFORE git.pull(): afterwards, a component file the remote
+    // changed already holds the incoming bytes on disk, so a later snapshot
+    // would compare that content against itself and restore trust for exactly
+    // the content that needs re-review.
+    const trustedComponentHashes = await this.snapshotTrustedComponentHashes();
+
     await git.pull(['--no-rebase']);
 
     await this.importFromJson();
+    await this.restoreTrustForUnchangedComponents(trustedComponentHashes);
     return { success: true };
   }
 
@@ -378,9 +439,23 @@ class GitServiceImpl {
   async resolveConflicts(): Promise<void> {
     await this.assertNoConflictMarkers();
 
+    const git = this.git();
+
+    // The merge is already applied to the working tree by the time this runs,
+    // so on-disk content is no longer purely local. Anything git reports as
+    // changed — a staged merge result, an unmerged conflict, or the user's own
+    // hand-resolution — is excluded from trust preservation, so only files the
+    // merge provably left alone can keep it. Untracked files are not excluded:
+    // git refuses to clobber them during a merge, so they are still local.
+    const mergeTouched = new Set(
+      (await git.status()).files
+        .filter(f => !(f.index === '?' && f.working_dir === '?'))
+        .map(f => f.path)
+    );
+    const trustedComponentHashes = await this.snapshotTrustedComponentHashes(mergeTouched);
+
     await this.stageFilesForCommit();
 
-    const git = this.git();
     try {
       await git.commit('Resolved merge conflicts');
     } catch (e: any) {
@@ -392,6 +467,7 @@ class GitServiceImpl {
     // genuine DB-level problem, not a marker slipping through.
     try {
       await this.importFromJson();
+      await this.restoreTrustForUnchangedComponents(trustedComponentHashes);
     } catch (importError) {
       await git.reset(['--merge', 'ORIG_HEAD']);
       throw new Error('Merge completed but database sync failed. Rolled back.');
