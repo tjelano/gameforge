@@ -353,8 +353,11 @@ class GitServiceImpl {
 
     await git.pull(['--no-rebase']);
 
-    await this.importFromJson();
-    await this.restoreTrustForUnchangedComponents(trustedComponentHashes);
+    try {
+      await this.importFromJson();
+    } finally {
+      await this.restoreTrustForUnchangedComponents(trustedComponentHashes);
+    }
     return { success: true };
   }
 

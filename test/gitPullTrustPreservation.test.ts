@@ -181,4 +181,29 @@ describe('GitService.pull() preserves local component trust only for byte-identi
     // ...while the genuinely-local trust is still intact.
     expect(editedExternallyOf(TRUSTED_ASSET_ID)).toBe(1);
   });
+
+  it('still restores trust for an untouched component even when importFromJson() throws partway through', async () => {
+    // importFromJson() processes data/users, then data/styles, then
+    // data/assets, then data/presets, then data/pages, in that fixed order
+    // (see GitService.importFromJson()). Putting the unparseable file in
+    // data/presets guarantees the entire data/assets pass - including this
+    // machine's own trusted asset, force-reset to edited_externally = 0 as
+    // part of that pass - completes before the throw, regardless of
+    // filesystem readdir ordering within any one directory.
+    await pushFromOtherMachine(async (cloneDir) => {
+      await fsPromises.mkdir(path.join(cloneDir, 'data', 'presets'), { recursive: true });
+      await fsPromises.writeFile(
+        path.join(cloneDir, 'data', 'presets', 'preset-broken.json'),
+        '{ not valid json'
+      );
+    });
+
+    await expect(gitService.pull()).rejects.toThrow();
+
+    // The trusted file's bytes were never touched by this pull, so despite
+    // the overall pull failing, trust must still have been restored.
+    const onDisk = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', TRUSTED_FILE), 'utf-8');
+    expect(onDisk).toBe(LOCAL_TRUSTED_CONTENT);
+    expect(editedExternallyOf(TRUSTED_ASSET_ID)).toBe(1);
+  });
 });

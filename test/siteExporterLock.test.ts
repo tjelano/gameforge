@@ -72,6 +72,39 @@ describe('siteExporter.exportSite concurrency', () => {
     expect('error' in result).toBe(false);
   });
 
+  it('recovers a lock whose heartbeat file is missing, via the lock directory\'s own stale mtime', async () => {
+    // Simulates a crash mid-release() - the heartbeat file got removed but
+    // the lock directory itself never finished being removed - by creating
+    // the lock dir with no heartbeat file at all and backdating the
+    // directory's own mtime past the staleness window.
+    const style = await setUpStyleWithOnePage('my-site');
+
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    const staleTime = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
+    await fsPromises.utimes(lockDir, staleTime, staleTime);
+
+    const result = await siteExporter.exportSite(style.id, 'my-site');
+    expect('error' in result).toBe(false);
+  });
+
+  it('does NOT treat a freshly-created, heartbeat-less lock directory as stale', async () => {
+    // Companion to the above: the narrow window right after another
+    // process's mkdir, before its first writeHeartbeat call, must still be
+    // protected - the directory's mtime is "just now", so falling back to
+    // it must not defeat the lock during that window.
+    const style = await setUpStyleWithOnePage('my-site');
+
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    // No heartbeat file written, no mtime backdating - mtime is "now".
+
+    const result = await siteExporter.exportSite(style.id, 'my-site');
+    expect(result).toHaveProperty('error');
+    if (!('error' in result)) throw new Error('expected an error result');
+    expect(result.error).toBe('EXPORT_IN_PROGRESS');
+  });
+
   it('does not treat an in-progress export as stale just because it is slow', async () => {
     const style = await setUpStyleWithOnePage('my-site');
 

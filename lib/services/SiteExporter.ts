@@ -36,11 +36,23 @@ async function isLockStale(lockDir: string): Promise<boolean> {
     return !Number.isFinite(last) || Date.now() - last > LOCK_STALE_MS;
   } catch (e: any) {
     if (e?.code === 'ENOENT') {
-      // Lock directory exists but no heartbeat file yet (a narrow window right
-      // after another process's mkdir, before its first writeHeartbeat call) -
-      // not stale, just brand new. Treating this as stale would defeat the
-      // lock during that window.
-      return false;
+      // No heartbeat file. Could be a lock claimed moments ago (the narrow
+      // window before its first writeHeartbeat call - stat's mtime will be
+      // very recent, correctly NOT stale below) or a lock whose heartbeat
+      // vanished some other way (e.g. a crash mid-release(), between the
+      // heartbeat file's removal and the directory's own removal completing).
+      // Fall back to the directory's own mtime so a genuinely old,
+      // heartbeat-less lock still eventually gets recovered instead of
+      // blocking every future export of this subdir forever.
+      try {
+        const stat = await fsPromises.stat(lockDir);
+        return Date.now() - stat.mtimeMs > LOCK_STALE_MS;
+      } catch {
+        // Directory itself is gone by the time we got here (released
+        // concurrently) - not our problem to resolve; the caller's own
+        // tryClaim()/tryRecoverStaleLock() retry logic handles this.
+        return false;
+      }
     }
     // Anything else (e.g. EACCES) is unexpected - still treat conservatively
     // as not-stale (never seize a lock we can't actually confirm is dead),
