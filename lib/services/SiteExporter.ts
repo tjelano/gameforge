@@ -287,6 +287,12 @@ class SiteExporterImpl {
 
       const components = [...componentsByAssetId.values()];
       const skippedComponents: string[] = [];
+      // Records the actual on-disk hash for a skipped (hand-edited) component,
+      // so the manifest written below can preserve "the last observed/accepted
+      // state" instead of "what GameForge would ideally generate" - otherwise
+      // a hand-edit gets flagged forever, since regenerated code never
+      // byte-matches hand-written code. See componentName -> onDiskHash below.
+      const manifestHashOverrides = new Map<string, string>();
 
       try {
         await fsPromises.mkdir(path.join(targetDir, 'app'), { recursive: true });
@@ -318,7 +324,21 @@ class SiteExporterImpl {
               }
             }
             if (onDiskHash !== null && onDiskHash !== priorEntry.contentHash) {
+              // Genuinely new divergence from whatever was last recorded
+              // (GameForge's own generated content, or a previously-accepted
+              // hand-edit baseline) - preserve it on disk and (re)flag it.
               skippedComponents.push(component.componentName);
+              manifestHashOverrides.set(component.componentName, onDiskHash);
+              continue;
+            }
+            if (onDiskHash !== null && priorEntry.handEdited) {
+              // Matches the previously-accepted hand-edited baseline exactly
+              // (nothing changed since it was accepted) - do NOT fall through
+              // to the unconditional regenerate-and-write below, or this
+              // would silently overwrite the accepted hand-edit with fresh
+              // ideal content on the very next export. Carry the same hash
+              // forward (still hand-edited) without re-flagging it.
+              manifestHashOverrides.set(component.componentName, onDiskHash);
               continue;
             }
           }
@@ -386,7 +406,11 @@ class SiteExporterImpl {
           components: components.map(c => ({
             assetId: c.asset.id,
             componentName: c.componentName,
-            contentHash: hashContent(this.buildComponentFile(c) + '\n' + c.css),
+            // A skipped (hand-edited) component preserves the accepted on-disk
+            // hash instead of the freshly-generated one - see
+            // manifestHashOverrides above.
+            contentHash: manifestHashOverrides.get(c.componentName) ?? hashContent(this.buildComponentFile(c) + '\n' + c.css),
+            handEdited: manifestHashOverrides.has(c.componentName),
           })),
         };
         await writeManifest(targetDir, manifest);

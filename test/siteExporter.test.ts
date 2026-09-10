@@ -444,6 +444,45 @@ describe('siteExporter.exportSite', () => {
     expect(afterReExport).toContain('// hand-edited');
   });
 
+  it('stops re-flagging a hand-edited component once it has been reported, but flags it again on a further edit', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const first = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
+
+    // Simulate a hand-edit, same as the test above.
+    const componentsDir = path.join(first.targetDir, 'components');
+    const [componentFile] = (await fsPromises.readdir(componentsDir)).filter(f => f.endsWith('.tsx'));
+    const componentPath = path.join(componentsDir, componentFile);
+    const original = await fsPromises.readFile(componentPath, 'utf-8');
+    await fsPromises.writeFile(componentPath, original + '\n// hand-edited\n');
+
+    const second = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in second) throw new Error(`Unexpected export error: ${second.error}`);
+    expect(second.skippedComponents).toHaveLength(1);
+
+    // Re-export again with NO further changes to the hand-edited file: the
+    // manifest written by the second export now records the accepted
+    // on-disk hash, so this third export must see on-disk hash == manifest
+    // hash and stop flagging it.
+    const third = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in third) throw new Error(`Unexpected export error: ${third.error}`);
+    expect(third.skippedComponents).toHaveLength(0);
+    const afterThird = await fsPromises.readFile(componentPath, 'utf-8');
+    expect(afterThird).toContain('// hand-edited');
+
+    // Edit it FURTHER: a genuinely new divergence must still be caught.
+    await fsPromises.writeFile(componentPath, original + '\n// hand-edited\n// edited again\n');
+    const fourth = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in fourth) throw new Error(`Unexpected export error: ${fourth.error}`);
+    expect(fourth.skippedComponents).toHaveLength(1);
+    const afterFourth = await fsPromises.readFile(componentPath, 'utf-8');
+    expect(afterFourth).toContain('// edited again');
+  });
+
   it('exports a component marked edited_externally with its hand-edited HTML intact', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_COMPONENT_DOC);

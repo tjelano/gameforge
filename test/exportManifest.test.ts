@@ -22,6 +22,12 @@ describe('hashContent', () => {
     expect(a).toBe(b);
     expect(a).not.toBe(c);
   });
+
+  it('produces the same hash for CRLF and LF line endings of otherwise-identical content', () => {
+    // A pure line-ending difference (an editor re-saving with CRLF, a git
+    // checkout with core.autocrlf) must never look like a hand-edit.
+    expect(hashContent('foo\r\nbar')).toBe(hashContent('foo\nbar'));
+  });
 });
 
 describe('writeManifest / readManifest', () => {
