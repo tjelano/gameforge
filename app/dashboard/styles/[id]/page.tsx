@@ -31,7 +31,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
 
   const [exportSubdir, setExportSubdir] = useState('my-site');
   const [exporting, setExporting] = useState(false);
-  const [exportResult, setExportResult] = useState<{ pagesExported: number; componentsExported: number; targetDir: string } | null>(null);
+  const [exportResult, setExportResult] = useState<{ pagesExported: number; componentsExported: number; targetDir: string; skippedComponents: string[] } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const [syncSubdir, setSyncSubdir] = useState('my-site');
@@ -42,6 +42,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     pageOrderChanges: { pageId: string; newComponentAssetIds: string[] }[];
     handEditedComponentAssetIds: string[];
     droppedDeletedAssetIds: string[];
+    conflictedPageIds: string[];
   } | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [applyingSync, setApplyingSync] = useState(false);
@@ -470,6 +471,10 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
             Exported {exportResult.pagesExported} page{exportResult.pagesExported === 1 ? '' : 's'} and{' '}
             {exportResult.componentsExported} component{exportResult.componentsExported === 1 ? '' : 's'} to{' '}
             <code>{exportResult.targetDir}</code>.
+            {exportResult.skippedComponents.length > 0 && (
+              <> {exportResult.skippedComponents.length} component{exportResult.skippedComponents.length === 1 ? '' : 's'} left untouched on disk
+              because {exportResult.skippedComponents.length === 1 ? 'it has' : 'they have'} been hand-edited: <code>{exportResult.skippedComponents.join(', ')}</code>.</>
+            )}
           </p>
         )}
       </div>
@@ -484,7 +489,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
           <label htmlFor="sync-subdir">Export folder name</label>
           <input id="sync-subdir" value={syncSubdir} onChange={e => setSyncSubdir(e.target.value)} />
         </div>
-        <button className="btn" onClick={handlePreviewSync} disabled={syncing}>
+        <button className="btn" onClick={handlePreviewSync} disabled={syncing || applyingSync}>
           {syncing ? 'Checking…' : 'Check for changes'}
         </button>
         {syncError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 8 }}>{syncError}</p>}
@@ -493,7 +498,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
           <div style={{ marginTop: 16 }}>
             {syncDiff.newPages.length === 0 && syncDiff.deletedPageIds.length === 0 &&
              syncDiff.pageOrderChanges.length === 0 && syncDiff.handEditedComponentAssetIds.length === 0 &&
-             syncDiff.droppedDeletedAssetIds.length === 0 ? (
+             syncDiff.droppedDeletedAssetIds.length === 0 && syncDiff.conflictedPageIds.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--ink-dim)' }}>No changes found.</p>
             ) : (
               <>
@@ -505,6 +510,11 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
                 ))}
                 {syncDiff.pageOrderChanges.map(c => (
                   <p key={c.pageId} style={{ fontSize: 13 }}>Component order changed on a page.</p>
+                ))}
+                {syncDiff.conflictedPageIds.map(pid => (
+                  <p key={pid} style={{ fontSize: 13, color: 'var(--reject)' }}>
+                    Component order for a page changed both in the dashboard and in the export — resolve manually before applying.
+                  </p>
                 ))}
                 {syncDiff.handEditedComponentAssetIds.map(aid => (
                   <p key={aid} style={{ fontSize: 13 }}>

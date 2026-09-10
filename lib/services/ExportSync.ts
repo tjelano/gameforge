@@ -22,6 +22,7 @@ export interface SyncDiff {
   pageOrderChanges: SyncPageOrderChange[];
   handEditedComponentAssetIds: string[];
   droppedDeletedAssetIds: string[];
+  conflictedPageIds: string[];
 }
 
 export type SyncDiffResult =
@@ -138,6 +139,7 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
 
   const deletedPageIds: string[] = [];
   const pageOrderChanges: SyncPageOrderChange[] = [];
+  const conflictedPageIds: string[] = [];
   const currentPages = await pageService.getActivePagesForStyle(styleId);
   const currentPagesById = new Map(currentPages.map(p => [p.id, p]));
 
@@ -150,10 +152,34 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
     }
     if (!currentPage) continue; // page was already soft-deleted in the DB independently of export - nothing to reconcile
     const tagNames = extractComponentTagOrder(route.content, knownComponentNames);
-    const newOrder = resolveActiveAssetIds(tagNames);
+    const diskOrder = resolveActiveAssetIds(tagNames);
     const currentOrder: string[] = JSON.parse(currentPage.component_asset_ids);
-    if (JSON.stringify(newOrder) !== JSON.stringify(currentOrder)) {
-      pageOrderChanges.push({ pageId: manifestPage.id, newComponentAssetIds: newOrder });
+    const ancestorOrder = manifestPage.componentAssetIds;
+
+    // Real 3-way diff against the ancestor order recorded at export time -
+    // comparing disk directly against current (the old logic) falsely
+    // flagged a dashboard-only reorder as "changed on disk", because disk
+    // still holds the stale exported order. The ancestor is what tells us
+    // which side, if either, actually moved since export.
+    const diskMatchesAncestor = JSON.stringify(diskOrder) === JSON.stringify(ancestorOrder);
+    const currentMatchesAncestor = JSON.stringify(currentOrder) === JSON.stringify(ancestorOrder);
+    if (diskMatchesAncestor) {
+      // Disk unchanged since export. If current also matches, nothing
+      // changed anywhere; if current differs, that's the dashboard's own
+      // edit - either way, disk has nothing to contribute. Not a sync-able
+      // change and not a conflict.
+      continue;
+    }
+    if (currentMatchesAncestor) {
+      // Only disk changed since export - the original, intended case.
+      pageOrderChanges.push({ pageId: manifestPage.id, newComponentAssetIds: diskOrder });
+      continue;
+    }
+    // Both sides changed independently since export. If they converged on
+    // the same order there's nothing to do; if they disagree, this is a
+    // genuine conflict that must not be silently resolved either way.
+    if (JSON.stringify(diskOrder) !== JSON.stringify(currentOrder)) {
+      conflictedPageIds.push(manifestPage.id);
     }
   }
 
@@ -181,6 +207,6 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
 
   return {
     success: true,
-    diff: { newPages, deletedPageIds, pageOrderChanges, handEditedComponentAssetIds, droppedDeletedAssetIds: [...droppedDeletedAssetIds] },
+    diff: { newPages, deletedPageIds, pageOrderChanges, handEditedComponentAssetIds, droppedDeletedAssetIds: [...droppedDeletedAssetIds], conflictedPageIds },
   };
 }

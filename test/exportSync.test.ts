@@ -123,6 +123,104 @@ describe('computeSyncDiff', () => {
     expect(result.diff.pageOrderChanges).toHaveLength(1);
     expect(result.diff.pageOrderChanges[0].pageId).toBe(page.id);
     expect(result.diff.pageOrderChanges[0].newComponentAssetIds).toEqual([compB.id, compA.id]);
+    // Disk-only reorder (DB order still matches the manifest's recorded
+    // ancestor order) - the 3-way diff must not treat this as a conflict.
+    expect(result.diff.conflictedPageIds).not.toContain(page.id);
+  });
+
+  it('does NOT report a page-order change when only the dashboard reordered since export (disk untouched)', async () => {
+    // This is the bug this task fixes: disk still holds the exported
+    // ("ancestor") order, but the DB was reordered in the dashboard after
+    // export. The old disk-vs-current comparison flagged this as "changed
+    // on disk" and Apply would silently revert the dashboard's own edit.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const compA = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'navbar', prompt: 'nav', imagePath: 'a.html', outputKind: 'component' });
+    const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    // Reordered in the dashboard after export: B now comes first.
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compB.id, compA.id]) });
+
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [compA.id, compB.id], pageFileHash: 'irrelevant' }],
+      components: [
+        { assetId: compA.id, componentName: 'NavbarAAA111', contentHash: 'x' },
+        { assetId: compB.id, componentName: 'HeroBBB222', contentHash: 'y' },
+      ],
+    });
+    // Disk untouched since export - still the original exported order.
+    await fsPromises.writeFile(
+      path.join(exportDir, 'app', 'page.tsx'),
+      pageFileContent(page.id, '      <NavbarAAA111 />\n      <HeroBBB222 />')
+    );
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.pageOrderChanges).toHaveLength(0);
+    expect(result.diff.conflictedPageIds).not.toContain(page.id);
+  });
+
+  it('reports a conflict when both the dashboard and disk reordered a page differently since export', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const compA = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'navbar', prompt: 'nav', imagePath: 'a.html', outputKind: 'component' });
+    const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
+    const compC = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'footer', prompt: 'footer', imagePath: 'c.html', outputKind: 'component' });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    // Dashboard swaps B and C relative to the exported order.
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compA.id, compC.id, compB.id]) });
+
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [compA.id, compB.id, compC.id], pageFileHash: 'irrelevant' }],
+      components: [
+        { assetId: compA.id, componentName: 'NavbarAAA111', contentHash: 'x' },
+        { assetId: compB.id, componentName: 'HeroBBB222', contentHash: 'y' },
+        { assetId: compC.id, componentName: 'FooterCCC333', contentHash: 'z' },
+      ],
+    });
+    // Disk (hand-edited) swaps A and B relative to the exported order -
+    // a different change than the dashboard's, so the two disagree.
+    await fsPromises.writeFile(
+      path.join(exportDir, 'app', 'page.tsx'),
+      pageFileContent(page.id, '      <HeroBBB222 />\n      <NavbarAAA111 />\n      <FooterCCC333 />')
+    );
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.conflictedPageIds).toContain(page.id);
+    expect(result.diff.pageOrderChanges.find(c => c.pageId === page.id)).toBeUndefined();
+  });
+
+  it('does not report a conflict when the dashboard and disk independently converged on the same new order', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const compA = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'navbar', prompt: 'nav', imagePath: 'a.html', outputKind: 'component' });
+    const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
+    const compC = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'footer', prompt: 'footer', imagePath: 'c.html', outputKind: 'component' });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    // Dashboard and disk both moved B to the front - the exact same result.
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compB.id, compA.id, compC.id]) });
+
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [compA.id, compB.id, compC.id], pageFileHash: 'irrelevant' }],
+      components: [
+        { assetId: compA.id, componentName: 'NavbarAAA111', contentHash: 'x' },
+        { assetId: compB.id, componentName: 'HeroBBB222', contentHash: 'y' },
+        { assetId: compC.id, componentName: 'FooterCCC333', contentHash: 'z' },
+      ],
+    });
+    await fsPromises.writeFile(
+      path.join(exportDir, 'app', 'page.tsx'),
+      pageFileContent(page.id, '      <HeroBBB222 />\n      <NavbarAAA111 />\n      <FooterCCC333 />')
+    );
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.conflictedPageIds).not.toContain(page.id);
+    expect(result.diff.pageOrderChanges.find(c => c.pageId === page.id)).toBeUndefined();
   });
 
   it('ignores a JSX tag that is not a known component name', async () => {
