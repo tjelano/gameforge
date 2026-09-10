@@ -60,6 +60,72 @@ describe('computeSyncDiff', () => {
     expect(result.diff.newPages[0].name).toBe('About');
   });
 
+  it('does NOT adopt a non-canonically-named route folder as a new page (reports it as not importable instead)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await writeManifest(exportDir, { styleId: style.id, exportedAt: Date.now(), pages: [], components: [] });
+    // Hand-added folder using a naming convention GameForge's own slugify()
+    // would never produce.
+    await fsPromises.mkdir(path.join(exportDir, 'app', 'my_page'), { recursive: true });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'my_page', 'page.tsx'), 'export default function Page() { return <><p>hi</p></>; }');
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.notImportableFolders).toEqual(['my_page']);
+    expect(result.diff.newPages).toHaveLength(0);
+  });
+
+  it('still detects a canonically-slugged route folder as a new page (regression check)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await writeManifest(exportDir, { styleId: style.id, exportedAt: Date.now(), pages: [], components: [] });
+    await fsPromises.mkdir(path.join(exportDir, 'app', 'my-page'), { recursive: true });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'my-page', 'page.tsx'), 'export default function Page() { return <><p>hi</p></>; }');
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.newPages).toHaveLength(1);
+    expect(result.diff.newPages[0].slug).toBe('my-page');
+    expect(result.diff.notImportableFolders).toHaveLength(0);
+  });
+
+  it('does not match a page-id comment that only appears inside a string literal, not as the first line', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await writeManifest(exportDir, { styleId: style.id, exportedAt: Date.now(), pages: [], components: [] });
+    await fsPromises.mkdir(path.join(exportDir, 'app', 'about'), { recursive: true });
+    await fsPromises.writeFile(
+      path.join(exportDir, 'app', 'about', 'page.tsx'),
+      "export default function Page() {\n  const x = '// gameforge-page-id: fake-id';\n  return <><p>{x}</p></>;\n}\n"
+    );
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Must be treated as a real new page (no valid id extracted), not
+    // silently attributed to "fake-id".
+    expect(result.diff.newPages).toHaveLength(1);
+    expect(result.diff.newPages[0].slug).toBe('about');
+  });
+
+  it('still matches a real first-line page-id comment (regression check for the anchored regex)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const page = await pageService.create({ styleId: style.id, name: 'About', createdBy: 'user-1' });
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'About', slug: 'about', componentAssetIds: [], pageFileHash: 'irrelevant' }],
+      components: [],
+    });
+    await fsPromises.mkdir(path.join(exportDir, 'app', 'about'), { recursive: true });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'about', 'page.tsx'), pageFileContent(page.id, ''));
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.newPages).toHaveLength(0);
+    expect(result.diff.deletedPageIds).toHaveLength(0);
+    expect(result.diff.notImportableFolders).toHaveLength(0);
+  });
+
   it('detects a page deleted externally (a manifest page-id with no matching route folder)', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'Contact', createdBy: 'user-1' });

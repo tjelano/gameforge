@@ -4,6 +4,7 @@ import path from 'path';
 import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
 import { readManifest, hashContent, type ExportManifest } from '@/lib/services/ExportManifest';
+import { slugify } from '@/lib/services/SiteExporter';
 
 export interface SyncNewPage {
   slug: string;
@@ -23,17 +24,30 @@ export interface SyncDiff {
   handEditedComponentAssetIds: string[];
   droppedDeletedAssetIds: string[];
   conflictedPageIds: string[];
+  notImportableFolders: string[];
 }
 
 export type SyncDiffResult =
   | { success: true; diff: SyncDiff }
   | { success: false; error: string };
 
-const PAGE_ID_COMMENT_RE = /\/\/ gameforge-page-id: ([0-9a-f-]+)/;
+const PAGE_ID_COMMENT_RE = /^\/\/ gameforge-page-id: ([0-9a-f-]+)/m;
 
 function slugToName(slug: string): string {
   if (!slug) return 'Home';
   return slug.split('-').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// A route folder is only safe to adopt as a brand-new page if its slug is
+// exactly what GameForge's own slugify() would produce - i.e. already
+// canonical. Anything else (underscores, route groups like "(marketing)",
+// dynamic segments like "[slug]", uppercase, stray hyphens) was never
+// written by GameForge's exporter, so it must not be silently adopted:
+// the NEXT export would then write a fresh canonically-named folder for it
+// without ever removing the original, non-canonical one, which would keep
+// re-triggering "new page" detection forever.
+function isImportableSlug(slug: string): boolean {
+  return slug === '' || slugify(slug) === slug;
 }
 
 function extractComponentTagOrder(pageFileContent: string, knownComponentNames: Set<string>): string[] {
@@ -115,6 +129,7 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
   const routes = await findRouteFolders(exportDir);
   const routesById = new Map<string, { slug: string; pageFilePath: string; content: string }>();
   const newPages: SyncNewPage[] = [];
+  const notImportableFolders: string[] = [];
 
   for (const route of routes) {
     let content: string;
@@ -127,6 +142,8 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
     const idMatch = content.match(PAGE_ID_COMMENT_RE);
     if (idMatch) {
       routesById.set(idMatch[1], { ...route, content });
+    } else if (!isImportableSlug(route.slug)) {
+      notImportableFolders.push(route.slug);
     } else {
       const tagNames = extractComponentTagOrder(content, knownComponentNames);
       newPages.push({
@@ -207,6 +224,6 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
 
   return {
     success: true,
-    diff: { newPages, deletedPageIds, pageOrderChanges, handEditedComponentAssetIds, droppedDeletedAssetIds: [...droppedDeletedAssetIds], conflictedPageIds },
+    diff: { newPages, deletedPageIds, pageOrderChanges, handEditedComponentAssetIds, droppedDeletedAssetIds: [...droppedDeletedAssetIds], conflictedPageIds, notImportableFolders },
   };
 }

@@ -43,6 +43,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     handEditedComponentAssetIds: string[];
     droppedDeletedAssetIds: string[];
     conflictedPageIds: string[];
+    notImportableFolders: string[];
   } | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [applyingSync, setApplyingSync] = useState(false);
@@ -498,7 +499,8 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
           <div style={{ marginTop: 16 }}>
             {syncDiff.newPages.length === 0 && syncDiff.deletedPageIds.length === 0 &&
              syncDiff.pageOrderChanges.length === 0 && syncDiff.handEditedComponentAssetIds.length === 0 &&
-             syncDiff.droppedDeletedAssetIds.length === 0 && syncDiff.conflictedPageIds.length === 0 ? (
+             syncDiff.droppedDeletedAssetIds.length === 0 && syncDiff.conflictedPageIds.length === 0 &&
+             syncDiff.notImportableFolders.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--ink-dim)' }}>No changes found.</p>
             ) : (
               <>
@@ -526,6 +528,11 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
                     {syncDiff.droppedDeletedAssetIds.length} reference{syncDiff.droppedDeletedAssetIds.length === 1 ? '' : 's'} to an already-deleted component will be dropped.
                   </p>
                 )}
+                {syncDiff.notImportableFolders.map(slug => (
+                  <p key={slug} style={{ fontSize: 13, color: 'var(--ink-dim)' }}>
+                    Folder "{slug}" doesn't match GameForge's naming convention and can't be imported as a page.
+                  </p>
+                ))}
                 <button className="btn btn-primary" onClick={handleApplySync} disabled={applyingSync} style={{ marginTop: 8 }}>
                   {applyingSync ? 'Applying…' : 'Apply structural changes'}
                 </button>
