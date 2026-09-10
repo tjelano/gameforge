@@ -107,6 +107,29 @@ describe('computeSyncDiff', () => {
     expect(result.diff.newPages[0].slug).toBe('about');
   });
 
+  it('does not match a page-id comment embedded after a newline inside a multi-line template literal', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    await writeManifest(exportDir, { styleId: style.id, exportedAt: Date.now(), pages: [], components: [] });
+    await fsPromises.mkdir(path.join(exportDir, 'app', 'about'), { recursive: true });
+    // The fake comment sits on its own line, but only because it's inside a
+    // multi-line template literal - it is not the file's true first line.
+    // A regex anchored with the `m` flag would match here (m makes `^`
+    // match after ANY newline, not just true string-start); anchoring
+    // without `m` must not.
+    await fsPromises.writeFile(
+      path.join(exportDir, 'app', 'about', 'page.tsx'),
+      "export default function Page() {\n  const x = `foo\n// gameforge-page-id: fake-id\nbar`;\n  return <><p>{x}</p></>;\n}\n"
+    );
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Must be treated as a real new page (no valid id extracted), not
+    // silently attributed to "fake-id".
+    expect(result.diff.newPages).toHaveLength(1);
+    expect(result.diff.newPages[0].slug).toBe('about');
+  });
+
   it('still matches a real first-line page-id comment (regression check for the anchored regex)', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'About', createdBy: 'user-1' });

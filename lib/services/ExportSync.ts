@@ -31,7 +31,17 @@ export type SyncDiffResult =
   | { success: true; diff: SyncDiff }
   | { success: false; error: string };
 
-const PAGE_ID_COMMENT_RE = /^\/\/ gameforge-page-id: ([0-9a-f-]+)/m;
+// SiteExporter's buildPageFile() always writes this comment as the file's
+// literal first line - nothing precedes it, not even a blank line or BOM.
+// So anchoring to absolute string-start (^ without the `m` flag) is both
+// sufficient for every legitimate file and a correct rejection of a fake
+// copy of this text appearing anywhere else in a hand-written page.tsx
+// (e.g. inside a multi-line template literal). The `m` flag must NOT be
+// used here: it makes `^` match after ANY newline in the string, not just
+// true position 0, so a fake comment on its own line inside a multi-line
+// template literal would still match - identical to the unanchored bug
+// this regex exists to fix.
+const PAGE_ID_COMMENT_RE = /^\/\/ gameforge-page-id: ([0-9a-f-]+)/;
 
 function slugToName(slug: string): string {
   if (!slug) return 'Home';
