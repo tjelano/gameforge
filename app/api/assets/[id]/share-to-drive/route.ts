@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
+import { Readable } from 'stream';
 import path from 'path';
 import { z, ZodError } from 'zod';
 import { assetService } from '@/lib/services/AssetService';
@@ -8,6 +9,8 @@ import { driveService } from '@/lib/services/DriveService';
 import { getCurrentUser } from '@/lib/utils/session';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { storageDirFor } from '@/lib/services/shared/assetSafety';
+import { parseComponentHtml, combineComponentHtml } from '@/lib/services/componentDocument';
+import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +65,39 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       console.error(`Failed to open asset file for Drive share: ${physicalPath}`, e);
       return NextResponse.json({ success: false, error: 'Could not read this asset\'s file.' }, { status: 500 });
     }
-    const stream = fs.createReadStream(physicalPath);
+    let stream: Readable;
+    if (asset.output_kind === 'component') {
+      // Same re-sanitization rule as GET /api/components/[filename] and
+      // GET /api/assets/[id]/export's component branch — this file could
+      // have landed on disk some other way (git pull from another
+      // machine, an older less-hardened version of this code), so it
+      // gets re-checked before ever leaving this machine, including via
+      // Drive. An asset marked `edited_externally` already had its trust
+      // decision made at WRITE time (PATCH .../component with
+      // trustAsEdited) — skip only the sanitize calls for that case.
+      let document: string;
+      try {
+        document = await fsPromises.readFile(physicalPath, 'utf-8');
+      } catch (e) {
+        console.error(`Failed to read component file for Drive share (asset ${id}):`, e);
+        return NextResponse.json({ success: false, error: 'Could not read this asset\'s file.' }, { status: 500 });
+      }
+      let safeDocument: string;
+      try {
+        const tokens = parseComponentHtml(document);
+        const trusted = asset.edited_externally === 1;
+        safeDocument = combineComponentHtml({
+          html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
+          css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),
+        });
+      } catch (e) {
+        console.error(`Component ${asset.image_path} failed re-sanitization for Drive share:`, e);
+        return NextResponse.json({ success: false, error: 'Component file failed validation' }, { status: 500 });
+      }
+      stream = Readable.from(safeDocument);
+    } else {
+      stream = fs.createReadStream(physicalPath);
+    }
 
     const extension = path.extname(asset.image_path).toLowerCase();
     const uploaded = await driveService.uploadFile({
