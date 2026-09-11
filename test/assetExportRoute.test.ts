@@ -40,6 +40,9 @@ async function makeThemeAsset(styleName: string, tokens: ThemeTokens = TOKENS): 
   return { assetId: asset.id };
 }
 
+const IMG_DOC = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+  + '<body><div class="hero"><img src="/hero.png" alt="Hero"></div></body></html>';
+
 async function makeComponentAsset(
   styleName: string,
   document: string,
@@ -206,6 +209,36 @@ describe('GET /api/assets/[id]/export', () => {
     const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=tailwind`);
     const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
     expect(res.status).toBe(400);
+  });
+
+  it('downloads a component marked edited_externally with its hand-edited content intact', async () => {
+    // <img> is deliberately excluded from componentSanitize's ALLOWED_TAGS,
+    // so it is the reliable "sanitizer would strip this" payload — and the
+    // exact case reverse-sync's trustAsEdited path exists for.
+    const { assetId } = await makeComponentAsset('Trusted Style', IMG_DOC);
+    await assetService.update(assetId, { editedExternally: true });
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="trusted-style-button.html"');
+    const body = await res.text();
+    expect(body).toContain('<img');
+    expect(body).toContain('/hero.png');
+  });
+
+  it('still sanitizes a component download when the asset is not marked edited_externally', async () => {
+    const { assetId } = await makeComponentAsset('Untrusted Style', IMG_DOC);
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('<img');
+    expect(body).not.toContain('/hero.png');
+    // Proves the <img> was SANITIZED OUT, not that the whole component was
+    // dropped — the surrounding allowed markup is still in the download.
+    expect(body).toContain('class="hero"');
   });
 
   it('returns 500 when the component file is missing on disk', async () => {

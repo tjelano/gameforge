@@ -157,4 +157,41 @@ describe('GitService.importFromJson() persists every current schema field, not j
     const row = db.prepare('SELECT states FROM assets WHERE id = ?').get(ASSET_ID) as any;
     expect(JSON.parse(row.states)).toEqual(['hover', 'pressed', 'disabled']);
   });
+
+  it('never imports edited_externally from git-synced JSON - forces it to 0 on both insert and update', async () => {
+    const EDITED_ASSET_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+    // A hostile or merely stale export claiming the component is trusted.
+    // edited_externally means "serve this file's HTML/CSS WITHOUT sanitizing
+    // it", so honouring this flag from a git pull would be a stored-XSS path:
+    // commit a malicious storage/components/*.html plus a matching asset JSON,
+    // and every puller serves it unsanitized without ever reviewing it. Trust
+    // is machine-local — set only via PATCH /api/assets/[id]/component.
+    const assetJson = JSON.stringify({
+      id: EDITED_ASSET_ID, style_id: ORIGINAL_STYLE_ID, created_by: 'user-1', asset_type: 'input',
+      prompt: 'Edited', image_path: 'edited.png', created_at: 4000, is_deleted: 0,
+      source_job_id: null,
+      nine_slice_margins: null,
+      states: JSON.stringify([]),
+      edited_externally: 1,
+    });
+    await fsPromises.writeFile(
+      path.join(tempRoot, 'data', 'assets', `asset-${EDITED_ASSET_ID}.json`),
+      assetJson
+    );
+
+    await gitService.importFromJson();
+
+    const db = DatabaseConnection.getInstance();
+    const row = db.prepare('SELECT edited_externally FROM assets WHERE id = ?').get(EDITED_ASSET_ID) as any;
+    expect(row.edited_externally).toBe(0);
+
+    // Re-import the SAME still-claiming-trusted JSON. This goes down the
+    // ON CONFLICT DO UPDATE branch instead of the INSERT branch, so it proves
+    // the 0 is force-set on every import — not just an INSERT-time default
+    // that a later pull could flip to 1.
+    await gitService.importFromJson();
+
+    const updatedRow = db.prepare('SELECT edited_externally FROM assets WHERE id = ?').get(EDITED_ASSET_ID) as any;
+    expect(updatedRow.edited_externally).toBe(0);
+  });
 });

@@ -55,12 +55,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // Re-sanitize at export time, same as GET /api/components/[filename] —
     // this file could have landed on disk some other way (git pull from
     // another machine, an older less-hardened version of this code).
+    // Exception: an asset marked `edited_externally` already had its trust
+    // decision made at WRITE time (PATCH .../component with
+    // trustAsEdited) — skip only the sanitize calls for that case.
     let safeDocument: string;
     try {
       const tokens = parseComponentHtml(document);
+      const trusted = asset.edited_externally === 1;
       safeDocument = combineComponentHtml({
-        html: sanitizeComponentHtml(tokens.html),
-        css: sanitizeComponentCss(tokens.css),
+        html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
+        css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),
       });
     } catch (e) {
       console.error(`Component ${asset.image_path} failed re-sanitization at export time:`, e);

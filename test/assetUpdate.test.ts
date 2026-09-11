@@ -5,6 +5,7 @@ import path from 'path';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
+import { assetService } from '@/lib/services/AssetService';
 import { PUT as updateAsset } from '@/app/api/assets/[id]/route';
 
 let tempRoot: string;
@@ -66,5 +67,64 @@ describe('PUT /api/assets/[id] — 9-slice margins and states', () => {
       { params: Promise.resolve({ id: ASSET_ID }) }
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe('AssetService.update() — edited_externally', () => {
+  it('sets edited_externally to 1 when patched with true', async () => {
+    const updated = await assetService.update(ASSET_ID, { editedExternally: true });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(1);
+  });
+
+  it('sets edited_externally to 0 when patched with false', async () => {
+    const db = DatabaseConnection.getInstance();
+    // First set it to 1
+    db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
+
+    const updated = await assetService.update(ASSET_ID, { editedExternally: false });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(0);
+  });
+
+  it('preserves edited_externally when not included in patch', async () => {
+    const db = DatabaseConnection.getInstance();
+    // Set it to 1 initially
+    db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
+
+    // Update with a different field, omitting editedExternally
+    const updated = await assetService.update(ASSET_ID, { prompt: 'Updated prompt' });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(1); // Should still be 1
+    expect(updated!.prompt).toBe('Updated prompt');
+  });
+
+  it('does not reset edited_externally when updating other fields', async () => {
+    const db = DatabaseConnection.getInstance();
+    db.prepare('UPDATE assets SET edited_externally = 1 WHERE id = ?').run(ASSET_ID);
+
+    const updated = await assetService.update(ASSET_ID, { assetType: 'input' });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.edited_externally).toBe(1); // Should still be 1
+    expect(updated!.asset_type).toBe('input');
+  });
+});
+
+describe('AssetService.getByImagePath()', () => {
+  it('returns the matching asset when one exists with that image_path', async () => {
+    const asset = await assetService.getByImagePath('inv.png');
+
+    expect(asset).not.toBeNull();
+    expect(asset!.id).toBe(ASSET_ID);
+  });
+
+  it('returns null when no asset has that image_path', async () => {
+    const asset = await assetService.getByImagePath('does-not-exist.png');
+
+    expect(asset).toBeNull();
   });
 });
