@@ -212,6 +212,10 @@ export async function computeSyncDiff(styleId: string, exportDir: string): Promi
 
   const handEditedComponentAssetIds: string[] = [];
   for (const component of manifest.components) {
+    if (component.componentName.includes('/') || component.componentName.includes('\\') || component.componentName.includes('..')) {
+      console.error(`Manifest component name "${component.componentName}" is unsafe, skipping hand-edit check for asset ${component.assetId}`);
+      continue;
+    }
     const tsxPath = path.join(exportDir, 'components', `${component.componentName}.tsx`);
     const cssPath = path.join(exportDir, 'components', `${component.componentName}.module.css`);
     try {

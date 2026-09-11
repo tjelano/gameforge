@@ -359,6 +359,33 @@ describe('computeSyncDiff', () => {
     expect(result.diff.handEditedComponentAssetIds).toEqual([comp.id]);
   });
 
+  it('skips the hand-edit check for a manifest componentName that attempts path traversal', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+
+    await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
+    // '../../evil' from exportDir/components resolves to tempRoot/evil - i.e.
+    // outside exportDir entirely. Planting real files there proves the guard
+    // (not a missing-file ENOENT) is what keeps this asset out of the result:
+    // if the traversal guard were absent, these files exist and would be read.
+    await fsPromises.writeFile(path.join(tempRoot, 'evil.tsx'), 'export function Evil() { return <div />; }');
+    await fsPromises.writeFile(path.join(tempRoot, 'evil.module.css'), '.root {}');
+
+    await writeManifest(exportDir, {
+      styleId: style.id, exportedAt: Date.now(),
+      pages: [{ id: page.id, name: 'Home', slug: '', componentAssetIds: [comp.id], pageFileHash: 'irrelevant' }],
+      components: [{ assetId: comp.id, componentName: '../../evil', contentHash: 'irrelevant' }],
+    });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'page.tsx'), pageFileContent(page.id, ''));
+
+    const result = await computeSyncDiff(style.id, exportDir);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.diff.handEditedComponentAssetIds).not.toContain(comp.id);
+  });
+
   it('keeps reporting an accepted hand-edit baseline until the asset is marked reconciled (edited_externally)', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
