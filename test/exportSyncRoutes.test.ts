@@ -72,6 +72,17 @@ describe('POST /api/styles/[id]/export-sync/preview', () => {
     expect(body.success).toBe(true);
     expect(body.data.newPages).toHaveLength(1);
   });
+
+  it('returns 409 when an export is currently in progress for this subdir', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(Date.now()));
+
+    const res = await previewPost(req({ subdir: 'my-site' }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
+    expect(res.status).toBe(409);
+  });
 });
 
 describe('POST /api/styles/[id]/export-sync/apply', () => {
@@ -161,5 +172,25 @@ describe('POST /api/styles/[id]/export-sync/apply', () => {
 
     const pages = await pageService.getActivePagesForStyle(style.id);
     expect(pages.map(p => p.name)).not.toContain('Fake');
+  });
+
+  it('returns 409 when an export is currently in progress for this subdir, without touching the DB', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const exportDir = path.join(tempRoot, 'storage', 'exports', 'my-site');
+    await fsPromises.mkdir(path.join(exportDir, 'app'), { recursive: true });
+    await writeManifest(exportDir, { styleId: style.id, exportedAt: Date.now(), pages: [], components: [] });
+    await fsPromises.mkdir(path.join(exportDir, 'app', 'about'), { recursive: true });
+    await fsPromises.writeFile(path.join(exportDir, 'app', 'about', 'page.tsx'), 'export default function Page() { return <><p>hi</p></>; }');
+
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(Date.now()));
+
+    const res = await applyPost(req({ subdir: 'my-site' }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
+    expect(res.status).toBe(409);
+
+    const pages = await pageService.getActivePagesForStyle(style.id);
+    expect(pages).toHaveLength(0);
   });
 });

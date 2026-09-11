@@ -31,7 +31,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
 
   const [exportSubdir, setExportSubdir] = useState('my-site');
   const [exporting, setExporting] = useState(false);
-  const [exportResult, setExportResult] = useState<{ pagesExported: number; componentsExported: number; targetDir: string; skippedComponents: string[] } | null>(null);
+  const [exportResult, setExportResult] = useState<{ pagesExported: number; componentsExported: number; targetDir: string; skippedComponents: string[]; skippedPages: string[] } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   const [syncSubdir, setSyncSubdir] = useState('my-site');
@@ -475,6 +475,10 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
             {exportResult.skippedComponents.length > 0 && (
               <> {exportResult.skippedComponents.length} component{exportResult.skippedComponents.length === 1 ? '' : 's'} left untouched on disk
               because {exportResult.skippedComponents.length === 1 ? 'it has' : 'they have'} been hand-edited: <code>{exportResult.skippedComponents.join(', ')}</code>.</>
+            )}
+            {exportResult.skippedPages.length > 0 && (
+              <> {exportResult.skippedPages.length} page{exportResult.skippedPages.length === 1 ? '' : 's'} left untouched on disk
+              because {exportResult.skippedPages.length === 1 ? 'it has' : 'they have'} been hand-edited.</>
             )}
           </p>
         )}

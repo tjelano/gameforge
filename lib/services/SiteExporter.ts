@@ -163,11 +163,29 @@ async function acquireExportLock(exportsRootDir: string, subdir: string): Promis
   };
 }
 
+/**
+ * Read-only check for callers that don't want to hold the lock themselves
+ * (the sync preview/apply routes) - they just need to avoid racing a
+ * re-export that's actively in flight. Mirrors acquireExportLock's own
+ * staleness logic exactly (including the mtime fallback for a missing
+ * heartbeat file), so it never reports a truly-dead lock as "in progress."
+ */
+export async function isExportInProgress(subdir: string): Promise<boolean> {
+  const lockDir = path.join(getProjectRoot(), 'storage', 'exports', '.locks', `${subdir}.lock`);
+  try {
+    await fsPromises.access(lockDir);
+  } catch {
+    return false;
+  }
+  return !(await isLockStale(lockDir));
+}
+
 export interface SiteExportResult {
   pagesExported: number;
   componentsExported: number;
   targetDir: string;
   skippedComponents: string[];
+  skippedPages: string[];
 }
 
 export function slugify(name: string): string {
@@ -306,6 +324,36 @@ class SiteExporterImpl {
       // byte-matches hand-written code. See componentName -> onDiskHash below.
       const manifestHashOverrides = new Map<string, string>();
 
+      const skippedPages: string[] = [];
+
+      // Same hash-check-and-skip pattern as the component loop above, applied
+      // to page files: only overwrite a page.tsx if its on-disk content still
+      // matches what GameForge itself last wrote there (per the PRIOR
+      // manifest) - anything else means a human touched it since, and it
+      // must not be silently clobbered. Deliberately simpler than the
+      // component version (no handEdited/accepted-baseline concept): pages
+      // have no explicit "accept this edit" action, so an unreverted
+      // hand-edit just stays flagged on every future export - safe, just
+      // not self-clearing.
+      const writePageIfUnedited = async (pageId: string, pageFile: string, pageFilePath: string): Promise<void> => {
+        const priorEntry = existingManifest?.pages.find(p => p.id === pageId);
+        if (priorEntry) {
+          let onDiskHash: string | null = null;
+          try {
+            onDiskHash = hashContent(await fsPromises.readFile(pageFilePath, 'utf-8'));
+          } catch (e: any) {
+            if (e?.code !== 'ENOENT') {
+              console.error(`Failed to read on-disk page ${pageId} for hand-edit check:`, e);
+            }
+          }
+          if (onDiskHash !== null && onDiskHash !== priorEntry.pageFileHash) {
+            skippedPages.push(pageId);
+            return;
+          }
+        }
+        await fsPromises.writeFile(pageFilePath, pageFile);
+      };
+
       try {
         await fsPromises.mkdir(path.join(targetDir, 'app'), { recursive: true });
         await fsPromises.mkdir(path.join(targetDir, 'components'), { recursive: true });
@@ -384,7 +432,7 @@ class SiteExporterImpl {
         await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
 
         const homePageFile = this.buildPageFile(pages[0], pageComponentNames[0], components);
-        await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), homePageFile);
+        await writePageIfUnedited(pages[0].id, homePageFile, path.join(targetDir, 'app', 'page.tsx'));
         manifestPages.push({
           id: pages[0].id,
           name: pages[0].name,
@@ -397,7 +445,7 @@ class SiteExporterImpl {
           const pageDir = path.join(targetDir, 'app', slugs[i]);
           await fsPromises.mkdir(pageDir, { recursive: true });
           const pageFile = this.buildPageFile(pages[i], pageComponentNames[i], components);
-          await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), pageFile);
+          await writePageIfUnedited(pages[i].id, pageFile, path.join(pageDir, 'page.tsx'));
           manifestPages.push({
             id: pages[i].id,
             name: pages[i].name,
@@ -431,7 +479,7 @@ class SiteExporterImpl {
         throw e;
       }
 
-      return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents };
+      return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents, skippedPages };
     } finally {
       await lock.release();
     }

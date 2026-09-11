@@ -390,6 +390,31 @@ describe('siteExporter.exportSite', () => {
 
     const second = await siteExporter.exportSite(style.id, 'my-site');
     expect('error' in second).toBe(false);
+    if ('error' in second) throw new Error(`Unexpected export error: ${second.error}`);
+    // Regression check: an UNedited page.tsx must still be regenerated
+    // normally on re-export - no false-positive skip.
+    expect(second.skippedPages).toEqual([]);
+  });
+
+  it('skips overwriting a page.tsx that was hand-edited since the last export, and reports it', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const first = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
+
+    const pageFilePath = path.join(first.targetDir, 'app', 'page.tsx');
+    const original = await fsPromises.readFile(pageFilePath, 'utf-8');
+    await fsPromises.writeFile(pageFilePath, original + '\n{/* hand-edited */}\n');
+
+    const second = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in second) throw new Error(`Unexpected export error: ${second.error}`);
+    expect(second.skippedPages).toEqual([page.id]);
+
+    const afterReExport = await fsPromises.readFile(pageFilePath, 'utf-8');
+    expect(afterReExport).toContain('hand-edited');
   });
 
   it('still refuses ALREADY_EXISTS when the existing directory has no GameForge manifest', async () => {

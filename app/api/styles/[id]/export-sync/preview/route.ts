@@ -4,6 +4,7 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getCurrentUser } from '@/lib/utils/session';
 import { computeSyncDiff } from '@/lib/services/ExportSync';
+import { isExportInProgress } from '@/lib/services/SiteExporter';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const input = PreviewSchema.parse(await req.json());
     if (!SUBDIR_PATTERN.test(input.subdir)) {
       return NextResponse.json({ success: false, error: 'Invalid subdir' }, { status: 400 });
+    }
+    if (await isExportInProgress(input.subdir)) {
+      return NextResponse.json({ success: false, error: 'An export is currently in progress for this folder. Try again in a moment.' }, { status: 409 });
     }
 
     const exportDir = path.join(getProjectRoot(), 'storage', 'exports', input.subdir);

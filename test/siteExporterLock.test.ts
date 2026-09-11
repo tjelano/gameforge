@@ -7,7 +7,7 @@ import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
-import { siteExporter } from '@/lib/services/SiteExporter';
+import { siteExporter, isExportInProgress } from '@/lib/services/SiteExporter';
 
 let tempRoot: string;
 
@@ -159,5 +159,32 @@ describe('siteExporter.exportSite concurrency', () => {
     const manifest = JSON.parse(manifestRaw);
     expect(manifest.styleId).toBe(style.id);
     expect(manifest.pages).toHaveLength(1);
+  });
+});
+
+describe('isExportInProgress', () => {
+  it('returns false when no lock directory is present', async () => {
+    await setUpStyleWithOnePage('my-site');
+    expect(await isExportInProgress('my-site')).toBe(false);
+  });
+
+  it('returns true while a live (fresh-heartbeat) lock is held', async () => {
+    await setUpStyleWithOnePage('my-site');
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    const recentTimestamp = Date.now() - 30 * 1000; // 30 seconds ago - well within the 2-minute window
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(recentTimestamp));
+
+    expect(await isExportInProgress('my-site')).toBe(true);
+  });
+
+  it('returns false once that lock\'s heartbeat is old enough to be stale', async () => {
+    await setUpStyleWithOnePage('my-site');
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    const staleTimestamp = Date.now() - 10 * 60 * 1000; // 10 minutes ago - well past the 2-minute staleness window
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(staleTimestamp));
+
+    expect(await isExportInProgress('my-site')).toBe(false);
   });
 });
