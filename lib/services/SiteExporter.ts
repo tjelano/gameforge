@@ -174,7 +174,10 @@ export async function isExportInProgress(subdir: string): Promise<boolean> {
   const lockDir = path.join(getProjectRoot(), 'storage', 'exports', '.locks', `${subdir}.lock`);
   try {
     await fsPromises.access(lockDir);
-  } catch {
+  } catch (e: any) {
+    if (e?.code !== 'ENOENT') {
+      console.error(`Failed to check export lock status for ${lockDir}:`, e);
+    }
     return false;
   }
   return !(await isLockStale(lockDir));
