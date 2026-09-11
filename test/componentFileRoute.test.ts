@@ -48,6 +48,26 @@ async function seedPromotedTheme(css: string): Promise<string> {
   return style.id;
 }
 
+// <img> is deliberately excluded from componentSanitize's ALLOWED_TAGS, so
+// this is the reliable "sanitizer would strip this" payload — and it's the
+// exact case reverse-sync exists for: a user pasting back hand-edited markup.
+const IMG_DOC = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+  + '<body><div class="hero"><img src="/hero.png" alt="Hero"></div></body></html>';
+
+async function seedComponentAsset(filename: string, document: string, editedExternally: boolean): Promise<void> {
+  const style = await styleService.create({ name: `style-${randomUUID()}`, createdBy: 'user-1', parameters: '{}' });
+  await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', filename), document);
+  const asset = await assetService.create({
+    styleId: style.id,
+    createdBy: 'user-1',
+    assetType: 'button',
+    prompt: 'test component',
+    imagePath: filename,
+    outputKind: 'component',
+  });
+  if (editedExternally) await assetService.update(asset.id, { editedExternally: true });
+}
+
 describe('GET /api/components/[filename]', () => {
   it('serves a stored component file as text/html with a restrictive CSP header', async () => {
     // A real <style>/<body> document, same shape combineComponentHtml
@@ -175,5 +195,41 @@ describe('GET /api/components/[filename]', () => {
     const body = await res.text();
     expect(body).not.toContain('evil.example');
     expect(body).not.toContain(':root');
+  });
+
+  it('serves hand-edited content intact when the matching asset is marked edited_externally', async () => {
+    // The bug this whole task exists for: the user checks "trust this as my
+    // own edited code", the PATCH writes it unsanitized, and the very next
+    // reload used to strip it right back out.
+    await seedComponentAsset('trusted.html', IMG_DOC, true);
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'trusted.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<img');
+    expect(body).toContain('/hero.png');
+  });
+
+  it('still strips the same content when the matching asset is not marked edited_externally', async () => {
+    await seedComponentAsset('untrusted.html', IMG_DOC, false);
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'untrusted.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('<img');
+    expect(body).not.toContain('/hero.png');
+    // Proves the <img> was SANITIZED OUT, not that the whole component was
+    // dropped — the surrounding allowed markup is still served.
+    expect(body).toContain('class="hero"');
+  });
+
+  it('still strips the same content when no asset row matches the filename at all', async () => {
+    // A file on disk with no traceable asset row (git-imported, older code
+    // version, bad merge) gets no trust benefit — the pre-existing
+    // defense-in-depth guarantee is unchanged for it.
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'orphan.html'), IMG_DOC);
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'orphan.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('<img');
+    expect(body).not.toContain('/hero.png');
   });
 });

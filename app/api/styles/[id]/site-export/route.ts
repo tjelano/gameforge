@@ -9,10 +9,17 @@ const SiteExportSchema = z.object({
   subdir: z.string().regex(/^[a-z0-9-]+$/, 'subdir must contain only lowercase letters, numbers, and hyphens'),
 });
 
-const ERROR_MESSAGES: Record<string, string> = {
+// Mirrors the error-kind union in SiteExporter.exportSite()'s own return
+// type - keeping this as a named Record key type (not Record<string, ...>)
+// means a future error kind added there but forgotten here fails `tsc`
+// instead of silently resolving to `undefined` at runtime.
+type ExportSiteErrorKind = 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' | 'EXPORT_IN_PROGRESS';
+
+const ERROR_MESSAGES: Record<ExportSiteErrorKind, string> = {
   NOTHING_TO_EXPORT: 'This Style Bible has no pages to export.',
   ALREADY_EXISTS: 'That folder name is already used — pick another.',
   INVALID_SUBDIR: 'subdir must contain only lowercase letters, numbers, and hyphens.',
+  EXPORT_IN_PROGRESS: 'Another export to this folder is already running — try again in a moment.',
 };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

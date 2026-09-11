@@ -26,6 +26,10 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [componentTokens, setComponentTokens] = useState<{ html: string; css: string } | null>(null);
+  const [trustAsEdited, setTrustAsEdited] = useState(false);
+  const [savingComponent, setSavingComponent] = useState(false);
+  const [componentSaveError, setComponentSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     // Same ignore-flag shape as useStyles.ts / the split page's mount effect:
@@ -66,6 +70,20 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     };
   }, [id, asset?.output_kind]);
 
+  useEffect(() => {
+    if (asset?.output_kind !== 'component' || !asset.image_path) return;
+    let ignore = false;
+    (async () => {
+      try {
+        const document = await (await fetch(`/api/components/${asset.image_path}`)).text();
+        if (!ignore) setComponentTokens(parseComponentHtml(document));
+      } catch {
+        if (!ignore) setComponentSaveError('Could not load this component\'s current markup.');
+      }
+    })();
+    return () => { ignore = true; };
+  }, [asset?.output_kind, asset?.image_path]);
+
   async function handleSave() {
     setSaving(true);
     setError(null);
@@ -88,6 +106,31 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
       setError('Could not reach the server.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveComponent() {
+    if (!componentTokens || savingComponent) return;
+    setSavingComponent(true);
+    setComponentSaveError(null);
+    try {
+      const res = await fetch(`/api/assets/${id}/component`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...componentTokens, trustAsEdited }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setComponentSaveError(body.error ?? 'Could not save.');
+        return;
+      }
+      setComponentTokens(body.data);
+      const refreshed = await (await fetch(`/api/assets/${id}`)).json();
+      if (refreshed.success) setAsset(refreshed.data);
+    } catch {
+      setComponentSaveError('Could not reach the server.');
+    } finally {
+      setSavingComponent(false);
     }
   }
 
@@ -295,6 +338,40 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           <p style={{ marginBottom: 24, fontSize: 13, color: 'var(--ink-dim)', minHeight: 18 }}>{copyStatus}</p>
         </>
+      )}
+
+      {asset.output_kind === 'component' && asset.image_path && (componentTokens || componentSaveError) && (
+        <div className="card" style={{ maxWidth: 560, marginTop: 16 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Edit markup</h2>
+          {!componentTokens && componentSaveError && (
+            <p style={{ color: 'var(--reject)', fontSize: 13 }}>{componentSaveError}</p>
+          )}
+          {componentTokens && (
+            <>
+              {asset.edited_externally === 1 && (
+                <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 8 }}>
+                  This component currently holds hand-edited code, imported outside GameForge&apos;s usual validation.
+                </p>
+              )}
+              <div className="field">
+                <label htmlFor="component-html">HTML</label>
+                <textarea id="component-html" value={componentTokens.html} onChange={e => setComponentTokens({ ...componentTokens, html: e.target.value })} rows={8} />
+              </div>
+              <div className="field">
+                <label htmlFor="component-css">CSS</label>
+                <textarea id="component-css" value={componentTokens.css} onChange={e => setComponentTokens({ ...componentTokens, css: e.target.value })} rows={8} />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginBottom: 12 }}>
+                <input type="checkbox" checked={trustAsEdited} onChange={e => setTrustAsEdited(e.target.checked)} />
+                Trust this as my own edited code (skips validation — use this when pasting in markup you hand-edited outside GameForge)
+              </label>
+              {componentSaveError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{componentSaveError}</p>}
+              <button className="btn btn-primary" onClick={handleSaveComponent} disabled={savingComponent}>
+                {savingComponent ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       {asset.output_kind !== 'theme' && asset.output_kind !== 'component' && asset.image_path && (
