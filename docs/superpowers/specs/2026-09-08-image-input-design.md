@@ -78,11 +78,14 @@ etc.) in transactional rollback; that machinery is reserved for genuinely multi-
 `PresetService.applyPreset()`.
 
 **Where the image gets shown back to the user**: Approach B was chosen specifically so a user can
-see what reference they used and retry without re-uploading — that means it needs a new
-authenticated serving route, mirroring the existing sibling pattern
+see what reference they used and retry without re-uploading — that means it needs a new serving
+route, `app/api/references/[filename]/route.ts`, mirroring the existing sibling pattern
 (`app/api/images/[filename]/route.ts`, `app/api/themes/[filename]/route.ts`,
-`app/api/components/[filename]/route.ts`) rather than being served as a static file with no auth
-check.
+`app/api/components/[filename]/route.ts`). **Correction after checking those files directly**:
+none of the three actually have an auth check today — they only sanitize the filename against
+path traversal (reject any `/`, `\`, or `..`). The new route matches that exact real pattern
+(filename-sanitized, no separate auth check), not a stricter policy invented for this one route
+that would be inconsistent with every sibling.
 
 ### Generator changes
 - **`ClaudeApiThemeGenerator` / `ClaudeApiComponentGenerator`**: when a reference image is
