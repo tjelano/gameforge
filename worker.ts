@@ -91,6 +91,10 @@ async function loadSpriteBasedOnImage(basedOnAssetId: unknown, jobId: string): P
   }
 }
 
+function markJobFailed(db: ReturnType<typeof DatabaseConnection.getInstance>, jobId: string, errorMessage: string): void {
+  db.prepare(`UPDATE jobs SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`).run(errorMessage, Date.now(), jobId);
+}
+
 export async function processJob(job: any): Promise<void> {
   const db = DatabaseConnection.getInstance();
 
@@ -101,7 +105,7 @@ export async function processJob(job: any): Promise<void> {
     // Malformed options JSON is a hard failure, not something to
     // silently ignore or default around — it means the row was
     // written by something that skipped the Zod contract.
-    db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+    markJobFailed(db, job.id, e instanceof Error ? e.message : String(e));
     console.error(`❌ Job ${job.id} has malformed options JSON:`, e);
     return;
   }
@@ -116,7 +120,7 @@ export async function processJob(job: any): Promise<void> {
   if (isUiSheet) {
     const parsed = UiSheetOptionsSchema.safeParse(options);
     if (!parsed.success) {
-      db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+      markJobFailed(db, job.id, parsed.error.message);
       console.error(`❌ Job ${job.id} has invalid UI sheet options:`, parsed.error.message);
       return;
     }
@@ -166,7 +170,7 @@ export async function processJob(job: any): Promise<void> {
       .run(result.path, Date.now(), job.id);
     console.log(`✅ Job ${job.id} complete -> ${result.path}`);
   } catch (error: any) {
-    db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+    markJobFailed(db, job.id, error instanceof Error ? error.message : String(error));
     console.error(`❌ Job ${job.id} failed:`, error.message);
   }
 }

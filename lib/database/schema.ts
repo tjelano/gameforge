@@ -58,6 +58,7 @@ export const JobSchema = z.object({
   prompt: z.string().min(1),
   status: JobStatusSchema,
   result_path: z.string().nullable(),
+  error_message: z.string().nullable(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
   options: z.string(), // JSON-serialized options blob
