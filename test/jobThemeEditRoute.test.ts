@@ -2,17 +2,19 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
-import { sessionService } from '@/lib/services/SessionService';
 import { tokensToCss, parseThemeCss, type ThemeTokens } from '@/lib/services/ThemeGenerator';
 import { PATCH } from '@/app/api/jobs/[id]/theme/route';
+import { seedSession } from '@/test/helpers/testSession';
 
 let tempRoot: string;
 let cookieHeader: string;
+let userId: string;
 
 const ORIGINAL: ThemeTokens = {
   colorBackground: '#1c1a17', colorForeground: '#ede7dc', colorAccent: '#e8a33d', colorBorder: '#3c352a',
@@ -21,10 +23,10 @@ const ORIGINAL: ThemeTokens = {
 const EDITED: ThemeTokens = { ...ORIGINAL, colorAccent: '#2c7be5', spaceUnit: '10px' };
 
 async function makeCompleteThemeJob(): Promise<{ jobId: string; filename: string }> {
-  const style = await styleService.create({ name: 'x', createdBy: '11111111-1111-1111-1111-111111111111', parameters: '{}' });
+  const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
   const filename = `job-${crypto.randomUUID()}.css`;
   await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', filename), tokensToCss(ORIGINAL));
-  const job = await jobService.create({ styleId: style.id, createdBy: '11111111-1111-1111-1111-111111111111', assetType: 'theme', prompt: 'x', outputKind: 'theme' });
+  const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'theme', prompt: 'x', outputKind: 'theme' });
   DatabaseConnection.getInstance()
     .prepare("UPDATE jobs SET status = 'complete', result_path = ? WHERE id = ?")
     .run(filename, job.id);
@@ -43,11 +45,9 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
-  DatabaseConnection.getInstance()
-    .prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
-    .run('11111111-1111-1111-1111-111111111111', 'Test User', 0, Date.now());
-  const { token } = await sessionService.create('11111111-1111-1111-1111-111111111111');
-  cookieHeader = `session=${token}`;
+  const { userId: newUserId, cookieHeader: newCookieHeader } = await seedSession();
+  userId = newUserId;
+  cookieHeader = newCookieHeader;
 });
 
 afterEach(async () => {
@@ -119,8 +119,8 @@ describe('PATCH /api/jobs/[id]/theme', () => {
   });
 
   it('rejects with 409 when the job is not in complete status', async () => {
-    const style = await styleService.create({ name: 'x', createdBy: '11111111-1111-1111-1111-111111111111', parameters: '{}' });
-    const job = await jobService.create({ styleId: style.id, createdBy: '11111111-1111-1111-1111-111111111111', assetType: 'theme', prompt: 'x', outputKind: 'theme' });
+    const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
+    const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'theme', prompt: 'x', outputKind: 'theme' });
     // Still 'pending' — never marked complete.
     const res = await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: job.id }) });
     expect(res.status).toBe(409);

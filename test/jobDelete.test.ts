@@ -5,11 +5,12 @@ import path from 'path';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
-import { sessionService } from '@/lib/services/SessionService';
 import { DELETE as deleteJob } from '@/app/api/jobs/[id]/route';
+import { seedSession } from '@/test/helpers/testSession';
 
 let tempRoot: string;
 let cookieHeader: string;
+let userId: string;
 const STYLE_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const SHEET_JOB_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const CHILD_ASSET_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
@@ -37,23 +38,22 @@ beforeEach(async () => {
 
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
-  const db = DatabaseConnection.getInstance();
+  const { userId: newUserId, cookieHeader: newCookieHeader } = await seedSession();
+  userId = newUserId;
+  cookieHeader = newCookieHeader;
 
-  db.prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
-    .run('11111111-1111-1111-1111-111111111111', 'Test User', 0, Date.now());
-  const { token } = await sessionService.create('11111111-1111-1111-1111-111111111111');
-  cookieHeader = `session=${token}`;
+  const db = DatabaseConnection.getInstance();
 
   db.prepare(
     `INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
-     VALUES (?, 'test style', '11111111-1111-1111-1111-111111111111', '{}', 0, 1000, 1000)`
-  ).run(STYLE_ID);
+     VALUES (?, 'test style', ?, '{}', 0, 1000, 1000)`
+  ).run(STYLE_ID, userId);
 
   // The sheet job — completed, with a composite image on disk.
   db.prepare(
     `INSERT INTO jobs (id, style_id, created_by, asset_type, prompt, status, result_path, created_at, updated_at, options)
-     VALUES (?, ?, '11111111-1111-1111-1111-111111111111', 'ui_sheet', 'a sheet', 'complete', ?, 1000, 1000, '{"pieces":[{}]}')`
-  ).run(SHEET_JOB_ID, STYLE_ID, COMPOSITE_FILENAME);
+     VALUES (?, ?, ?, 'ui_sheet', 'a sheet', 'complete', ?, 1000, 1000, '{"pieces":[{}]}')`
+  ).run(SHEET_JOB_ID, STYLE_ID, userId, COMPOSITE_FILENAME);
 
   const compositePath = path.join(tempRoot, 'storage', 'images', COMPOSITE_FILENAME);
   await fsPromises.writeFile(compositePath, 'fake-png-bytes');
@@ -62,8 +62,8 @@ beforeEach(async () => {
   // NOT the composite's filename, but source_job_id points back at the job.
   db.prepare(
     `INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, source_job_id)
-     VALUES (?, ?, '11111111-1111-1111-1111-111111111111', 'button', 'Inventory', 'split-inventory.png', 1000, 0, ?)`
-  ).run(CHILD_ASSET_ID, STYLE_ID, SHEET_JOB_ID);
+     VALUES (?, ?, ?, 'button', 'Inventory', 'split-inventory.png', 1000, 0, ?)`
+  ).run(CHILD_ASSET_ID, STYLE_ID, userId, SHEET_JOB_ID);
 });
 
 afterEach(async () => {

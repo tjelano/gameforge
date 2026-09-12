@@ -8,13 +8,14 @@ import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
-import { sessionService } from '@/lib/services/SessionService';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
 import { PATCH } from '@/app/api/jobs/[id]/component/route';
 import { POST } from '@/app/api/jobs/[id]/component/reset/route';
+import { seedSession } from '@/test/helpers/testSession';
 
 let tempRoot: string;
 let cookieHeader: string;
+let userId: string;
 
 const ORIGINAL: ComponentTokens = {
   html: '<button class="btn-primary">Buy now</button>',
@@ -23,10 +24,10 @@ const ORIGINAL: ComponentTokens = {
 const EDITED: ComponentTokens = { ...ORIGINAL, html: '<button class="btn-primary">Buy today</button>' };
 
 async function makeCompleteComponentJob(): Promise<{ jobId: string; filename: string }> {
-  const style = await styleService.create({ name: 'x', createdBy: '11111111-1111-1111-1111-111111111111', parameters: '{}' });
+  const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
   const filename = `component-${crypto.randomUUID()}.html`;
   await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', filename), combineComponentHtml(ORIGINAL));
-  const job = await jobService.create({ styleId: style.id, createdBy: '11111111-1111-1111-1111-111111111111', assetType: 'component', prompt: 'x', outputKind: 'component' });
+  const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'component', prompt: 'x', outputKind: 'component' });
   DatabaseConnection.getInstance()
     .prepare("UPDATE jobs SET status = 'complete', result_path = ? WHERE id = ?")
     .run(filename, job.id);
@@ -45,11 +46,9 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
-  DatabaseConnection.getInstance()
-    .prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
-    .run('11111111-1111-1111-1111-111111111111', 'Test User', 0, Date.now());
-  const { token } = await sessionService.create('11111111-1111-1111-1111-111111111111');
-  cookieHeader = `session=${token}`;
+  const { userId: newUserId, cookieHeader: newCookieHeader } = await seedSession();
+  userId = newUserId;
+  cookieHeader = newCookieHeader;
 });
 
 afterEach(async () => {
