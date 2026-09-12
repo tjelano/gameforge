@@ -86,7 +86,7 @@ export default function UiSheetsPage() {
 
       {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
-      {!stylesLoading && styles.length === 0 ? (
+      {!stylesLoading && !stylesError && styles.length === 0 ? (
         <div className="empty-state">
           No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page first.
         </div>

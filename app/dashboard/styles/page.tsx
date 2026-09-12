@@ -115,7 +115,7 @@ export default function StylesPage() {
 
       {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
-      {!loading && styles.length === 0 ? (
+      {!loading && !stylesError && styles.length === 0 ? (
         <div className="empty-state">No Style Bibles yet. Create the first one above.</div>
       ) : (
         <div className="grid">
