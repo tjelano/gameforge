@@ -1,4 +1,3 @@
-// test/godotExporterSkipsThemes.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
@@ -8,12 +7,11 @@ import { DatabaseConnection } from '@/lib/database';
 import { godotExporter } from '@/lib/services/GodotExporter';
 
 let tempRoot: string;
-const STYLE_ID = '88888888-8888-8888-8888-888888888888';
-const IMAGE_ASSET_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const THEME_ASSET_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+const STYLE_A = '11111111-1111-1111-1111-111111111111';
+const STYLE_B = '22222222-2222-2222-2222-222222222222';
 
 beforeEach(async () => {
-  tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-godottheme-'));
+  tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-godotscope-'));
   await fsPromises.writeFile(path.join(tempRoot, 'package.json'), JSON.stringify({ name: 'gameforge-test' }));
 
   const realMigrationsDir = path.resolve(__dirname, '..', 'lib', 'database', 'migrations');
@@ -24,23 +22,28 @@ beforeEach(async () => {
   }
   const imagesDir = path.join(tempRoot, 'storage', 'images');
   await fsPromises.mkdir(imagesDir, { recursive: true });
-  await fsPromises.writeFile(path.join(imagesDir, 'goblin.png'), 'fake-png');
+  await fsPromises.writeFile(path.join(imagesDir, 'goblin-a.png'), 'fake-png-a');
+  await fsPromises.writeFile(path.join(imagesDir, 'goblin-b.png'), 'fake-png-b');
 
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
   const db = DatabaseConnection.getInstance();
   db.prepare(
     `INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
-     VALUES (?, 'style', 'user-1', '{}', 0, 1000, 1000)`
-  ).run(STYLE_ID);
+     VALUES (?, 'style A', 'user-1', '{}', 0, 1000, 1000)`
+  ).run(STYLE_A);
+  db.prepare(
+    `INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
+     VALUES (?, 'style B', 'user-1', '{}', 0, 1000, 1000)`
+  ).run(STYLE_B);
   db.prepare(
     `INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, output_kind)
-     VALUES (?, ?, 'user-1', 'sprite', 'x', 'goblin.png', 1000, 0, 'image')`
-  ).run(IMAGE_ASSET_ID, STYLE_ID);
+     VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', ?, 'user-1', 'sprite', 'x', 'goblin-a.png', 1000, 0, 'image')`
+  ).run(STYLE_A);
   db.prepare(
     `INSERT INTO assets (id, style_id, created_by, asset_type, prompt, image_path, created_at, is_deleted, output_kind)
-     VALUES (?, ?, 'user-1', 'theme', 'x', 'theme-1.css', 1000, 0, 'theme')`
-  ).run(THEME_ASSET_ID, STYLE_ID);
+     VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', ?, 'user-1', 'sprite', 'x', 'goblin-b.png', 1000, 0, 'image')`
+  ).run(STYLE_B);
 });
 
 afterEach(async () => {
@@ -49,14 +52,20 @@ afterEach(async () => {
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
-describe('GodotExporter.exportToGodot() skips theme assets', () => {
-  it('exports only the image asset', async () => {
-    const result = await godotExporter.exportToGodot(STYLE_ID, 'godot-test');
+describe('GodotExporter.exportToGodot() scopes to one style and guards a subdir collision', () => {
+  it("exports only the requested style's image, not a sibling style's", async () => {
+    const result = await godotExporter.exportToGodot(STYLE_A, 'godot-scope-test');
     if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);
     expect(result.exported).toBe(1);
-    expect(result.skipped).toBe(0);
-
     const exportedFiles = await fsPromises.readdir(result.targetDir);
-    expect(exportedFiles).toEqual(['goblin.png']);
+    expect(exportedFiles).toEqual(['goblin-a.png']);
+  });
+
+  it('returns ALREADY_EXISTS on a second export to the same subdir', async () => {
+    const first = await godotExporter.exportToGodot(STYLE_A, 'godot-collision-test');
+    expect('error' in first).toBe(false);
+
+    const second = await godotExporter.exportToGodot(STYLE_B, 'godot-collision-test');
+    expect(second).toEqual({ error: 'ALREADY_EXISTS' });
   });
 });
