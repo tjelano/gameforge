@@ -248,7 +248,9 @@ export function DriveBrowser({
           <button className="btn" onClick={() => setShowNewFolderForm(!showNewFolderForm)}>
             New folder
           </button>
+          <label htmlFor="drive-search" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>Search this folder</label>
           <input
+            id="drive-search"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search this folder…"
@@ -259,7 +261,8 @@ export function DriveBrowser({
 
       {showNewFolderForm && (
         <form onSubmit={handleCreateFolder} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Folder name" autoFocus />
+          <label htmlFor="drive-new-folder-name" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>New folder name</label>
+          <input id="drive-new-folder-name" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Folder name" autoFocus />
           <button className="btn btn-primary" type="submit" disabled={creatingFolder || !newFolderName.trim()}>
             {creatingFolder ? 'Creating…' : 'Create'}
           </button>
