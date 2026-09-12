@@ -8,11 +8,13 @@ import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
+import { sessionService } from '@/lib/services/SessionService';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
 import { PATCH } from '@/app/api/jobs/[id]/component/route';
 import { POST } from '@/app/api/jobs/[id]/component/reset/route';
 
 let tempRoot: string;
+let cookieHeader: string;
 
 const ORIGINAL: ComponentTokens = {
   html: '<button class="btn-primary">Buy now</button>',
@@ -21,10 +23,10 @@ const ORIGINAL: ComponentTokens = {
 const EDITED: ComponentTokens = { ...ORIGINAL, html: '<button class="btn-primary">Buy today</button>' };
 
 async function makeCompleteComponentJob(): Promise<{ jobId: string; filename: string }> {
-  const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+  const style = await styleService.create({ name: 'x', createdBy: '11111111-1111-1111-1111-111111111111', parameters: '{}' });
   const filename = `component-${crypto.randomUUID()}.html`;
   await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', filename), combineComponentHtml(ORIGINAL));
-  const job = await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component' });
+  const job = await jobService.create({ styleId: style.id, createdBy: '11111111-1111-1111-1111-111111111111', assetType: 'component', prompt: 'x', outputKind: 'component' });
   DatabaseConnection.getInstance()
     .prepare("UPDATE jobs SET status = 'complete', result_path = ? WHERE id = ?")
     .run(filename, job.id);
@@ -43,6 +45,11 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  DatabaseConnection.getInstance()
+    .prepare('INSERT INTO users (id, name, is_admin, created_at) VALUES (?, ?, ?, ?)')
+    .run('11111111-1111-1111-1111-111111111111', 'Test User', 0, Date.now());
+  const { token } = await sessionService.create('11111111-1111-1111-1111-111111111111');
+  cookieHeader = `session=${token}`;
 });
 
 afterEach(async () => {
@@ -54,9 +61,13 @@ afterEach(async () => {
 function patchRequest(tokens: ComponentTokens): NextRequest {
   return new NextRequest('http://localhost/x', {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
     body: JSON.stringify(tokens),
   });
+}
+
+function resetRequest(): NextRequest {
+  return new NextRequest('http://localhost/x', { method: 'POST', headers: { Cookie: cookieHeader } });
 }
 
 describe('POST /api/jobs/[id]/component/reset', () => {
@@ -64,7 +75,7 @@ describe('POST /api/jobs/[id]/component/reset', () => {
     const { jobId, filename } = await makeCompleteComponentJob();
     await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
 
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.data).toEqual(ORIGINAL);
@@ -75,7 +86,7 @@ describe('POST /api/jobs/[id]/component/reset', () => {
 
   it('returns 404 when the job has never been edited', async () => {
     const { jobId } = await makeCompleteComponentJob();
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     expect(res.status).toBe(404);
   });
 
@@ -83,12 +94,12 @@ describe('POST /api/jobs/[id]/component/reset', () => {
     const { jobId } = await makeCompleteComponentJob();
     await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
     DatabaseConnection.getInstance().prepare("UPDATE jobs SET status = 'promoted' WHERE id = ?").run(jobId);
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     expect(res.status).toBe(409);
   });
 
   it('returns 404 for a nonexistent job', async () => {
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: '00000000-0000-0000-0000-000000000000' }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: '00000000-0000-0000-0000-000000000000' }) });
     expect(res.status).toBe(404);
   });
 
@@ -105,7 +116,7 @@ describe('POST /api/jobs/[id]/component/reset', () => {
 
     const before = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
 
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     expect(res.status).toBe(400);
 
     const after = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
@@ -122,7 +133,7 @@ describe('POST /api/jobs/[id]/component/reset', () => {
 
     const before = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
 
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     const body = await res.json();
     expect(res.status).toBe(400);
     expect(body.success).toBe(false);
