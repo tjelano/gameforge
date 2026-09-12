@@ -56,7 +56,11 @@ class StyleServiceImpl {
     return (await this.getById(id))!;
   }
 
-  async softDelete(id: string): Promise<void> {
+  /** Only the creator, or an admin, may delete a style. Mirrors update() above. */
+  async softDelete(id: string, requestingUserId: string, isAdmin: boolean = false): Promise<void | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
+    const existing = await this.getById(id);
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
     db.prepare('UPDATE styles SET is_deleted = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
   }

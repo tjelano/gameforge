@@ -76,4 +76,16 @@ describe('style ownership: admin bypass', () => {
     const res = await DELETE(req, { params: Promise.resolve({ id: style.id }) });
     expect(res.status).toBe(200);
   });
+
+  it('still blocks a non-owner, non-admin user from deleting', async () => {
+    await userService.create({ name: 'Admin' }); // first user = admin, not relevant here
+    const owner = await userService.create({ name: 'Owner' });
+    const stranger = await userService.create({ name: 'Stranger' });
+    const { token } = await sessionService.create(stranger.id);
+    const style = await styleService.create({ name: 'Owned', createdBy: owner.id, parameters: '{}' });
+
+    const req = new NextRequest('http://localhost/api/styles/x', { method: 'DELETE', headers: { Cookie: `session=${token}` } });
+    const res = await DELETE(req, { params: Promise.resolve({ id: style.id }) });
+    expect(res.status).toBe(403);
+  });
 });
