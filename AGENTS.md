@@ -10,6 +10,54 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # AGENTS.md - GameForge AI Directives
 
+## Start here (read before anything else)
+
+A session has no memory of prior sessions unless it checks for one. Do this first, every time:
+
+1. **Check for in-progress SDD work** — `git worktree list`, then for each one under
+   `.claude/worktrees/`, check `.superpowers/sdd/*/progress.md` for a ledger. A ledger's first line
+   names its plan file; lines like `Task N: complete` are done, the first task without one is where
+   to resume. Don't assume a feature is unstarted or finished without checking — a branch can look
+   abandoned and still have 30 committed, reviewed tasks sitting on it.
+2. **Check `docs/superpowers/plans/`** (sorted by date) for the most recent plan — it's the closest
+   thing to "what was being worked on." Its paired spec under `docs/superpowers/specs/` has the
+   reasoning; the plan has the task breakdown.
+3. **Treat this file's "Shipped Features" list below as a snapshot, not a guarantee** — verify
+   anything load-bearing against the actual code/git log before relying on it (the "No auth system"
+   line below this sentence used to be wrong for months before someone checked).
+4. **Use the `deepseek-review` skill proactively, without being asked, at BOTH the plan level and the
+   per-task diff level** — it costs fractions of a cent per call (55 requests across a whole session
+   billed $0.03 total; a 34-task plan re-review across 6 chunks was ~$0.02), so cost is never a
+   reason to skip it. Two uses, both worth doing every time, not just for security-sensitive tasks:
+   (a) before starting execution of any multi-task SDD plan, run it plan-wide (chunk by ~30-40KB
+   section if the plan is long — the proxy has a real, non-deterministic payload ceiling around
+   there) — caught a real, load-bearing bug this way in the 2026-09-12-audit-fixes plan (Tasks
+   26/29's swallowed-error bug, see that plan's paired `*-review-log.md`) that would otherwise have
+   propagated through 5+ downstream UI tasks; (b) run a DeepSeek diff review (Mode 2, single-pass PR
+   -style) on each task's diff too, alongside — not instead of — the Claude task-reviewer. This was
+   originally written down as redundant with the task-reviewer gate; that was wrong, and the user
+   corrected it in the same session: a fresh Claude task-reviewer subagent is still the *same model
+   family* reviewing another Claude subagent's work, which is exactly the "echo chamber" cross-model
+   review exists to break, even with fully isolated context. Retroactively running it on Tasks 1-4
+   found zero real defects (all false positives, since DeepSeek has no filesystem access and mostly
+   guesses wrong) — but that's still worth confirming, especially on a security-sensitive diff, for
+   the same reason a clean test run is worth having even when you expected it to pass. Verify every
+   finding from either mode against the actual code/plan text yourself before acting — you are the
+   final arbiter, not DeepSeek; expect roughly 1-in-5 "Important" findings to hold up, not more.
+
+## Shipped Features (chronological, by merged PR — see `git log --merges --oneline main` for the
+authoritative, up-to-date list; this is a snapshot as of PR #22)
+
+Style Bibles, asset generation (sprites/themes/components), Godot export → seed theme library →
+theme export formats → contrast checking → dedup/multi-candidate generation → live theme tweaking
+→ component generation/preview/theming → **login/auth** (PR #12 — session-cookie login, pick-your-
+name-no-password, first account created is admin; see `lib/services/SessionService.ts`) → Google
+Drive sharing → Style Hub export/share, stack/prompt presets → Page Composer, Site Export (hand-
+editable Next.js site export) → `audit-fixes-pages-presets-sync` (PR #18) → image input (reference
+images for generation) → W3C design tokens import → AI page-layout suggestion → **reverse-sync**
+(PR #22 — hand-edited exported-site changes sync back into the dashboard; see
+`docs/superpowers/specs/2026-09-09-reverse-sync-design.md`).
+
 ## STRICT RULES FOR AI CODE GENERATION
 
 ### FORBIDDEN
@@ -48,8 +96,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   (`pending | processing | complete | promoted | discarded | failed`) were designed during
   implementation — the blueprint never pinned these down. See `lib/database/schema.ts` (Zod, source of
   truth for shapes) and `lib/database/migrations/001_init.sql` (actual columns).
-- **No auth system.** `created_by` is a client-persisted UUID (`lib/utils/clientId.ts`), not a real user
-  account. The "only the creator can edit" rule still holds, it just isn't backed by real authentication.
+- **Real session-based auth exists** (PR #12, `lib/services/SessionService.ts`) — pick-your-name-no-
+  password login (`app/login/LoginForm.tsx`), server-side session tokens (`sessions` table,
+  `crypto.randomBytes(32)`, 90-day expiry), first account created becomes admin. `created_by` on
+  styles/assets/jobs is a real user id, not a client-persisted UUID. Ownership checks
+  (`requestingUserId` + `isAdmin` params, `{error:'FORBIDDEN'}` returns) are being retrofitted onto
+  services one at a time — see `docs/superpowers/plans/2026-09-12-audit-fixes.md` Part A. Before
+  assuming a given route/service checks ownership, check it directly; this file won't necessarily be
+  updated task-by-task as that plan lands.
 - **`cleanupOrphanedImages()` protects in-flight job images** (`pending`/`processing`/`complete`), not
   just asset images — confirm this is still the intended behavior before changing it; it was an inferred
   design decision, not an explicit requirement.
