@@ -41,6 +41,29 @@ describe('PixellabGenerator.generate() timeout', () => {
   });
 });
 
+describe('PixellabGenerator.generate() caller-supplied signal', () => {
+  it('combines a caller-supplied signal with the internal timeout, so aborting it aborts the request', async () => {
+    const controller = new AbortController();
+
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = new PixellabGenerator('fake-key');
+    const pending = generator.generate('a goblin', 'style-1', { signal: controller.signal });
+
+    // Assert the signal passed to fetch is not aborted before we abort the controller
+    expect(fetchMock.mock.calls[0][1].signal?.aborted).toBe(false);
+
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(/abort/i);
+  });
+});
+
 describe('PixellabGenerator.generate() response shape validation', () => {
   it('throws a specific error when the response is missing image.base64, not a raw TypeError', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ usage: { type: 'generation' } }), { status: 200 }));
