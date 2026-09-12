@@ -1,16 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useStyles } from '@/lib/hooks/useStyles';
+import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 
 export default function ExportPage() {
+  const { styles, loading: stylesLoading } = useStyles();
+  const [styleId, setStyleId] = useState('');
   const [subdir, setSubdir] = useState('godot');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ exported: number; skipped: number; targetDir: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!styleId && styles.length > 0) setStyleId(styles[0].id);
+  }, [styleId, styles]);
+
   async function handleExport(e: React.FormEvent) {
     e.preventDefault();
-    if (running || !subdir.trim()) return;
+    if (running || !styleId || !subdir.trim()) return;
     setRunning(true);
     setError(null);
     setResult(null);
@@ -18,7 +26,7 @@ export default function ExportPage() {
       const res = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subdir: subdir.trim() }),
+        body: JSON.stringify({ styleId, subdir: subdir.trim() }),
       });
       const body = await res.json();
       if (body.success) {
@@ -37,17 +45,19 @@ export default function ExportPage() {
     <>
       <h1 className="page-title">Export</h1>
       <p className="page-subtitle">
-        Copy every active asset&apos;s image into <code>storage/exports/</code> for your Godot project
-        (2D only for V1).
+        Copy one Style Bible&apos;s active asset images into <code>storage/exports/</code> for your Godot
+        project (2D only for V1).
       </p>
 
       <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
+        <StyleBiblePicker styles={styles} value={styleId} onChange={setStyleId} />
+
         <div className="field">
           <label htmlFor="subdir">Export folder name</label>
           <input id="subdir" value={subdir} onChange={e => setSubdir(e.target.value)} placeholder="godot" />
         </div>
 
-        <button className="btn btn-primary" type="submit" disabled={running || !subdir.trim()}>
+        <button className="btn btn-primary" type="submit" disabled={running || !styleId || !subdir.trim() || stylesLoading}>
           {running ? 'Exporting…' : 'Export to Godot'}
         </button>
 
