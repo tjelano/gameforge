@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
     const connected = await driveService.isConnected();
     return NextResponse.json({ success: true, data: { connected } });
   } catch (error: any) {
+    console.error('Failed to check Drive connection status:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

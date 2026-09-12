@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
       data: { id: user.id, name: user.name, isAdmin: !!user.is_admin },
     });
   } catch (error: any) {
+    console.error('Failed to fetch current user:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

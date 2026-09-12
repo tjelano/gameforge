@@ -22,6 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       headers: { 'Content-Type': thumbnail.mimeType },
     });
   } catch (error: any) {
+    console.error('Failed to fetch file thumbnail:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
