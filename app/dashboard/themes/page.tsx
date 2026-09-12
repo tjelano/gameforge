@@ -14,6 +14,7 @@ export default function ThemesPage() {
   const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const jobs = useJobStore(s => s.jobs).filter(j => j.output_kind === 'theme');
   const refreshActive = useJobStore(s => s.refreshActive);
+  const jobsError = useJobStore(s => s.error);
   usePolling(refreshActive, 2000);
 
   const [styleId, setStyleId] = useState('');
@@ -150,7 +151,8 @@ export default function ThemesPage() {
       <h2 className="frame-label" style={{ marginBottom: 12, fontSize: 12 }}>
         Live queue
       </h2>
-      {jobs.length === 0 ? (
+      {jobsError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{jobsError}</p>}
+      {!jobsError && jobs.length === 0 ? (
         <div className="empty-state">Nothing in flight. Queue a generation above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
