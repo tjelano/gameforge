@@ -142,6 +142,11 @@ export async function processJob(job: any): Promise<void> {
         break;
       }
       case 'image': {
+        // No AbortController is constructed here — every generator (Theme,
+        // Component, PageLayout, Pixellab/Image) now accepts an optional
+        // signal (see Tasks 18-19), but nothing in this app has a cancel-job
+        // feature to produce one yet. Wiring one up is out of scope until
+        // a cancel-job feature is actually requested.
         const spriteReferenceImage = referenceImage ?? (await loadSpriteBasedOnImage(options.basedOnAssetId, job.id));
         result = sheetOptions
           ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
