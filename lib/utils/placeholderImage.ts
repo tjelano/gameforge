@@ -2,6 +2,12 @@ import zlib from 'zlib';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+// GameForge's own --accent amber, so a mock placeholder reads as
+// "this is a stand-in," not a broken/empty image — the only fill color
+// either call site in ImageGenerator.ts ever passed, so it's a constant
+// here instead of a parameter.
+const FILL: [number, number, number, number] = [0xe8, 0xa3, 0x3d, 0xff];
+
 function chunk(type: string, data: Buffer): Buffer {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length, 0);
@@ -17,7 +23,7 @@ function chunk(type: string, data: Buffer): Buffer {
  * bordered square so a mock generation is visibly a placeholder, not
  * an empty/broken image.
  */
-export function createPlaceholderPng(size: number, fill: [number, number, number, number]): Buffer {
+export function createPlaceholderPng(size: number): Buffer {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
   ihdr.writeUInt32BE(size, 4);
@@ -34,7 +40,7 @@ export function createPlaceholderPng(size: number, fill: [number, number, number
     raw[rowStart] = 0; // filter type: none
     for (let x = 0; x < size; x++) {
       const onEdge = x === 0 || y === 0 || x === size - 1 || y === size - 1;
-      const px = onEdge ? border : fill;
+      const px = onEdge ? border : FILL;
       const offset = rowStart + 1 + x * 4;
       raw[offset] = px[0];
       raw[offset + 1] = px[1];

@@ -31,7 +31,7 @@ export interface ImageGenerator {
 const PLACEHOLDER_SIZE = 64;
 // GameForge's own --accent amber, so a mock placeholder reads as
 // "this is a stand-in," not a broken/empty image.
-const PLACEHOLDER_PNG = createPlaceholderPng(PLACEHOLDER_SIZE, [0xe8, 0xa3, 0x3d, 0xff]);
+const PLACEHOLDER_PNG = createPlaceholderPng(PLACEHOLDER_SIZE);
 
 export class MockGenerator implements ImageGenerator {
   async generate(prompt: string, styleId: string, options?: GenerateOptions): Promise<GeneratedImage> {
@@ -74,7 +74,7 @@ export class MockGenerator implements ImageGenerator {
     // dimensions means a landscape/portrait placeholder won't exactly match
     // the requested aspect ratio — fine for a mock no one inspects pixel-by-pixel.
     const longSide = Math.max(imageSize.width, imageSize.height);
-    const placeholder = createPlaceholderPng(longSide, [0xe8, 0xa3, 0x3d, 0xff]);
+    const placeholder = createPlaceholderPng(longSide);
 
     const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
     await fsPromises.mkdir(imagesDir, { recursive: true });
