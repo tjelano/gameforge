@@ -1,20 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 
 export default function ExportPage() {
   const { styles, loading: stylesLoading, error: stylesError } = useStyles();
-  const [styleId, setStyleId] = useState('');
+  const [selectedStyleId, setSelectedStyleId] = useState('');
+  const styleId = selectedStyleId || styles[0]?.id || '';
   const [subdir, setSubdir] = useState('godot');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ exported: number; skipped: number; targetDir: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!styleId && styles.length > 0) setStyleId(styles[0].id);
-  }, [styleId, styles]);
 
   async function handleExport(e: React.FormEvent) {
     e.preventDefault();
@@ -50,7 +47,7 @@ export default function ExportPage() {
       </p>
 
       <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
-        <StyleBiblePicker styles={styles} value={styleId} onChange={setStyleId} />
+        <StyleBiblePicker styles={styles} value={styleId} onChange={setSelectedStyleId} />
 
         {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{stylesError}</p>}
 
