@@ -28,14 +28,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!asset || asset.is_deleted || asset.output_kind !== 'component') {
       return NextResponse.json({ success: false, error: 'Component asset not found' }, { status: 404 });
     }
-    if (!asset.image_path || asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
-      return NextResponse.json({ success: false, error: 'Invalid result path' }, { status: 500 });
-    }
     if (asset.created_by !== user.id && !user.is_admin) {
       return NextResponse.json({
         success: false,
         error: 'Only the creator can edit this asset.',
       }, { status: 403 });
+    }
+    if (!asset.image_path || asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
+      return NextResponse.json({ success: false, error: 'Invalid result path' }, { status: 500 });
     }
 
     const input = PatchSchema.parse(await req.json());

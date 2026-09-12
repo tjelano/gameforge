@@ -98,7 +98,7 @@ describe('POST /api/styles/[id]/site-export', () => {
     expect(body.success).toBe(false);
   });
 
-  it('returns 400 (STYLE_NOT_FOUND) for a soft-deleted style', async () => {
+  it('returns 404 (STYLE_NOT_FOUND) for a soft-deleted style', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     await styleService.softDelete(style.id, 'user-1');
@@ -109,7 +109,7 @@ describe('POST /api/styles/[id]/site-export', () => {
       body: JSON.stringify({ subdir: 'deleted-route-test' }),
     });
     const res = await POST(req, { params: Promise.resolve({ id: style.id }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toBe('This Style Bible was deleted.');
   });

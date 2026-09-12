@@ -159,8 +159,8 @@ export function DriveBrowser({
   }
 
   async function handleTrash(itemId: string) {
-    if (!window.confirm(`Move "${items.find(i => i.id === itemId)?.name ?? 'this item'}" to trash?`)) return;
     if (busyItemId) return;
+    if (!window.confirm(`Move "${items.find(i => i.id === itemId)?.name ?? 'this item'}" to trash?`)) return;
     setBusyItemId(itemId);
     setError(null);
     try {

@@ -23,6 +23,17 @@ const ERROR_MESSAGES: Record<ExportSiteErrorKind, string> = {
   STYLE_NOT_FOUND: 'This Style Bible was deleted.',
 };
 
+// Every other NOT_FOUND-shaped error in this codebase maps to 404 - this one
+// used to map to 400 along with every other error kind above. Only
+// STYLE_NOT_FOUND gets its own status; everything else still maps to 400.
+const ERROR_STATUS: Record<ExportSiteErrorKind, number> = {
+  NOTHING_TO_EXPORT: 400,
+  ALREADY_EXISTS: 400,
+  INVALID_SUBDIR: 400,
+  EXPORT_IN_PROGRESS: 400,
+  STYLE_NOT_FOUND: 404,
+};
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser(req);
@@ -41,7 +52,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const result = await siteExporter.exportSite(id, input.subdir);
 
     if ('error' in result) {
-      return NextResponse.json({ success: false, error: ERROR_MESSAGES[result.error] }, { status: 400 });
+      return NextResponse.json({ success: false, error: ERROR_MESSAGES[result.error] }, { status: ERROR_STATUS[result.error] });
     }
 
     return NextResponse.json({ success: true, data: result });
