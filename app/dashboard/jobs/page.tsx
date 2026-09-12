@@ -38,8 +38,10 @@ export default function JobsPage() {
       })
     );
 
-  const handleDiscard = (jobId: string) =>
-    withBusy(jobId, () => fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }));
+  const handleDiscard = (jobId: string) => {
+    if (!window.confirm("Discard this job? This can't be undone from the UI.")) return;
+    return withBusy(jobId, () => fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }));
+  };
 
   const handleRetry = (jobId: string) =>
     withBusy(jobId, () =>

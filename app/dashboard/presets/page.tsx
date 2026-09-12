@@ -77,6 +77,7 @@ export default function PresetsPage() {
   }
 
   async function handleDelete(id: string) {
+    if (!window.confirm(`Delete preset "${presets.find(p => p.id === id)?.name ?? 'this preset'}"? This can't be undone from the UI.`)) return;
     if (deletingId) return;
     setDeletingId(id);
     setError(null);
