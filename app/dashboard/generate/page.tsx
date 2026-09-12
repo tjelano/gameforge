@@ -23,6 +23,11 @@ export default function GeneratePage() {
   const [error, setError] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<{ base64: string; mediaType: string } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  // Mirrors PixellabGenerator.ts's DEFAULT_SIZE (64) - not imported
+  // directly, since that module pulls in Node-only fs/crypto imports
+  // unsuitable for this 'use client' page.
+  const SPRITE_SIZE_PRESETS = [32, 64, 128] as const;
+  const [spriteSize, setSpriteSize] = useState<number>(64);
 
   const activeStyleId = styleId || styles[0]?.id || '';
 
@@ -69,6 +74,8 @@ export default function GeneratePage() {
           styleId: activeStyleId,
           assetType,
           prompt: prompt.trim(),
+          width: spriteSize,
+          height: spriteSize,
           ...(referenceImage ? { referenceImage } : {}),
         }),
       });
@@ -123,6 +130,15 @@ export default function GeneratePage() {
             <input id="referenceImage" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} />
             {imageError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 4 }}>{imageError}</p>}
             {referenceImage && !imageError && <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 4 }}>Image attached.</p>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="spriteSize">Size</label>
+            <select id="spriteSize" value={spriteSize} onChange={e => setSpriteSize(Number(e.target.value))}>
+              {SPRITE_SIZE_PRESETS.map(size => (
+                <option key={size} value={size}>{size}x{size}</option>
+              ))}
+            </select>
           </div>
 
           {error && (

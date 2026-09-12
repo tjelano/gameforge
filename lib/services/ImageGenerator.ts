@@ -10,6 +10,8 @@ export interface GenerateOptions {
   signal?: AbortSignal;
   referenceImage?: ReferenceImagePayload;
   referenceStrength?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface GeneratedImage {

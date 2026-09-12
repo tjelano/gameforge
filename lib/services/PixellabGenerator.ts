@@ -78,7 +78,7 @@ const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
 export class PixellabGenerator implements ImageGenerator {
   constructor(private apiKey: string) {}
 
-  async generate(prompt: string, styleId: string, options?: GenerateOptions & { width?: number; height?: number }): Promise<GeneratedImage> {
+  async generate(prompt: string, styleId: string, options?: GenerateOptions): Promise<GeneratedImage> {
     const width = clampSize(options?.width);
     const height = clampSize(options?.height);
 

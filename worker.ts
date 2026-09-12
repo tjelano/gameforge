@@ -131,6 +131,8 @@ export async function processJob(job: any): Promise<void> {
     typeof options.referenceImageFilename === 'string' ? options.referenceImageFilename : undefined
   );
   const referenceStrength = typeof options.referenceStrength === 'number' ? options.referenceStrength : undefined;
+  const width = typeof options.width === 'number' ? options.width : undefined;
+  const height = typeof options.height === 'number' ? options.height : undefined;
 
   try {
     let result: { path: string };
@@ -154,7 +156,7 @@ export async function processJob(job: any): Promise<void> {
         const spriteReferenceImage = referenceImage ?? (await loadSpriteBasedOnImage(options.basedOnAssetId, job.id));
         result = sheetOptions
           ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
-          : await getImageGenerator().generate(job.prompt, job.style_id, { referenceImage: spriteReferenceImage, referenceStrength });
+          : await getImageGenerator().generate(job.prompt, job.style_id, { referenceImage: spriteReferenceImage, referenceStrength, width, height });
         break;
       }
       default:
