@@ -1,5 +1,7 @@
 # Multi-Provider Theme Generation — Design Spec
 
+> **Note (added during a later audit):** kie.ai support described below was never shipped — the final implementation only has `anthropic`/`cheaperinference` (see `lib/services/claudeApiProviders.ts`). This section is historical, not a guide to current behavior.
+
 Status: Approved by user in brainstorming chat. Ready for implementation planning.
 
 ## Motivation
