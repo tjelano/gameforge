@@ -13,7 +13,7 @@ const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB raw file - keeps the base64 payload comfortably under the server's 10MB base64-string ceiling
 
 export default function ComponentsPage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const jobs = useJobStore(s => s.jobs).filter(j => j.output_kind === 'component');
   const refreshActive = useJobStore(s => s.refreshActive);
   usePolling(refreshActive, 2000);
@@ -97,6 +97,8 @@ export default function ComponentsPage() {
         Generate a real HTML+CSS website component (button, card, nav bar) styled to a Style Bible. Same
         review-and-promote flow as themes and images.
       </p>
+
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
       {!stylesLoading && styles.length === 0 ? (
         <div className="empty-state" style={{ marginBottom: 32 }}>

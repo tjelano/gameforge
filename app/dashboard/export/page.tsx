@@ -5,7 +5,7 @@ import { useStyles } from '@/lib/hooks/useStyles';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 
 export default function ExportPage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const [styleId, setStyleId] = useState('');
   const [subdir, setSubdir] = useState('godot');
   const [running, setRunning] = useState(false);
@@ -51,6 +51,8 @@ export default function ExportPage() {
 
       <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
         <StyleBiblePicker styles={styles} value={styleId} onChange={setStyleId} />
+
+        {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{stylesError}</p>}
 
         <div className="field">
           <label htmlFor="subdir">Export folder name</label>

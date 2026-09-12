@@ -15,7 +15,7 @@ import {
 const CANVAS_LONG_SIDE = 512;
 
 export default function UiSheetsPage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const [styleId, setStyleId] = useState('');
   const [description, setDescription] = useState('');
   const [colorPalette, setColorPalette] = useState('');
@@ -83,6 +83,8 @@ export default function UiSheetsPage() {
       <p className="page-subtitle">
         Place named pieces on the canvas, then generate one composite sheet from the whole layout.
       </p>
+
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
       {!stylesLoading && styles.length === 0 ? (
         <div className="empty-state">

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
 
 export default function StylesPage() {
-  const { styles, loading, refresh } = useStyles();
+  const { styles, loading, error: stylesError, refresh } = useStyles();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [forkingId, setForkingId] = useState<string | null>(null);
@@ -112,6 +112,8 @@ export default function StylesPage() {
           {importing ? 'Importing…' : 'Import'}
         </button>
       </form>
+
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
       {!loading && styles.length === 0 ? (
         <div className="empty-state">No Style Bibles yet. Create the first one above.</div>

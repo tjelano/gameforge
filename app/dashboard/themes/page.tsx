@@ -11,7 +11,7 @@ const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB raw file - keeps the base64 payload comfortably under the server's 10MB base64-string ceiling
 
 export default function ThemesPage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const jobs = useJobStore(s => s.jobs).filter(j => j.output_kind === 'theme');
   const refreshActive = useJobStore(s => s.refreshActive);
   usePolling(refreshActive, 2000);
@@ -96,6 +96,8 @@ export default function ThemesPage() {
         Generate a website design token set (colors, typography, spacing) from a Style Bible. GameForge
         keeps every generation until you promote it to an asset or discard it — same as pixel art.
       </p>
+
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
       {!stylesLoading && styles.length === 0 ? (
         <div className="empty-state" style={{ marginBottom: 32 }}>

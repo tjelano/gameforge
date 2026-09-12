@@ -11,7 +11,7 @@ const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB raw file - keeps the base64 payload comfortably under the server's 10MB base64-string ceiling
 
 export default function GeneratePage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const jobs = useJobStore(s => s.jobs);
   const refreshActive = useJobStore(s => s.refreshActive);
   usePolling(refreshActive, 2000);
@@ -101,6 +101,8 @@ export default function GeneratePage() {
         Queue a new sprite against a Style Bible. GameForge keeps every generation until you promote it to
         an asset or discard it.
       </p>
+
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
 
       {!stylesLoading && styles.length === 0 ? (
         <div className="empty-state" style={{ marginBottom: 32 }}>
