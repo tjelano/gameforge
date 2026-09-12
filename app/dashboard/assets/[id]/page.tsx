@@ -501,9 +501,15 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
             <div style={{ fontWeight: 600, marginBottom: 12 }}>States</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
               {states.map(s => (
-                <span key={s} className="badge" style={{ cursor: 'pointer' }} onClick={() => setStates(states.filter(x => x !== s))}>
+                <button
+                  key={s}
+                  type="button"
+                  className="badge"
+                  style={{ cursor: 'pointer', background: 'none' }}
+                  onClick={() => setStates(states.filter(x => x !== s))}
+                >
                   {s} x
-                </span>
+                </button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>

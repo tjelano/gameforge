@@ -275,7 +275,7 @@ export function DriveBrowser({
             const isFolder = item.mimeType === FOLDER_MIME;
             const isBusy = busyItemId === item.id;
             return (
-              <div key={item.id} className="card" style={{ padding: 10, cursor: isFolder ? 'pointer' : 'default', opacity: isBusy ? 0.5 : 1 }} onClick={() => isFolder && openFolder(item)}>
+              <div key={item.id} className="card" style={{ padding: 10, opacity: isBusy ? 0.5 : 1 }}>
                 {!isFolder && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -286,15 +286,23 @@ export function DriveBrowser({
                   />
                 )}
                 {renamingId === item.id ? (
-                  <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 4 }}>
                     <input value={renameValue} onChange={e => setRenameValue(e.target.value)} style={{ fontSize: 12, width: '100%' }} autoFocus />
                     <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => handleRename(item.id)} disabled={isBusy}>OK</button>
                   </div>
+                ) : isFolder ? (
+                  <button
+                    type="button"
+                    onClick={() => openFolder(item)}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', fontSize: 13, wordBreak: 'break-word' }}
+                  >
+                    📁 {item.name}
+                  </button>
                 ) : (
-                  <div style={{ fontSize: 13, wordBreak: 'break-word' }}>{isFolder ? '📁 ' : ''}{item.name}</div>
+                  <div style={{ fontSize: 13, wordBreak: 'break-word' }}>{item.name}</div>
                 )}
                 {!selectMode && renamingId !== item.id && (
-                  <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
                     {!isFolder && item.webViewLink && (
                       <a href={item.webViewLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open</a>
                     )}
