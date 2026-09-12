@@ -562,4 +562,13 @@ describe('siteExporter.exportSite', () => {
     const compiled = await postcss([localByDefault({ mode: 'pure' })]).process(generatedCss, { from: undefined });
     expect(compiled.css).toContain(':local(.root)');
   });
+
+  it("returns STYLE_NOT_FOUND instead of exporting — this is the behavior change: exportSite() never checked the style itself, only pageService.getActivePagesForStyle()", async () => {
+    const style = await styleService.create({ name: 'Deleted Bible', createdBy: 'user-1', parameters: '{}' });
+    await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await styleService.softDelete(style.id, 'user-1');
+
+    const result = await siteExporter.exportSite(style.id, 'deleted-style-export');
+    expect(result).toEqual({ error: 'STYLE_NOT_FOUND' });
+  });
 });
