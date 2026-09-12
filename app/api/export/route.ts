@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
   try {
     const { styleId, subdir } = ExportSchema.parse(await req.json().catch(() => ({})));
     const result = await godotExporter.exportToGodot(styleId, subdir);
+    if ('error' in result) {
+      return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+    }
     return NextResponse.json({ success: true, data: result });
   } catch (error: any) {
     if (error instanceof ZodError) {
