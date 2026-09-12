@@ -52,4 +52,18 @@ describe('GET /api/drive/files/[id]/thumbnail', () => {
     const res = await GET(req, { params: Promise.resolve({ id: 'f1' }) });
     expect(res.status).toBe(401);
   });
+
+  it('returns a clean 500 instead of crashing when the Drive lookup throws', async () => {
+    const { getCurrentUser } = await import('@/lib/utils/session');
+    const { driveService } = await import('@/lib/services/DriveService');
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: 'user1', name: 'Alice', is_admin: 0, created_at: 0 } as any);
+    vi.mocked(driveService.getThumbnail).mockRejectedValue(new Error('drive unreachable'));
+
+    const { GET } = await import('@/app/api/drive/files/[id]/thumbnail/route');
+    const req = new NextRequest('http://localhost/api/drive/files/f1/thumbnail');
+    const res = await GET(req, { params: Promise.resolve({ id: 'f1' }) });
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.success).toBe(false);
+  });
 });

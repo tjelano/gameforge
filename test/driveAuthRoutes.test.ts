@@ -58,6 +58,18 @@ describe('GET /api/drive/status', () => {
     const body = await res.json();
     expect(body.data.connected).toBe(false);
   });
+
+  it('returns a clean 500 instead of crashing when the Drive check throws', async () => {
+    const { driveService } = await import('@/lib/services/DriveService');
+    const spy = vi.spyOn(driveService, 'isConnected').mockRejectedValueOnce(new Error('drive unreachable'));
+    const { GET } = await import('@/app/api/drive/status/route');
+    const req = new NextRequest('http://localhost/api/drive/status', { headers: { Cookie: cookieHeader } });
+    const res = await GET(req);
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.success).toBe(false);
+    spy.mockRestore();
+  });
 });
 
 describe('GET /api/drive/callback', () => {
