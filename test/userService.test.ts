@@ -53,10 +53,13 @@ describe('userService reads', () => {
     await userService.create({ name: 'Bob' });
 
     expect((await userService.getAll()).length).toBe(2);
-    expect((await userService.getActiveUsers()).length).toBe(2);
     expect((await userService.getById(alice.id))?.name).toBe('Alice');
     expect((await userService.getByName('Bob'))?.name).toBe('Bob');
     expect(await userService.getById('nonexistent-id')).toBeNull();
     expect(await userService.getByName('Nobody')).toBeNull();
+  });
+
+  it('no longer exposes getActiveUsers — getAll() is the single source of truth now that the only caller (login page) was migrated to it', () => {
+    expect((userService as any).getActiveUsers).toBeUndefined();
   });
 });
