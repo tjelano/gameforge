@@ -25,6 +25,21 @@ A session has no memory of prior sessions unless it checks for one. Do this firs
 3. **Treat this file's "Shipped Features" list below as a snapshot, not a guarantee** — verify
    anything load-bearing against the actual code/git log before relying on it (the "No auth system"
    line below this sentence used to be wrong for months before someone checked).
+4. **Use the `deepseek-review` skill proactively, without being asked, on any plan or diff it fits** —
+   it costs fractions of a cent per call (a full 34-task plan re-review across 6 chunks cost ~$0.02),
+   so there's no reason to skip it. Two concrete uses: (a) before starting execution of any
+   multi-task SDD plan, run it plan-wide (chunk by ~30-40KB section if the plan is long — the proxy
+   has a real, non-deterministic payload ceiling around there); (b) it's still worth an occasional
+   pass mid-execution on remaining, undispatched tasks if one was skipped up front — caught a
+   real, load-bearing bug this way in the 2026-09-12-audit-fixes plan (see its paired
+   `*-review-log.md`) that would otherwise have propagated through 5+ downstream UI tasks. DeepSeek
+   has no filesystem access — it can only react to what's pasted in, so most "Important" findings
+   on a real, working codebase turn out to be false positives once checked against the actual code.
+   Verify every load-bearing finding yourself before acting on it; you are the final arbiter, not
+   DeepSeek. The per-task implementer+reviewer+fix-loop gate already in `subagent-driven-development`
+   is a separate, sufficient safety net for code that's actually been written — don't add a
+   redundant DeepSeek pass per task on top of that gate, it's for the plan/diff level, not a second
+   task-reviewer seat.
 
 ## Shipped Features (chronological, by merged PR — see `git log --merges --oneline main` for the
 authoritative, up-to-date list; this is a snapshot as of PR #22)
