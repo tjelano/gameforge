@@ -9,15 +9,35 @@ const API_BASE = 'https://api.pixellab.ai/v2';
 const MIN_SIZE = 16;
 const MAX_SIZE = 400;
 const DEFAULT_SIZE = 64;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 function clampSize(value: number | undefined): number {
   if (!value || Number.isNaN(value)) return DEFAULT_SIZE;
   return Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(value)));
 }
 
+// Same combining approach as lib/services/claudeToolCall.ts's
+// combineWithTimeout — duplicated rather than imported, since this file's
+// fetch calls are a different API shape (Pixellab, not Anthropic
+// Messages) and don't otherwise share anything with that module.
+function combineWithTimeout(signal?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal;
+}
+
 interface PixfluxResponse {
   image: { type: 'base64'; base64: string; format: string };
   usage?: { type: string; generations?: number; usd?: number };
+}
+
+function isPixfluxResponse(data: unknown): data is PixfluxResponse {
+  return (
+    !!data &&
+    typeof data === 'object' &&
+    'image' in data &&
+    !!(data as { image?: unknown }).image &&
+    typeof (data as { image: { base64?: unknown } }).image.base64 === 'string'
+  );
 }
 
 interface CreateUiAssetResponse {
@@ -79,7 +99,7 @@ export class PixellabGenerator implements ImageGenerator {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      signal: options?.signal,
+      signal: combineWithTimeout(options?.signal),
     });
 
     if (!res.ok) {
@@ -87,7 +107,10 @@ export class PixellabGenerator implements ImageGenerator {
       throw new Error(`Pixellab generation failed (${res.status}): ${body || res.statusText}`);
     }
 
-    const data = (await res.json()) as PixfluxResponse;
+    const data = (await res.json()) as unknown;
+    if (!isPixfluxResponse(data)) {
+      throw new Error('Pixellab generation returned an unexpected response shape (missing image.base64).');
+    }
     const format = data.image.format || 'png';
     const filename = `pixellab-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${format}`;
 
