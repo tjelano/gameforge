@@ -68,4 +68,19 @@ describe('ClaudeApiComponentGenerator with a reference image', () => {
     const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(sentBody.messages[0].content).toContain('<button class="btn">Go</button>');
   });
+
+  it('combines a caller-supplied signal with the internal request timeout', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const fetchMock = mockToolUseResponse();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await generator.generate('a button', style.id, undefined, undefined, undefined, controller.signal);
+
+    const sentSignal = (fetchMock.mock.calls[0][1] as RequestInit).signal as AbortSignal;
+    expect(sentSignal.aborted).toBe(false);
+    controller.abort();
+    expect(sentSignal.aborted).toBe(true);
+  });
 });

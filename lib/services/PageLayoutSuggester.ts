@@ -1,6 +1,7 @@
 // lib/services/PageLayoutSuggester.ts
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { callClaudeTool } from '@/lib/services/claudeToolCall';
 
 export interface PageLayoutComponentCandidate {
   id: string;
@@ -10,7 +11,7 @@ export interface PageLayoutComponentCandidate {
 
 export interface PageLayoutSuggester {
   /** Ordered componentAssetIds to put on a page named `pageName`, chosen from `candidates`. */
-  suggest(pageName: string, candidates: PageLayoutComponentCandidate[]): Promise<string[]>;
+  suggest(pageName: string, candidates: PageLayoutComponentCandidate[], signal?: AbortSignal): Promise<string[]>;
 }
 
 const TOOL_INPUT_SCHEMA = {
@@ -24,15 +25,6 @@ const TOOL_INPUT_SCHEMA = {
   },
   required: ['order'],
 };
-
-type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
-interface AnthropicMessageResponse {
-  content: Array<{ type: string } & Record<string, unknown>>;
-  stop_reason: string;
-}
-
-const ANTHROPIC_VERSION = '2023-06-01';
-const REQUEST_TIMEOUT_MS = 60_000;
 
 function buildLayoutPrompt(pageName: string, candidates: PageLayoutComponentCandidate[]): string {
   const list = candidates.map((c, i) => `${i}. [${c.assetType}] ${c.prompt}`).join('\n');
@@ -48,45 +40,21 @@ Respond by calling the emit_page_layout tool with the indices of the components 
 export class ClaudeApiPageLayoutSuggester implements PageLayoutSuggester {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async suggest(pageName: string, candidates: PageLayoutComponentCandidate[]): Promise<string[]> {
+  async suggest(pageName: string, candidates: PageLayoutComponentCandidate[], signal?: AbortSignal): Promise<string[]> {
     if (candidates.length === 0) return [];
 
-    const res = await fetch(this.provider.requestUrl, {
-      method: 'POST',
-      headers: {
-        ...this.provider.buildAuthHeaders(this.apiKey),
-        'anthropic-version': ANTHROPIC_VERSION,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.provider.model,
-        max_tokens: 1024,
-        tools: [
-          {
-            name: 'emit_page_layout',
-            description: 'Emit the ordered list of component indices that belong on this page.',
-            input_schema: TOOL_INPUT_SCHEMA,
-          },
-        ],
-        tool_choice: { type: 'tool', name: 'emit_page_layout' },
-        messages: [{ role: 'user', content: buildLayoutPrompt(pageName, candidates) }],
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    const input = await callClaudeTool({
+      provider: this.provider,
+      apiKey: this.apiKey,
+      toolName: 'emit_page_layout',
+      toolDescription: 'Emit the ordered list of component indices that belong on this page.',
+      inputSchema: TOOL_INPUT_SCHEMA,
+      messages: [{ role: 'user', content: buildLayoutPrompt(pageName, candidates) }],
+      maxTokens: 1024,
+      signal,
+      operationLabel: 'page layout suggestion',
+      truncatedMessage: 'the layout could not be suggested',
     });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Anthropic page layout suggestion failed via ${this.provider.name} (${res.status}): ${body || res.statusText}`);
-    }
-
-    const data = (await res.json()) as AnthropicMessageResponse;
-    if (data.stop_reason === 'max_tokens') {
-      throw new Error(`Anthropic response (via ${this.provider.name}) was truncated (stop_reason: max_tokens) before completing the tool call — the layout could not be suggested.`);
-    }
-    const toolUse = data.content.find((block): block is ToolUseBlock => block.type === 'tool_use');
-    if (!toolUse) {
-      throw new Error(`Anthropic response (via ${this.provider.name}) contained no tool_use block for emit_page_layout.`);
-    }
 
     // A malformed top-level shape here is an upstream AI-response problem,
     // not caller input - thrown as a plain Error (not ZodError) so the
@@ -98,7 +66,6 @@ export class ClaudeApiPageLayoutSuggester implements PageLayoutSuggester {
     // suggestion - same reasoning as the W3C tokens importer's
     // candidate-fallback fix (see feedback_fallback_converter_contract
     // memory).
-    const input = toolUse.input;
     if (!input || typeof input !== 'object' || !Array.isArray((input as { order?: unknown }).order)) {
       throw new Error(`Anthropic response (via ${this.provider.name}) for emit_page_layout did not include an "order" array.`);
     }

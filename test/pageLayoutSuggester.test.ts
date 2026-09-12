@@ -117,6 +117,20 @@ describe('ClaudeApiPageLayoutSuggester', () => {
     expect(error.constructor.name).not.toBe('ZodError');
     expect(error.message).toMatch(/order/);
   });
+
+  it('combines a caller-supplied signal with the internal request timeout', async () => {
+    const fetchMock = mockFetchOnce([0]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const suggester = new ClaudeApiPageLayoutSuggester('fake-key', ANTHROPIC_PROVIDER);
+    await suggester.suggest('Home', CANDIDATES, controller.signal);
+
+    const sentSignal = (fetchMock.mock.calls[0][1] as RequestInit).signal as AbortSignal;
+    expect(sentSignal.aborted).toBe(false);
+    controller.abort();
+    expect(sentSignal.aborted).toBe(true);
+  });
 });
 
 describe('getPageLayoutSuggester() provider selection', () => {
