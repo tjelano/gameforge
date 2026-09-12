@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { PixellabGenerator } from '@/lib/services/PixellabGenerator';
+import { MockGenerator } from '@/lib/services/ImageGenerator';
 
 let tempRoot: string;
 
@@ -121,5 +122,69 @@ describe('PixellabGenerator.generate() retry on transient failures', () => {
     await assertion;
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('PixellabGenerator.generate() happy path', () => {
+  it('writes the decoded image to storage/images/ and returns metadata at the default size', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ image: { type: 'base64', base64: Buffer.from('fake-png-bytes').toString('base64'), format: 'png' } }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = new PixellabGenerator('fake-key');
+    const result = await generator.generate('a goblin', 'style-1');
+
+    expect(result.path).toMatch(/^pixellab-.*\.png$/);
+    expect(result.metadata).toEqual({ width: 64, height: 64, format: 'png' }); // DEFAULT_SIZE
+    const filePath = path.join(tempRoot, 'storage', 'images', result.path);
+    const bytes = await fsPromises.readFile(filePath);
+    expect(bytes.toString()).toBe('fake-png-bytes');
+  });
+
+  it('clamps an out-of-range width/height to the 16-400 bounds', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ image: { type: 'base64', base64: Buffer.from('x').toString('base64'), format: 'png' } }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = new PixellabGenerator('fake-key');
+    const result = await generator.generate('a goblin', 'style-1', { width: 5, height: 99999 });
+
+    expect(result.metadata.width).toBe(16);
+    expect(result.metadata.height).toBe(400);
+  });
+
+  it('throws a clear error when the HTTP response is not ok', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('server exploded', { status: 500 })));
+    const generator = new PixellabGenerator('fake-key');
+    await expect(generator.generate('a goblin', 'style-1')).rejects.toThrow(/500/);
+  });
+});
+
+describe('MockGenerator.generate() abort/timer behavior', () => {
+  it('rejects immediately with an AbortError when the signal is already aborted before the call', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const gen = new MockGenerator();
+    await expect(gen.generate('a goblin', 'style-1', { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('rejects with an AbortError if the signal aborts before the 2-second placeholder delay elapses', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const gen = new MockGenerator();
+    const pending = gen.generate('a goblin', 'style-1', { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('resolves with the placeholder image after the delay when never aborted', async () => {
+    vi.useFakeTimers();
+    const gen = new MockGenerator();
+    const pending = gen.generate('a goblin', 'style-1');
+    await vi.advanceTimersByTimeAsync(2000);
+    const result = await pending;
+    expect(result.metadata).toEqual({ width: 64, height: 64, format: 'png' });
   });
 });
