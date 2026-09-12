@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
     if (job.created_by !== user.id && !user.is_admin) {
       return NextResponse.json({ success: false, error: 'Only the creator can retry this job.' }, { status: 403 });
     }
+    if (job.status !== 'complete' && job.status !== 'failed') {
+      return NextResponse.json({ success: false, error: 'Only a completed or failed job can be retried' }, { status: 409 });
+    }
 
     // Free the old attempt's image (if any, and if no asset already
     // claims it) before wiping result_path — the shared helper only
