@@ -16,6 +16,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 }
 
+// Only the creator (or an admin) may edit — enforced server-side in PageService.update().
 const UpdatePageSchema = z.object({
   name: z.string().min(1).optional(),
   componentAssetIds: z.array(z.string()).optional(),
@@ -30,12 +31,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { id } = await params;
     const input = UpdatePageSchema.parse(await req.json());
-    const updated = await pageService.update(id, {
+    const result = await pageService.update(id, user.id, {
       name: input.name,
       componentAssetIds: input.componentAssetIds !== undefined ? JSON.stringify(input.componentAssetIds) : undefined,
-    });
-    if (!updated) return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 });
-    return NextResponse.json({ success: true, data: updated });
+    }, !!user.is_admin);
+
+    if ('error' in result) {
+      if (result.error === 'NOT_FOUND') {
+        return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 });
+      }
+      return NextResponse.json({
+        success: false,
+        error: 'Only the creator can edit this page.',
+      }, { status: 403 });
+    }
+
+    return NextResponse.json({ success: true, data: result });
   } catch (error: any) {
     if (error instanceof ZodError) {
       return NextResponse.json({
@@ -55,10 +66,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     const { id } = await params;
-    const existing = await pageService.getById(id);
-    if (!existing) return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 });
+    const result = await pageService.softDelete(id, user.id, !!user.is_admin);
 
-    await pageService.softDelete(id);
+    if (result && 'error' in result) {
+      if (result.error === 'NOT_FOUND') {
+        return NextResponse.json({ success: false, error: 'Page not found' }, { status: 404 });
+      }
+      return NextResponse.json({
+        success: false,
+        error: 'Only the creator can delete this page.',
+      }, { status: 403 });
+    }
+
     return NextResponse.json({ success: true, data: { id } });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

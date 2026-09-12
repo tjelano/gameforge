@@ -103,8 +103,8 @@ describe('siteExporter.exportSite', () => {
     const shared = await makeComponentAsset(style.id, 'shared.html', COMPONENT_DOC);
     const pageA = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     const pageB = await pageService.create({ styleId: style.id, name: 'About', createdBy: 'user-1' });
-    await pageService.update(pageA.id, { componentAssetIds: JSON.stringify([shared.id]) });
-    await pageService.update(pageB.id, { componentAssetIds: JSON.stringify([shared.id]) });
+    await pageService.update(pageA.id, 'user-1', { componentAssetIds: JSON.stringify([shared.id]) });
+    await pageService.update(pageB.id, 'user-1', { componentAssetIds: JSON.stringify([shared.id]) });
 
     const result = await siteExporter.exportSite(style.id, 'test-export');
     expect(result).not.toHaveProperty('error');
@@ -141,7 +141,7 @@ describe('siteExporter.exportSite', () => {
     const stale = await makeComponentAsset(style.id, 'stale.html', COMPONENT_DOC);
     await assetService.softDelete(stale.id, 'user-1');
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([valid.id, stale.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([valid.id, stale.id]) });
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -250,7 +250,7 @@ describe('siteExporter.exportSite', () => {
     });
     await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'weird-type.html'), COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const result = await siteExporter.exportSite(style.id, 'test-weird-type');
     const ok = result as { targetDir: string };
@@ -305,7 +305,7 @@ describe('siteExporter.exportSite', () => {
     const componentCss = '.btn { background: var(--color-bg); color: var(--color-fg); padding: var(--space-unit); }';
     const document = `<!DOCTYPE html><html><head><style>${componentCss}</style></head><body><button class="btn">Go</button></body></html>`;
     const component = await makeComponentAsset(style.id, 'btn.html', document);
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([component.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([component.id]) });
 
     const result = await siteExporter.exportSite(style.id, 'test-theme-alias');
     const ok = result as { targetDir: string };
@@ -339,7 +339,7 @@ describe('siteExporter.exportSite', () => {
     const bareSelectorDoc = '<!DOCTYPE html><html><head><style>button { color: red; } a:hover { text-decoration: underline; }</style></head><body><button>Go</button></body></html>';
     const component = await makeComponentAsset(style.id, 'bare.html', bareSelectorDoc);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([component.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([component.id]) });
 
     const result = await siteExporter.exportSite(style.id, 'test-pure-mode');
     const ok = result as { targetDir: string };
@@ -360,7 +360,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const result = await siteExporter.exportSite(style.id, 'my-site');
     if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);
@@ -383,7 +383,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const first = await siteExporter.exportSite(style.id, 'my-site');
     if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
@@ -400,7 +400,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const first = await siteExporter.exportSite(style.id, 'my-site');
     if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
@@ -449,7 +449,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const first = await siteExporter.exportSite(style.id, 'my-site');
     if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
@@ -473,7 +473,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const first = await siteExporter.exportSite(style.id, 'my-site');
     if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
@@ -513,7 +513,7 @@ describe('siteExporter.exportSite', () => {
     const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_COMPONENT_DOC);
     await assetService.update(asset.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const tsx = await exportedComponentTsx(style.id, 'test-trusted-export');
     expect(tsx).toContain('<img');
@@ -524,7 +524,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'untrusted.html', IMG_COMPONENT_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const tsx = await exportedComponentTsx(style.id, 'test-untrusted-export');
     expect(tsx).not.toContain('<img');
@@ -545,7 +545,7 @@ describe('siteExporter.exportSite', () => {
     const asset = await makeComponentAsset(style.id, 'trusted-bare.html', bareSelectorDoc);
     await assetService.update(asset.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const result = await siteExporter.exportSite(style.id, 'test-trusted-conversions');
     if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);

@@ -52,31 +52,59 @@ describe('PresetService', () => {
     const second = await presetService.create({
       name: 'Second', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',
     });
-    await presetService.softDelete(first.id);
+    await presetService.softDelete(first.id, 'user-1');
 
     const active = await presetService.getActivePresets();
     expect(active.map(p => p.id)).toEqual([second.id]);
   });
 
-  it('update() has no ownership check - any caller can edit any preset', async () => {
+  it('update() sets name for the creator', async () => {
     const preset = await presetService.create({
       name: 'Original', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',
     });
-    const updated = await presetService.update(preset.id, { name: 'Renamed by someone else' });
-    expect(updated?.name).toBe('Renamed by someone else');
+    const updated = await presetService.update(preset.id, 'user-1', { name: 'Renamed' });
+    if ('error' in updated) throw new Error(`Unexpected error: ${updated.error}`);
+    expect(updated.name).toBe('Renamed');
   });
 
-  it('update() returns null for a nonexistent preset', async () => {
-    const result = await presetService.update('00000000-0000-0000-0000-000000000000', { name: 'x' });
-    expect(result).toBeNull();
+  it('update() blocks a non-owner, non-admin requester', async () => {
+    const preset = await presetService.create({
+      name: 'Original', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',
+    });
+    const result = await presetService.update(preset.id, 'user-2', { name: 'Should fail' });
+    expect(result).toEqual({ error: 'FORBIDDEN' });
+  });
+
+  it('update() lets an admin edit someone else\'s preset', async () => {
+    const preset = await presetService.create({
+      name: 'Original', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',
+    });
+    const result = await presetService.update(preset.id, 'user-2', { name: 'Renamed by admin' }, true);
+    if ('error' in result) throw new Error(`Unexpected error: ${result.error}`);
+    expect(result.name).toBe('Renamed by admin');
+  });
+
+  it('update() returns NOT_FOUND for a nonexistent preset', async () => {
+    const result = await presetService.update('00000000-0000-0000-0000-000000000000', 'user-1', { name: 'x' });
+    expect(result).toEqual({ error: 'NOT_FOUND' });
   });
 
   it('softDelete() flips is_deleted to 1', async () => {
     const preset = await presetService.create({
       name: 'x', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',
     });
-    await presetService.softDelete(preset.id);
+    await presetService.softDelete(preset.id, 'user-1');
     const fetched = await presetService.getById(preset.id);
     expect(fetched?.is_deleted).toBe(1);
+  });
+
+  it('softDelete() blocks a non-owner, non-admin requester', async () => {
+    const preset = await presetService.create({
+      name: 'x', createdBy: 'user-1', prompt: 'x', techStackTags: '[]', themePrompt: null, components: '[]',
+    });
+    const result = await presetService.softDelete(preset.id, 'user-2');
+    expect(result).toEqual({ error: 'FORBIDDEN' });
+    const fetched = await presetService.getById(preset.id);
+    expect(fetched?.is_deleted).toBe(0);
   });
 });

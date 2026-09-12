@@ -2,6 +2,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { assetService } from '@/lib/services/AssetService';
+import { styleService } from '@/lib/services/StyleService';
 
 export interface ExportResult {
   exported: number;
@@ -25,7 +26,11 @@ class GodotExporterImpl {
    * is a flat image copy with no hand-edit-preservation concept to
    * protect, so a reused subdir is simply rejected outright.
    */
-  async exportToGodot(styleId: string, subdir: string): Promise<ExportResult | { error: 'ALREADY_EXISTS' }> {
+  async exportToGodot(styleId: string, subdir: string): Promise<ExportResult | { error: 'ALREADY_EXISTS' | 'STYLE_NOT_FOUND' }> {
+    if (!(await styleService.getActiveById(styleId))) {
+      return { error: 'STYLE_NOT_FOUND' };
+    }
+
     const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
     const exportsRootDir = path.join(getProjectRoot(), 'storage', 'exports');
     const targetDir = path.join(exportsRootDir, subdir);

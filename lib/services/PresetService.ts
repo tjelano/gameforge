@@ -41,16 +41,22 @@ class PresetServiceImpl {
     return (await this.getById(id))!;
   }
 
-  /** No ownership check - presets are shared, any logged-in user may edit any preset. */
-  async update(id: string, patch: {
-    name?: string;
-    prompt?: string;
-    techStackTags?: string;
-    themePrompt?: string | null;
-    components?: string;
-  }): Promise<Preset | null> {
+  /** Only the creator, or an admin, may edit a preset. Mirrors StyleService.update(). */
+  async update(
+    id: string,
+    requestingUserId: string,
+    patch: {
+      name?: string;
+      prompt?: string;
+      techStackTags?: string;
+      themePrompt?: string | null;
+      components?: string;
+    },
+    isAdmin: boolean = false
+  ): Promise<Preset | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
     const existing = await this.getById(id);
-    if (!existing) return null;
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
     db.prepare(`
       UPDATE presets SET name = ?, prompt = ?, tech_stack_tags = ?, theme_prompt = ?, components = ?, updated_at = ? WHERE id = ?
@@ -63,10 +69,14 @@ class PresetServiceImpl {
       Date.now(),
       id
     );
-    return this.getById(id);
+    return (await this.getById(id))!;
   }
 
-  async softDelete(id: string): Promise<void> {
+  /** Only the creator, or an admin, may delete a preset. Mirrors update() above. */
+  async softDelete(id: string, requestingUserId: string, isAdmin: boolean = false): Promise<void | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
+    const existing = await this.getById(id);
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
     db.prepare('UPDATE presets SET is_deleted = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
   }

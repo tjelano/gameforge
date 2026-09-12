@@ -47,7 +47,7 @@ describe('GitService pages sync', () => {
     // just that a page can round-trip in isolation.
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify(['some-asset-id']) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['some-asset-id']) });
     await gitService.exportToJson();
 
     // Simulate a second machine: fresh DB, same exported data/ directory.
@@ -66,7 +66,7 @@ describe('GitService pages sync', () => {
   it('a soft-deleted page still exports and imports (deletes propagate across machines)', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'Gone', createdBy: 'user-1' });
-    await pageService.softDelete(page.id);
+    await pageService.softDelete(page.id, 'user-1');
     await gitService.exportToJson();
 
     DatabaseConnection.resetForTests();

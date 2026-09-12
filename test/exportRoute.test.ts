@@ -80,4 +80,15 @@ describe('POST /api/export', () => {
     expect(body.success).toBe(false);
     expect(body.error).toBe('ALREADY_EXISTS');
   });
+
+  it('maps a soft-deleted style to a 404 with STYLE_NOT_FOUND', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    await styleService.softDelete(style.id, userId);
+    const res = await POST(postRequest({ styleId: style.id, subdir: 'godot-route-deleted-style' }, cookieHeader));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toBe('STYLE_NOT_FOUND');
+  });
 });

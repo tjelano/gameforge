@@ -68,4 +68,23 @@ describe('GodotExporter.exportToGodot() scopes to one style and guards a subdir 
     const second = await godotExporter.exportToGodot(STYLE_B, 'godot-collision-test');
     expect(second).toEqual({ error: 'ALREADY_EXISTS' });
   });
+
+  it('returns STYLE_NOT_FOUND for a soft-deleted style, and never claims the export subdir', async () => {
+    const db = DatabaseConnection.getInstance();
+    db.prepare('UPDATE styles SET is_deleted = 1 WHERE id = ?').run(STYLE_A);
+
+    const result = await godotExporter.exportToGodot(STYLE_A, 'godot-soft-deleted-test');
+    expect(result).toEqual({ error: 'STYLE_NOT_FOUND' });
+
+    // The subdir must not have been claimed by the rejected export - a
+    // later, legitimate export to the same name must still succeed.
+    const retry = await godotExporter.exportToGodot(STYLE_B, 'godot-soft-deleted-test');
+    if ('error' in retry) throw new Error(`Unexpected export error: ${retry.error}`);
+    expect(retry.exported).toBe(1);
+  });
+
+  it('returns STYLE_NOT_FOUND for a nonexistent style', async () => {
+    const result = await godotExporter.exportToGodot('99999999-9999-9999-9999-999999999999', 'godot-missing-style-test');
+    expect(result).toEqual({ error: 'STYLE_NOT_FOUND' });
+  });
 });

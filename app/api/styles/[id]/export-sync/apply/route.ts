@@ -41,15 +41,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     const { diff } = result;
 
+    // This reconciles hand-edited, exported-site changes back into the DB
+    // for every page under this style, regardless of which user originally
+    // created each page — not a per-page edit on the requesting user's own
+    // behalf. Bypasses ownership the same way GitService's trusted
+    // reconciliation paths do (isAdmin=true; requestingUserId is then
+    // irrelevant to the check, so the acting user's own id is passed).
     for (const newPage of diff.newPages) {
       const created = await pageService.create({ styleId: id, name: newPage.name, createdBy: user.id });
-      await pageService.update(created.id, { componentAssetIds: JSON.stringify(newPage.componentAssetIds) });
+      await pageService.update(created.id, user.id, { componentAssetIds: JSON.stringify(newPage.componentAssetIds) }, true);
     }
     for (const change of diff.pageOrderChanges) {
-      await pageService.update(change.pageId, { componentAssetIds: JSON.stringify(change.newComponentAssetIds) });
+      await pageService.update(change.pageId, user.id, { componentAssetIds: JSON.stringify(change.newComponentAssetIds) }, true);
     }
     for (const deletedId of diff.deletedPageIds) {
-      await pageService.softDelete(deletedId);
+      await pageService.softDelete(deletedId, user.id, true);
     }
 
     return NextResponse.json({ success: true, data: diff });

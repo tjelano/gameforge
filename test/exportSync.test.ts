@@ -189,7 +189,7 @@ describe('computeSyncDiff', () => {
     const compA = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'navbar', prompt: 'nav', imagePath: 'a.html', outputKind: 'component' });
     const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compA.id, compB.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([compA.id, compB.id]) });
 
     await writeManifest(exportDir, {
       styleId: style.id, exportedAt: Date.now(),
@@ -227,7 +227,7 @@ describe('computeSyncDiff', () => {
     const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     // Reordered in the dashboard after export: B now comes first.
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compB.id, compA.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([compB.id, compA.id]) });
 
     await writeManifest(exportDir, {
       styleId: style.id, exportedAt: Date.now(),
@@ -257,7 +257,7 @@ describe('computeSyncDiff', () => {
     const compC = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'footer', prompt: 'footer', imagePath: 'c.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     // Dashboard swaps B and C relative to the exported order.
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compA.id, compC.id, compB.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([compA.id, compC.id, compB.id]) });
 
     await writeManifest(exportDir, {
       styleId: style.id, exportedAt: Date.now(),
@@ -289,7 +289,7 @@ describe('computeSyncDiff', () => {
     const compC = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'footer', prompt: 'footer', imagePath: 'c.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     // Dashboard and disk both moved B to the front - the exact same result.
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compB.id, compA.id, compC.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([compB.id, compA.id, compC.id]) });
 
     await writeManifest(exportDir, {
       styleId: style.id, exportedAt: Date.now(),
@@ -316,7 +316,7 @@ describe('computeSyncDiff', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([comp.id]) });
 
     await writeManifest(exportDir, {
       styleId: style.id, exportedAt: Date.now(),
@@ -340,7 +340,7 @@ describe('computeSyncDiff', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([comp.id]) });
 
     await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
     await fsPromises.writeFile(path.join(exportDir, 'components', 'HeroAAA111.tsx'), 'export function HeroAAA111() { return <div />; }');
@@ -363,7 +363,7 @@ describe('computeSyncDiff', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([comp.id]) });
 
     await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
     // '../../evil' from exportDir/components resolves to tempRoot/evil - i.e.
@@ -390,7 +390,7 @@ describe('computeSyncDiff', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([comp.id]) });
 
     await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
     const tsx = 'export function HeroAAA111() { return <div />; }';
@@ -421,7 +421,7 @@ describe('computeSyncDiff', () => {
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     await assetService.update(comp.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([comp.id]) });
 
     await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
     const tsx = 'export function HeroAAA111() { return <div />; }';
@@ -448,7 +448,7 @@ describe('computeSyncDiff', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([comp.id]) });
 
     await fsPromises.mkdir(path.join(exportDir, 'components'), { recursive: true });
     const tsx = 'export function HeroAAA111() { return <div />; }';
@@ -475,7 +475,7 @@ describe('computeSyncDiff', () => {
     const compA = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'navbar', prompt: 'nav', imagePath: 'a.html', outputKind: 'component' });
     const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([compA.id, compB.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([compA.id, compB.id]) });
     await assetService.softDelete(compB.id, 'user-1');
 
     await writeManifest(exportDir, {

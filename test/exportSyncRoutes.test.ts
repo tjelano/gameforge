@@ -135,7 +135,7 @@ describe('POST /api/styles/[id]/export-sync/apply', () => {
     const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: userId, assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: userId });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([]) });
+    await pageService.update(page.id, userId, { componentAssetIds: JSON.stringify([]) });
 
     const exportDir = path.join(tempRoot, 'storage', 'exports', 'my-site');
     await fsPromises.mkdir(path.join(exportDir, 'app'), { recursive: true });
