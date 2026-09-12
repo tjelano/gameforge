@@ -6,12 +6,23 @@ import type { Style } from '@/lib/database/schema';
 export function useStyles() {
   const [styles, setStyles] = useState<Style[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const res = await fetch('/api/styles');
-    const body = await res.json();
-    if (body.success) setStyles(body.data);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/styles');
+      const body = await res.json();
+      if (body.success) {
+        setStyles(body.data);
+        setError(null);
+      } else {
+        setError(body.error ?? 'Request failed.');
+      }
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -22,16 +33,26 @@ export function useStyles() {
     // that race isn't a concern.
     let ignore = false;
     (async () => {
-      const res = await fetch('/api/styles');
-      const body = await res.json();
-      if (ignore) return;
-      if (body.success) setStyles(body.data);
-      setLoading(false);
+      try {
+        const res = await fetch('/api/styles');
+        const body = await res.json();
+        if (ignore) return;
+        if (body.success) {
+          setStyles(body.data);
+          setError(null);
+        } else {
+          setError(body.error ?? 'Request failed.');
+        }
+      } catch {
+        if (!ignore) setError('Could not reach the server.');
+      } finally {
+        if (!ignore) setLoading(false);
+      }
     })();
     return () => {
       ignore = true;
     };
   }, []);
 
-  return { styles, loading, refresh };
+  return { styles, loading, error, refresh };
 }
