@@ -269,6 +269,10 @@ export function DriveBrowser({
       {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
       {loading && items.length === 0 ? (
         <p className="page-subtitle">Loading…</p>
+      ) : !loading && items.length === 0 && !error ? (
+        <div className="empty-state">
+          {selectMode ? 'This folder is empty.' : 'This folder is empty. Upload a file or create a new folder above.'}
+        </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
           {items.map(item => {
