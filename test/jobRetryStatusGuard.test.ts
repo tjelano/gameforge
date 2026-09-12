@@ -68,6 +68,13 @@ describe('POST /api/jobs/retry — status guard', () => {
     expect(res.status).toBe(409);
   });
 
+  it('409s a discarded job', async () => {
+    const { userId, cookieHeader } = await seedSession();
+    const job = await makeJobWithStatus(userId, 'discarded');
+    const res = await POST(retryRequest(job.id, cookieHeader));
+    expect(res.status).toBe(409);
+  });
+
   it('allows retrying a failed job', async () => {
     const { userId, cookieHeader } = await seedSession();
     const job = await makeJobWithStatus(userId, 'failed');
