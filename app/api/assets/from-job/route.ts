@@ -3,6 +3,7 @@ import { z, ZodError } from 'zod';
 import crypto from 'crypto';
 import { DatabaseConnection } from '@/lib/database';
 import { AssetSchema } from '@/lib/database/schema';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,13 +11,29 @@ const PromoteSchema = z.object({ jobId: z.string().uuid() });
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const body = await req.json();
     const { jobId } = PromoteSchema.parse(body);
 
     const db = DatabaseConnection.getInstance();
+
+    // Fetched synchronously, immediately before the transaction below with
+    // no intervening await — nothing else can run on this job between this
+    // read and the transaction, so there's no race to re-check inside it.
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
+    if (!job) {
+      return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
+    }
+    if (job.created_by !== user.id && !user.is_admin) {
+      return NextResponse.json({ success: false, error: 'Only the creator can promote this job.' }, { status: 403 });
+    }
+
     const result = db.transaction(() => {
-      const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as any;
-      if (!job || !job.result_path) {
+      if (!job.result_path) {
         return { success: false as const, error: 'Job not complete or missing result path' };
       }
 

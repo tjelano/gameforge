@@ -138,7 +138,7 @@ describe('POST /api/assets/from-job copies output_kind through', () => {
     const { POST } = await import('@/app/api/assets/from-job/route');
     const req = new NextRequest('http://localhost/api/assets/from-job', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ jobId: job.id }),
     });
     const res = await POST(req);
