@@ -39,6 +39,12 @@ export class MockGenerator implements ImageGenerator {
   async generate(prompt: string, styleId: string, options?: GenerateOptions): Promise<GeneratedImage> {
     const signal = options?.signal;
     const filename = `mock-${Date.now()}.png`;
+    // Mirror generateUiAsset's approach: use the max of width/height as the PNG size
+    // (since createPlaceholderPng only draws squares), but return metadata with the
+    // actual requested dimensions. Fallback to PLACEHOLDER_SIZE if not specified.
+    const width = typeof options?.width === 'number' ? options.width : PLACEHOLDER_SIZE;
+    const height = typeof options?.height === 'number' ? options.height : PLACEHOLDER_SIZE;
+    const longSide = Math.max(width, height);
 
     await new Promise<void>((resolve, reject) => {
       if (signal?.aborted) {
@@ -54,14 +60,15 @@ export class MockGenerator implements ImageGenerator {
       }
     });
 
+    const placeholder = longSide === PLACEHOLDER_SIZE ? PLACEHOLDER_PNG : createPlaceholderPng(longSide);
     const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
     await fsPromises.mkdir(imagesDir, { recursive: true });
-    await fsPromises.writeFile(path.join(imagesDir, filename), PLACEHOLDER_PNG);
+    await fsPromises.writeFile(path.join(imagesDir, filename), placeholder);
 
     return {
       path: filename,
       prompt,
-      metadata: { width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE, format: 'png' },
+      metadata: { width, height, format: 'png' },
     };
   }
 

@@ -26,6 +26,38 @@ afterEach(async () => {
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
+describe('MockGenerator.generate', () => {
+  it('honors requested width/height in options', async () => {
+    const gen = new MockGenerator();
+    const result = await gen.generate('a goblin sprite', 'style-1', { width: 128, height: 64 });
+
+    expect(result.metadata.width).toBe(128);
+    expect(result.metadata.height).toBe(64);
+    const filePath = path.join(tempRoot, 'storage', 'images', result.path);
+    const bytes = await fsPromises.readFile(filePath);
+    // PNG signature is 8 bytes, then IHDR chunk: 4 bytes length + "IHDR" + 13 bytes data + 4 bytes CRC
+    // Width is bytes 16-19, height is bytes 20-23 (big-endian)
+    const pngWidth = bytes.readUInt32BE(16);
+    const pngHeight = bytes.readUInt32BE(20);
+    expect(pngWidth).toBe(128);
+    expect(pngHeight).toBe(128); // PNG is square, using the max dimension
+  });
+
+  it('uses default placeholder size when width/height are omitted', async () => {
+    const gen = new MockGenerator();
+    const result = await gen.generate('a goblin sprite', 'style-1');
+
+    expect(result.metadata.width).toBe(64);
+    expect(result.metadata.height).toBe(64);
+    const filePath = path.join(tempRoot, 'storage', 'images', result.path);
+    const bytes = await fsPromises.readFile(filePath);
+    const pngWidth = bytes.readUInt32BE(16);
+    const pngHeight = bytes.readUInt32BE(20);
+    expect(pngWidth).toBe(64);
+    expect(pngHeight).toBe(64);
+  });
+});
+
 describe('MockGenerator.generateUiAsset', () => {
   it('writes a placeholder composite sized to the requested image size', async () => {
     const gen = new MockGenerator();
