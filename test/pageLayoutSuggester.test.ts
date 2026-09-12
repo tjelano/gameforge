@@ -83,7 +83,7 @@ describe('ClaudeApiPageLayoutSuggester', () => {
   });
 
   it('throws a clear error when the HTTP response is not ok', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('server exploded', { status: 500 })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('server exploded', { status: 500 })));
     const suggester = new ClaudeApiPageLayoutSuggester('fake-key', ANTHROPIC_PROVIDER);
     await expect(suggester.suggest('Home', CANDIDATES)).rejects.toThrow(/500/);
   });

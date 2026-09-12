@@ -76,3 +76,50 @@ describe('PixellabGenerator.generate() response shape validation', () => {
     expect(error.message).toMatch(/unexpected response shape|image\.base64/i);
   });
 });
+
+describe('PixellabGenerator.generate() retry on transient failures', () => {
+  it('retries on 429 twice then succeeds on the 3rd attempt', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ image: { type: 'base64', base64: Buffer.from('ok').toString('base64'), format: 'png' } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = new PixellabGenerator('fake-key');
+    const pending = generator.generate('a goblin', 'style-1');
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    const result = await pending;
+    expect(result.path).toMatch(/\.png$/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws immediately after exactly one call on a non-retryable 400', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('bad request', { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = new PixellabGenerator('fake-key');
+    await expect(generator.generate('a goblin', 'style-1')).rejects.toThrow(/400/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws the last response error after exhausting all retries on persistent 5xx/429s', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('server exploded 1', { status: 500 }))
+      .mockResolvedValueOnce(new Response('server exploded 2', { status: 429 }))
+      .mockResolvedValueOnce(new Response('server exploded 3', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const generator = new PixellabGenerator('fake-key');
+    const pending = generator.generate('a goblin', 'style-1');
+    const assertion = expect(pending).rejects.toThrow(/server exploded 3/);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(3000);
+    await assertion;
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});

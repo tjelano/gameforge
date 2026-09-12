@@ -233,7 +233,7 @@ describe('ClaudeApiThemeGenerator', () => {
   });
 
   it('throws with the response status when the API call itself fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('rate limited', { status: 429 }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response('rate limited', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);

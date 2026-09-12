@@ -10,6 +10,8 @@ const MIN_SIZE = 16;
 const MAX_SIZE = 400;
 const DEFAULT_SIZE = 64;
 const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_RETRIES = 2;
+const RETRY_DELAYS_MS = [1000, 3000];
 
 function clampSize(value: number | undefined): number {
   if (!value || Number.isNaN(value)) return DEFAULT_SIZE;
@@ -23,6 +25,19 @@ function clampSize(value: number | undefined): number {
 function combineWithTimeout(signal?: AbortSignal): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   return signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal;
+}
+
+// Same retry approach as lib/services/claudeToolCall.ts's fetchWithRetry —
+// duplicated rather than imported, for the same reason combineWithTimeout
+// above is duplicated (different API shape, nothing else shared).
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url, init);
+    const isRetryable = res.status === 429 || (res.status >= 500 && res.status < 600);
+    if (!isRetryable || attempt === MAX_RETRIES) return res;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+  }
+  throw new Error('unreachable'); // loop above always returns
 }
 
 interface PixfluxResponse {
@@ -92,7 +107,7 @@ export class PixellabGenerator implements ImageGenerator {
       }
     }
 
-    const res = await fetch(`${API_BASE}/create-image-pixflux`, {
+    const res = await fetchWithRetry(`${API_BASE}/create-image-pixflux`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiKey}`,

@@ -12,6 +12,8 @@ import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_RETRIES = 2;
+const RETRY_DELAYS_MS = [1000, 3000];
 
 type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
 interface AnthropicMessageResponse {
@@ -25,6 +27,20 @@ interface AnthropicMessageResponse {
 function combineWithTimeout(signal?: AbortSignal): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   return signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal;
+}
+
+// Retries a 429 (rate limited) or 5xx (server error) response up to
+// MAX_RETRIES more times with backoff — both are transient and worth
+// retrying. Any other non-ok status (e.g. 400) is returned as-is on the
+// first attempt so the caller's existing res.ok check throws immediately.
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url, init);
+    const isRetryable = res.status === 429 || (res.status >= 500 && res.status < 600);
+    if (!isRetryable || attempt === MAX_RETRIES) return res;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+  }
+  throw new Error('unreachable'); // loop above always returns
 }
 
 export interface ClaudeToolCallParams {
@@ -52,7 +68,7 @@ export interface ClaudeToolCallParams {
 export async function callClaudeTool(params: ClaudeToolCallParams): Promise<unknown> {
   const { provider, apiKey, toolName, toolDescription, inputSchema, messages, maxTokens = 4096, signal, operationLabel, truncatedMessage } = params;
 
-  const res = await fetch(provider.requestUrl, {
+  const res = await fetchWithRetry(provider.requestUrl, {
     method: 'POST',
     headers: {
       ...provider.buildAuthHeaders(apiKey),
