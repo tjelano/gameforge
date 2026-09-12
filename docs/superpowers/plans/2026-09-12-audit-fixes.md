@@ -3549,6 +3549,8 @@ export function useStyles() {
       if (body.success) {
         setStyles(body.data);
         setError(null);
+      } else {
+        setError(body.error ?? 'Request failed.');
       }
     } catch {
       setError('Could not reach the server.');
@@ -3567,6 +3569,8 @@ export function useStyles() {
         if (body.success) {
           setStyles(body.data);
           setError(null);
+        } else {
+          setError(body.error ?? 'Request failed.');
         }
       } catch {
         if (!ignore) setError('Could not reach the server.');
@@ -3608,6 +3612,8 @@ export const useJobStore = create<JobStore>((set) => ({
       const body = await res.json();
       if (body.success) {
         set({ jobs: body.data, lastRefreshedAt: Date.now(), error: null });
+      } else {
+        set({ error: body.error ?? 'Request failed.' });
       }
     } catch {
       set({ error: 'Could not reach the server.' });
@@ -3747,7 +3753,7 @@ EOF
 
 - [ ] **Step 1: Add local `error` state, wrap the mount effect and `loadMore` in try/catch**
 
-In the mount `useEffect`, wrap the `fetch`/`.json()` call in try/catch, setting a new `error` state (`'Could not reach the server.'`) on catch and clearing it on success, mirroring Task 26's `useStyles()` shape exactly (including the `ignore`-flag guard). Do the same inside `loadMore()`.
+In the mount `useEffect`, wrap the `fetch`/`.json()` call in try/catch, setting a new `error` state (`'Could not reach the server.'`) on catch and clearing it on success, mirroring Task 26's (corrected) `useStyles()` shape exactly — including the `ignore`-flag guard AND the `else { setError(body.error ?? 'Request failed.') }` branch for a `{success:false}` response, not just the network-level catch. Do the same inside `loadMore()`.
 
 - [ ] **Step 2: Render the error near the top**
 
