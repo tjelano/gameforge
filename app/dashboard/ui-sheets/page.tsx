@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { useJobStore } from '@/lib/store/useJobStore';
+import { JobCard } from '@/app/components/JobCard';
 import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 import {
@@ -16,6 +19,11 @@ const CANVAS_LONG_SIDE = 512;
 
 export default function UiSheetsPage() {
   const { styles, loading: stylesLoading, error: stylesError } = useStyles();
+  const jobs = useJobStore(s => s.jobs).filter(j => j.asset_type === 'ui_sheet');
+  const refreshActive = useJobStore(s => s.refreshActive);
+  const jobsError = useJobStore(s => s.error);
+  usePolling(refreshActive, 2000);
+
   const [styleId, setStyleId] = useState('');
   const [description, setDescription] = useState('');
   const [colorPalette, setColorPalette] = useState('');
@@ -69,6 +77,7 @@ export default function UiSheetsPage() {
         setError(body.error ?? 'Generation failed to queue.');
       } else {
         setDescription('');
+        refreshActive();
       }
     } catch {
       setError('Could not reach the server.');
@@ -196,6 +205,20 @@ export default function UiSheetsPage() {
             {submitting ? 'Queuing…' : 'Generate sheet'}
           </button>
         </>
+      )}
+
+      <h2 className="frame-label" style={{ marginBottom: 12, fontSize: 12 }}>
+        Live queue
+      </h2>
+      {jobsError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{jobsError}</p>}
+      {!jobsError && jobs.length === 0 ? (
+        <div className="empty-state">Nothing in flight. Queue a generation above.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {jobs.map(job => (
+            <JobCard key={job.id} job={job} />
+          ))}
+        </div>
       )}
     </>
   );
