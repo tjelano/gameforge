@@ -31,6 +31,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!asset.image_path || asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')) {
       return NextResponse.json({ success: false, error: 'Invalid result path' }, { status: 500 });
     }
+    if (asset.created_by !== user.id && !user.is_admin) {
+      return NextResponse.json({
+        success: false,
+        error: 'Only the creator can edit this asset.',
+      }, { status: 403 });
+    }
 
     const input = PatchSchema.parse(await req.json());
     const trustAsEdited = input.trustAsEdited === true;
