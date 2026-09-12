@@ -22,6 +22,13 @@ class StyleServiceImpl {
     return row ? StyleSchema.parse(row) : null;
   }
 
+  /** Like getById, but returns null for a soft-deleted style — mirrors getActiveStyles()'s is_deleted = 0 filter, scoped to one id. */
+  async getActiveById(id: string): Promise<Style | null> {
+    const db = DatabaseConnection.getInstance();
+    const row = db.prepare('SELECT * FROM styles WHERE id = ? AND is_deleted = 0').get(id);
+    return row ? StyleSchema.parse(row) : null;
+  }
+
   async create(input: { name: string; createdBy: string; parameters: string; forkedFrom?: string | null }): Promise<Style> {
     const db = DatabaseConnection.getInstance();
     const id = crypto.randomUUID();
@@ -72,7 +79,7 @@ class StyleServiceImpl {
    * modified, per the Fork hard rule.
    */
   async fork(id: string, newOwnerId: string): Promise<Style | { error: 'NOT_FOUND' }> {
-    const original = await this.getById(id);
+    const original = await this.getActiveById(id);
     if (!original) return { error: 'NOT_FOUND' };
     return this.create({
       name: `${original.name} (fork)`,
