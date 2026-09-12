@@ -107,7 +107,7 @@ class PresetServiceImpl {
     if (!preset) return { error: 'PRESET_NOT_FOUND' };
 
     if (target.existingStyleId) {
-      const existing = await styleService.getById(target.existingStyleId);
+      const existing = await styleService.getActiveById(target.existingStyleId);
       if (!existing) return { error: 'STYLE_NOT_FOUND' };
     }
 
