@@ -148,7 +148,7 @@ describe('GET /api/pages/[id]/render', () => {
     // check this route stripped it back out on every page preview/download.
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_DOC);
-    await assetService.update(asset.id, { editedExternally: true });
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
     await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
 

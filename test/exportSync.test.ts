@@ -419,7 +419,7 @@ describe('computeSyncDiff', () => {
   it('stops reporting an accepted hand-edit once the asset is marked reconciled (edited_externally = 1)', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const comp = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'a.html', outputKind: 'component' });
-    await assetService.update(comp.id, { editedExternally: true });
+    await assetService.update(comp.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     await pageService.update(page.id, { componentAssetIds: JSON.stringify([comp.id]) });
 
@@ -476,7 +476,7 @@ describe('computeSyncDiff', () => {
     const compB = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'hero', prompt: 'hero', imagePath: 'b.html', outputKind: 'component' });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     await pageService.update(page.id, { componentAssetIds: JSON.stringify([compA.id, compB.id]) });
-    await assetService.softDelete(compB.id);
+    await assetService.softDelete(compB.id, 'user-1');
 
     await writeManifest(exportDir, {
       styleId: style.id, exportedAt: Date.now(),

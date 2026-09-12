@@ -60,7 +60,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ success: false, error: 'Could not write the component file' }, { status: 500 });
     }
 
-    await assetService.update(id, { editedExternally: trustAsEdited });
+    await assetService.update(id, user.id, { editedExternally: trustAsEdited }, !!user.is_admin);
 
     return NextResponse.json({ success: true, data: tokens });
   } catch (error: any) {

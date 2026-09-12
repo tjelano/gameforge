@@ -300,7 +300,10 @@ class GitServiceImpl {
       try {
         const content = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', asset.image_path), 'utf-8');
         if (hashContent(content) === preHash) {
-          await assetService.update(assetId, { editedExternally: true });
+          // Trusted system reconciliation (git pull/import), not a specific
+          // user's action — bypasses ownership via isAdmin, same as
+          // cleanupOrphanedImages() bypasses the per-user asset model.
+          await assetService.update(assetId, asset.created_by, { editedExternally: true }, true);
         }
       } catch (e: any) {
         if (e.code !== 'ENOENT') console.error(`Failed to re-check trusted component ${asset.image_path} after import:`, e);

@@ -139,7 +139,7 @@ describe('siteExporter.exportSite', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const valid = await makeComponentAsset(style.id, 'valid.html', COMPONENT_DOC);
     const stale = await makeComponentAsset(style.id, 'stale.html', COMPONENT_DOC);
-    await assetService.softDelete(stale.id);
+    await assetService.softDelete(stale.id, 'user-1');
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     await pageService.update(page.id, { componentAssetIds: JSON.stringify([valid.id, stale.id]) });
 
@@ -511,7 +511,7 @@ describe('siteExporter.exportSite', () => {
   it('exports a component marked edited_externally with its hand-edited HTML intact', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_COMPONENT_DOC);
-    await assetService.update(asset.id, { editedExternally: true });
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
 
@@ -543,7 +543,7 @@ describe('siteExporter.exportSite', () => {
     const bareSelectorDoc = '<!DOCTYPE html><html><head><style>button { color: red; }</style></head>'
       + '<body><button class="btn">Go</button><img src="/hero.png"></body></html>';
     const asset = await makeComponentAsset(style.id, 'trusted-bare.html', bareSelectorDoc);
-    await assetService.update(asset.id, { editedExternally: true });
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
     await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
 
