@@ -181,7 +181,7 @@ export default function ComponentsPage() {
               <option value="claude">Claude</option>
               {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
             </select>
-            {referenceImage && <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>Ollama isn't available with a reference image attached.</p>}
+            {referenceImage && <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>{`Ollama isn't available with a reference image attached.`}</p>}
           </div>
 
           {error && (

@@ -48,8 +48,8 @@ export default function OllamaSettingsPage() {
       } finally {
         setLoading(false);
       }
+      await refreshModels();
     })();
-    refreshModels();
   }, []);
 
   async function handleSave(e: React.FormEvent) {
