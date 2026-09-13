@@ -1,46 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-
-const LINKS = [
-  { href: '/dashboard/generate', label: 'Generate' },
-  { href: '/dashboard/ui-sheets', label: 'UI Sheets' },
-  { href: '/dashboard/themes', label: 'Themes' },
-  { href: '/dashboard/components', label: 'Components' },
-  { href: '/dashboard/jobs', label: 'Jobs' },
-  { href: '/dashboard/assets', label: 'Assets' },
-  { href: '/dashboard/styles', label: 'Style Bibles' },
-  { href: '/dashboard/presets', label: 'Presets' },
-  { href: '/dashboard/export', label: 'Export' },
-  { href: '/dashboard/drive', label: 'Drive' },
-  { href: '/dashboard/settings/storage', label: 'Storage' },
-  { href: '/dashboard/settings/aseprite', label: 'Aseprite' },
-  { href: '/dashboard/settings/seed-themes', label: 'Seed Themes' },
-  { href: '/dashboard/settings/google-drive', label: 'Google Drive' },
-  { href: '/dashboard/settings/ollama', label: 'Ollama' },
-];
+import { DASHBOARD_ROUTES } from '@/lib/dashboardRoutes';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export function NavRail() {
   const pathname = usePathname();
   const router = useRouter();
-  const [me, setMe] = useState<{ name: string; isAdmin: boolean } | null>(null);
+  const { user: me } = useCurrentUser();
   const [loggingOut, setLoggingOut] = useState(false);
-
-  useEffect(() => {
-    let ignore = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/auth/me');
-        const body = await res.json();
-        if (!ignore && body.success) setMe(body.data);
-      } catch {
-        // Purely informational — a failed fetch just means no identity shows.
-      }
-    })();
-    return () => { ignore = true; };
-  }, [pathname]);
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -59,7 +29,7 @@ export function NavRail() {
       <div className="rail-brand">
         Game<span>Forge</span>
       </div>
-      {LINKS.map(link => (
+      {DASHBOARD_ROUTES.map(link => (
         <Link
           key={link.href}
           href={link.href}
