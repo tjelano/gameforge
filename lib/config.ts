@@ -13,3 +13,8 @@ export const ASEPRITE_PATH_SETTING_KEY = 'aseprite_path';
 // Shared between the OAuth callback route (writes it) and DriveService
 // (reads it on every Drive API call).
 export const GOOGLE_DRIVE_REFRESH_TOKEN_SETTING_KEY = 'google_drive_refresh_token';
+
+// Settings-table key for the configured Ollama host, and its default when
+// unset -- Ollama's own standard local port.
+export const OLLAMA_HOST_SETTING_KEY = 'ollama_host';
+export const DEFAULT_OLLAMA_HOST = 'http://localhost:11434';

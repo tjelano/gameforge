@@ -8,6 +8,7 @@ import { assetService } from '@/lib/services/AssetService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 import { callClaudeTool } from '@/lib/services/claudeToolCall';
+import { callOllamaTool, type OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
 import {
   ThemeTokensSchema,
   tokensToCss,
@@ -49,7 +50,7 @@ const TOOL_INPUT_SCHEMA = {
 export class ClaudeApiThemeGenerator implements ThemeGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedTheme> {
+  async generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
     let existingThemes: Awaited<ReturnType<typeof assetService.getActiveThemeAssetsForStyle>> = [];
     try {
@@ -98,17 +99,31 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
         ]
       : fullPrompt;
 
-    const toolInput = await callClaudeTool({
-      provider: this.provider,
-      apiKey: this.apiKey,
-      toolName: 'emit_theme',
-      toolDescription: 'Emit a website design token set matching the requested aesthetic.',
-      inputSchema: TOOL_INPUT_SCHEMA,
-      messages: [{ role: 'user', content }],
-      signal,
-      operationLabel: 'theme generation',
-      truncatedMessage: 'the theme could not be generated',
-    });
+    const toolInput = providerOverride
+      ? await callOllamaTool({
+          host: providerOverride.host,
+          model: providerOverride.model,
+          toolName: 'emit_theme',
+          toolDescription: 'Emit a website design token set matching the requested aesthetic.',
+          inputSchema: TOOL_INPUT_SCHEMA,
+          messages: [{ role: 'user', content: providerOverride.correctionRequested
+            ? `${fullPrompt}\n\nYou did not call the emit_theme tool last time -- you must call it now with valid arguments matching its schema.`
+            : content }],
+          signal,
+          operationLabel: 'theme generation',
+          truncatedMessage: 'the theme could not be generated',
+        })
+      : await callClaudeTool({
+          provider: this.provider,
+          apiKey: this.apiKey,
+          toolName: 'emit_theme',
+          toolDescription: 'Emit a website design token set matching the requested aesthetic.',
+          inputSchema: TOOL_INPUT_SCHEMA,
+          messages: [{ role: 'user', content }],
+          signal,
+          operationLabel: 'theme generation',
+          truncatedMessage: 'the theme could not be generated',
+        });
 
     const tokens = ThemeTokensSchema.parse(toolInput);
     const filename = `theme-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.css`;

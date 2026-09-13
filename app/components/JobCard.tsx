@@ -5,16 +5,18 @@ import Link from 'next/link';
 import type { Job } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 import { usePolling } from '@/lib/hooks/usePolling';
+import { OLLAMA_NO_TOOL_CALL_ERROR_PREFIX } from '@/lib/services/ollamaToolCall';
 
 interface JobCardProps {
   job: Job;
   onPromote?: (jobId: string) => void;
   onDiscard?: (jobId: string) => void;
   onRetry?: (jobId: string) => void;
+  onRetryWithCorrection?: (jobId: string) => void;
   busy?: boolean;
 }
 
-export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardProps) {
+export function JobCard({ job, onPromote, onDiscard, onRetry, onRetryWithCorrection, busy }: JobCardProps) {
   const canAct = job.status === 'complete' || job.status === 'failed';
 
   const parsedOptions = (() => {
@@ -132,6 +134,13 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
         {job.status === 'failed' && job.error_message && (
           <div style={{ fontSize: 12, color: 'var(--reject)', marginBottom: 12 }}>
             {job.error_message}
+            {onRetryWithCorrection && job.error_message.startsWith(OLLAMA_NO_TOOL_CALL_ERROR_PREFIX) && (
+              <div style={{ marginTop: 6 }}>
+                <button className="btn" disabled={busy} onClick={() => onRetryWithCorrection(job.id)}>
+                  Retry with correction
+                </button>
+              </div>
+            )}
           </div>
         )}
 

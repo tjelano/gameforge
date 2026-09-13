@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
 import { usePolling } from '@/lib/hooks/usePolling';
+import { useOllamaModels } from '@/lib/hooks/useOllamaModels';
 import { useJobStore } from '@/lib/store/useJobStore';
 import { JobCard } from '@/app/components/JobCard';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
@@ -26,6 +27,10 @@ export default function ComponentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<{ base64: string; mediaType: string } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
+  const [provider, setProvider] = useState<'claude' | string>('claude');
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const activeStyleId = styleId || styles[0]?.id || '';
 
@@ -74,6 +79,9 @@ export default function ComponentsPage() {
           prompt: `${componentType}: ${prompt.trim()}`,
           outputKind: 'component',
           ...(referenceImage ? { referenceImage } : {}),
+          ...(provider !== 'claude' && !referenceImage
+            ? { provider: 'ollama', model: provider, ollamaHost: ollamaHost }
+            : {}),
         }),
       });
       const body = await res.json();
@@ -88,6 +96,29 @@ export default function ComponentsPage() {
       setError('Could not reach the server.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleRetryWithCorrection(jobId: string) {
+    if (retryingJobId) return;
+    setRetryingJobId(jobId);
+    setRetryError(null);
+    try {
+      const res = await fetch('/api/jobs/retry-with-correction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setRetryError(body.error ?? 'Could not retry this job.');
+      } else {
+        refreshActive();
+      }
+    } catch {
+      setRetryError('Could not reach the server.');
+    } finally {
+      setRetryingJobId(null);
     }
   }
 
@@ -139,6 +170,20 @@ export default function ComponentsPage() {
             {referenceImage && !imageError && <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 4 }}>Image attached.</p>}
           </div>
 
+          <div className="field">
+            <label htmlFor="provider">Model</label>
+            <select
+              id="provider"
+              value={referenceImage ? 'claude' : provider}
+              disabled={!!referenceImage}
+              onChange={e => setProvider(e.target.value)}
+            >
+              <option value="claude">Claude</option>
+              {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
+            </select>
+            {referenceImage && <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>{`Ollama isn't available with a reference image attached.`}</p>}
+          </div>
+
           {error && (
             <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -8, marginBottom: 16 }}>{error}</p>
           )}
@@ -153,12 +198,18 @@ export default function ComponentsPage() {
         Live queue
       </h2>
       {jobsError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{jobsError}</p>}
+      {retryError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{retryError}</p>}
       {!jobsError && jobs.length === 0 ? (
         <div className="empty-state">Nothing in flight. Queue a generation above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {jobs.map(job => (
-            <JobCard key={job.id} job={job} />
+            <JobCard
+              key={job.id}
+              job={job}
+              onRetryWithCorrection={handleRetryWithCorrection}
+              busy={retryingJobId === job.id}
+            />
           ))}
         </div>
       )}

@@ -33,7 +33,13 @@ const GenerateSchema = z.object({
   // 400 instead of being silently clamped deep in the generator.
   width: z.number().int().min(16).max(400).optional(),
   height: z.number().int().min(16).max(400).optional(),
-});
+  provider: z.enum(['claude', 'ollama']).optional(),
+  model: z.string().min(1).optional(),
+  ollamaHost: z.string().regex(/^https?:\/\//).optional(),
+}).refine(
+  input => input.provider !== 'ollama' || (!!input.model && !!input.ollamaHost),
+  { message: 'model and ollamaHost are required when provider is "ollama"' }
+);
 
 // These three keys are computed by THIS route from the validated
 // referenceImage/basedOnAssetId fields below - options is a generic,
@@ -41,7 +47,7 @@ const GenerateSchema = z.object({
 // otherwise inject a raw referenceImageFilename/referenceStrength/
 // basedOnAssetId directly into options and bypass ReferenceImageSchema's
 // size/type checks and basedOnAssetId's uuid format check entirely.
-const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height'] as const;
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested'] as const;
 
 export async function POST(req: NextRequest) {
   try {
@@ -61,6 +67,13 @@ export async function POST(req: NextRequest) {
 
     if (input.outputKind === 'component' && input.candidateCount !== undefined && input.candidateCount !== 1) {
       return NextResponse.json({ success: false, error: 'Component jobs do not support multi-candidate generation.' }, { status: 400 });
+    }
+
+    if (input.provider === 'ollama' && (input.outputKind === 'image' || input.outputKind === undefined)) {
+      return NextResponse.json({ success: false, error: 'Ollama is not supported for image (sprite) generation.' }, { status: 400 });
+    }
+    if (input.provider === 'ollama' && input.referenceImage) {
+      return NextResponse.json({ success: false, error: 'Ollama is not supported alongside a reference image.' }, { status: 400 });
     }
 
     let mergedOptions: Record<string, unknown> = { ...(input.options ?? {}) };
@@ -85,6 +98,11 @@ export async function POST(req: NextRequest) {
     }
     if (input.height !== undefined) {
       mergedOptions.height = input.height;
+    }
+    if (input.provider === 'ollama') {
+      mergedOptions.provider = input.provider;
+      mergedOptions.model = input.model;
+      mergedOptions.ollamaHost = input.ollamaHost;
     }
 
     const jobInput = {

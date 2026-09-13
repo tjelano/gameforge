@@ -11,6 +11,7 @@ import { assetService } from '@/lib/services/AssetService';
 import { loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referenceImage';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
+import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
 
 const POLL_INTERVAL_MS = 2000;
 const LOCK_FILE = path.join(getProjectRoot(), '.worker.lock');
@@ -91,6 +92,22 @@ async function loadSpriteBasedOnImage(basedOnAssetId: unknown, jobId: string): P
   }
 }
 
+/**
+ * Builds the providerOverride the Task-2 generators expect, from a job's
+ * raw options object. Returns undefined for a Claude job (the default) --
+ * only 'ollama' jobs ever set this. `correctionRequested` is omitted
+ * entirely rather than set to `false` when absent -- it's an optional
+ * field on OllamaProviderOverride, and omitting it (instead of always
+ * including an explicit `false`) keeps the object's shape identical to
+ * what a plain ollama job (no correction) already produces.
+ */
+function buildOllamaOverride(options: any): OllamaProviderOverride | undefined {
+  if (options.provider !== 'ollama') return undefined;
+  const override: OllamaProviderOverride = { type: 'ollama', host: options.ollamaHost, model: options.model };
+  if (options.ollamaCorrectionRequested === true) override.correctionRequested = true;
+  return override;
+}
+
 function markJobFailed(db: ReturnType<typeof DatabaseConnection.getInstance>, jobId: string, errorMessage: string): void {
   db.prepare(`UPDATE jobs SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`).run(errorMessage, Date.now(), jobId);
 }
@@ -139,12 +156,14 @@ export async function processJob(job: any): Promise<void> {
     switch (job.output_kind) {
       case 'theme': {
         const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
-        result = await getThemeGenerator().generate(job.prompt, job.style_id, referenceImage ?? undefined, basedOnContent);
+        const providerOverride = buildOllamaOverride(options);
+        result = await getThemeGenerator().generate(job.prompt, job.style_id, referenceImage ?? undefined, basedOnContent, undefined, providerOverride);
         break;
       }
       case 'component': {
         const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
-        result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent);
+        const providerOverride = buildOllamaOverride(options);
+        result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent, undefined, providerOverride);
         break;
       }
       case 'image': {

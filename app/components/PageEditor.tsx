@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import type { Asset } from '@/lib/database/schema';
+import { useOllamaModels } from '@/lib/hooks/useOllamaModels';
 
 export interface PageEditorProps {
   styleId: string; // for the "Suggest layout" AI call
@@ -28,6 +29,8 @@ export function PageEditor({
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
+  const [provider, setProvider] = useState<'claude' | string>('claude');
 
   function toggleComponent(assetId: string) {
     setComponentAssetIds(ids =>
@@ -72,7 +75,10 @@ export function PageEditor({
       const res = await fetch(`/api/styles/${styleId}/pages/suggest-layout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pageName: name.trim() }),
+        body: JSON.stringify({
+          pageName: name.trim(),
+          ...(provider !== 'claude' ? { provider: 'ollama', model: provider, ollamaHost } : {}),
+        }),
       });
       const body = await res.json();
       if (!body.success) {
@@ -109,6 +115,14 @@ export function PageEditor({
           Picks and orders components for a page named &ldquo;{name.trim() || '...'}&rdquo;, replacing the current selection below.
         </p>
         {suggestError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 4 }}>{suggestError}</p>}
+      </div>
+
+      <div className="field">
+        <label htmlFor="layout-provider">Model</label>
+        <select id="layout-provider" value={provider} onChange={e => setProvider(e.target.value)}>
+          <option value="claude">Claude</option>
+          {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
+        </select>
       </div>
 
       <div>

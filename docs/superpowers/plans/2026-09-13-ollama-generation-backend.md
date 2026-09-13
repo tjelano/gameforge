@@ -327,7 +327,8 @@ git commit -m "feat: add callOllamaTool, the Ollama-backed sibling of callClaude
 Same mechanical change applied 3 times — batched into one task per this project's own "batch small same-shape work" convention, since splitting it into 3 separate review gates for an identical pattern would be pure overhead.
 
 **Files:**
-- Modify: `lib/services/ThemeGenerator.ts`
+- Modify: `lib/services/ThemeGenerator.ts` (interface + `MockThemeGenerator` signature only — this file only re-exports/imports `ClaudeApiThemeGenerator`, it doesn't define it)
+- Modify: `lib/services/ClaudeApiThemeGenerator.ts` (**correction, found during Task 2's own implementation**: `ClaudeApiThemeGenerator` is defined in its own file, not inside `ThemeGenerator.ts` as originally written here — the dispatch logic below belongs in this file)
 - Modify: `lib/services/ComponentGenerator.ts`
 - Modify: `lib/services/PageLayoutSuggester.ts`
 - Modify: `test/themeGenerator.test.ts`
@@ -579,6 +580,7 @@ git commit -m "feat: thread an Ollama provider override through the 3 tool-calli
 - Modify: `worker.ts`
 - Modify: `test/generateRoute.test.ts`
 - Modify: `test/workerThemeRouting.test.ts`
+- Modify: `test/workerReferenceImage.test.ts` (**correction, found during Task 3's own implementation**: this pre-existing file has 3 assertions that call `toHaveBeenCalledWith(...)` on the theme generator with the OLD 4-positional-arg shape; once `worker.ts`'s `case 'theme':` branch always passes the 2 new trailing args, these 3 assertions fail on arg-count alone unless each gains `, undefined, undefined` at the end — no change to what's being tested, just matching the real, wider call signature)
 
 **Interfaces:**
 - Consumes: `ThemeGenerator.generate(...,providerOverride?)`, `ComponentGenerator.generate(...,providerOverride?)` (Task 2).
@@ -654,11 +656,17 @@ it('passes a providerOverride to the component generator when the job options re
   };
   await processJob(job as any);
 
-  expect(generateSpy).toHaveBeenCalledWith('a button', 'style-1', undefined, undefined, undefined, {
+  expect(generateSpy).toHaveBeenCalledWith('a button', 'style-1', undefined, undefined, undefined, undefined, {
     type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
   });
 });
 ```
+
+(**Correction, found during Task 3's own implementation**: the line above originally had one fewer
+`undefined` — `ComponentGenerator.generate()`'s real, Task-2-established signature is 7 positional
+parameters [`prompt, styleId, componentType?, referenceImage?, basedOnContent?, signal?,
+providerOverride?`], and the worker.ts call site below already calls it with all 7; the expected-args
+assertion needs 6 values before the override object, not 5, to match.)
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1918,36 +1926,48 @@ afterEach(async () => {
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
+// The route's schema requires jobId to be a real UUID (z.string().uuid(), matching the sibling
+// /api/jobs/retry/route.ts and how JobService.create() actually generates ids via
+// crypto.randomUUID()) -- a non-UUID literal like 'job-1' fails Zod validation and returns a
+// generic 400 before any of the route's own business-logic checks run. Found during this task's
+// own implementation: with non-UUID literals, 2 of these 4 tests failed outright on the wrong
+// status code, and a 3rd "passed" for the wrong reason (it expects 400 and got one, but from Zod
+// rejecting the malformed id, not from the business-logic branch its name claims to exercise).
+const JOB_ID_1 = '00000000-0000-0000-0000-000000000001';
+const JOB_ID_2 = '00000000-0000-0000-0000-000000000002';
+const JOB_ID_3 = '00000000-0000-0000-0000-000000000003';
+const JOB_ID_4 = '00000000-0000-0000-0000-000000000004';
+
 describe('POST /api/jobs/retry-with-correction', () => {
   it('401s when not logged in', async () => {
-    insertJob('job-1', 'failed', OLLAMA_NO_TOOL_CALL_ERROR_PREFIX, { provider: 'ollama' });
+    insertJob(JOB_ID_1, 'failed', OLLAMA_NO_TOOL_CALL_ERROR_PREFIX, { provider: 'ollama' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(new NextRequest('http://localhost/api/jobs/retry-with-correction', { method: 'POST', body: JSON.stringify({ jobId: 'job-1' }) }));
+    const res = await POST(new NextRequest('http://localhost/api/jobs/retry-with-correction', { method: 'POST', body: JSON.stringify({ jobId: JOB_ID_1 }) }));
     expect(res.status).toBe(401);
   });
 
   it('rejects a job that did not fail with the ollama-no-tool-call error', async () => {
-    insertJob('job-2', 'failed', 'some other network error', { provider: 'ollama' });
+    insertJob(JOB_ID_2, 'failed', 'some other network error', { provider: 'ollama' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(req('job-2'));
+    const res = await POST(req(JOB_ID_2));
     expect(res.status).toBe(400);
   });
 
   it('rejects a job that is not failed', async () => {
-    insertJob('job-3', 'complete', null, { provider: 'ollama' });
+    insertJob(JOB_ID_3, 'complete', null, { provider: 'ollama' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(req('job-3'));
+    const res = await POST(req(JOB_ID_3));
     expect(res.status).toBe(409);
   });
 
   it('resets the job to pending with ollamaCorrectionRequested set, preserving the rest of options', async () => {
-    insertJob('job-4', 'failed', `${OLLAMA_NO_TOOL_CALL_ERROR_PREFIX} for emit_theme`, { provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434' });
+    insertJob(JOB_ID_4, 'failed', `${OLLAMA_NO_TOOL_CALL_ERROR_PREFIX} for emit_theme`, { provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(req('job-4'));
+    const res = await POST(req(JOB_ID_4));
     expect(res.status).toBe(200);
 
     const db = DatabaseConnection.getInstance();
-    const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get('job-4') as any;
+    const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(JOB_ID_4) as any;
     expect(row.status).toBe('pending');
     expect(row.error_message).toBeNull();
     const options = JSON.parse(row.options);
