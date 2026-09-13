@@ -6,6 +6,9 @@ import {
   type PageLayoutComponentCandidate,
 } from '@/lib/services/PageLayoutSuggester';
 import { ANTHROPIC_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { callOllamaTool } from '@/lib/services/ollamaToolCall';
+
+vi.mock('@/lib/services/ollamaToolCall', () => ({ callOllamaTool: vi.fn() }));
 
 const CANDIDATES: PageLayoutComponentCandidate[] = [
   { id: 'aaaaaaaa-0000-0000-0000-000000000000', assetType: 'navbar', prompt: 'A dark navbar with a logo and links.' },
@@ -130,6 +133,16 @@ describe('ClaudeApiPageLayoutSuggester', () => {
     expect(sentSignal.aborted).toBe(false);
     controller.abort();
     expect(sentSignal.aborted).toBe(true);
+  });
+
+  it('calls callOllamaTool instead of callClaudeTool when a providerOverride is given', async () => {
+    (callOllamaTool as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ order: [0] });
+    const suggester = new ClaudeApiPageLayoutSuggester('fake-key', ANTHROPIC_PROVIDER);
+    const result = await suggester.suggest('Home', [{ id: 'c1', assetType: 'nav', prompt: 'navbar' }], undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+    expect(callOllamaTool).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'emit_page_layout' }));
+    expect(result).toEqual(['c1']);
   });
 });
 

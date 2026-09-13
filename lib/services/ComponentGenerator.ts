@@ -8,6 +8,7 @@ import { styleService } from '@/lib/services/StyleService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { callClaudeTool } from '@/lib/services/claudeToolCall';
+import { callOllamaTool, type OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 
@@ -23,7 +24,7 @@ export interface GeneratedComponent {
 }
 
 export interface ComponentGenerator {
-  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedComponent>;
+  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent>;
 }
 
 const TOOL_INPUT_SCHEMA = {
@@ -51,7 +52,7 @@ Respond by calling the emit_component tool with the component's html and css.`;
 export class ClaudeApiComponentGenerator implements ComponentGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedComponent> {
+  async generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent> {
     const style = await styleService.getById(styleId);
     const fullPrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType, basedOnContent);
 
@@ -62,17 +63,31 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
         ]
       : fullPrompt;
 
-    const toolInput = await callClaudeTool({
-      provider: this.provider,
-      apiKey: this.apiKey,
-      toolName: 'emit_component',
-      toolDescription: 'Emit a single website UI component as HTML and CSS.',
-      inputSchema: TOOL_INPUT_SCHEMA,
-      messages: [{ role: 'user', content }],
-      signal,
-      operationLabel: 'component generation',
-      truncatedMessage: 'the component could not be generated',
-    });
+    const toolInput = providerOverride
+      ? await callOllamaTool({
+          host: providerOverride.host,
+          model: providerOverride.model,
+          toolName: 'emit_component',
+          toolDescription: 'Emit a single website UI component as HTML and CSS.',
+          inputSchema: TOOL_INPUT_SCHEMA,
+          messages: [{ role: 'user', content: providerOverride.correctionRequested
+            ? `${fullPrompt}\n\nYou did not call the emit_component tool last time -- you must call it now with valid arguments matching its schema.`
+            : content }],
+          signal,
+          operationLabel: 'component generation',
+          truncatedMessage: 'the component could not be generated',
+        })
+      : await callClaudeTool({
+          provider: this.provider,
+          apiKey: this.apiKey,
+          toolName: 'emit_component',
+          toolDescription: 'Emit a single website UI component as HTML and CSS.',
+          inputSchema: TOOL_INPUT_SCHEMA,
+          messages: [{ role: 'user', content }],
+          signal,
+          operationLabel: 'component generation',
+          truncatedMessage: 'the component could not be generated',
+        });
 
     const raw = z.object({ html: z.string(), css: z.string() }).parse(toolInput);
     const tokens: ComponentTokens = {
@@ -95,7 +110,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
 }
 
 export class MockComponentGenerator implements ComponentGenerator {
-  async generate(prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string): Promise<GeneratedComponent> {
+  async generate(prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent> {
     const tokens: ComponentTokens = {
       html: '<button class="btn-primary">Buy now</button>',
       css: '.btn-primary { background: var(--color-accent); color: var(--color-bg); padding: calc(var(--space-unit) * 1.5) calc(var(--space-unit) * 3); border: none; border-radius: var(--radius-base); font-family: var(--font-body); }',

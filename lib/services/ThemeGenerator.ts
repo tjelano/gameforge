@@ -7,6 +7,7 @@ import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator'
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { ThemeTokensSchema, tokensToCss, type ThemeTokens } from '@/lib/services/themeTokens';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
+import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
 
 // Re-exported so every existing server-side caller of this module keeps
 // working unchanged — the pure schema/serialization logic itself now
@@ -20,7 +21,7 @@ export interface GeneratedTheme {
 }
 
 export interface ThemeGenerator {
-  generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedTheme>;
+  generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<GeneratedTheme>;
 }
 
 export function buildThemePrompt(styleParameters: string, jobPrompt: string, avoidColors: string[] = [], basedOnContent?: string): string {
@@ -51,7 +52,7 @@ const FIXED_MOCK_TOKENS: ThemeTokens = {
 };
 
 export class MockThemeGenerator implements ThemeGenerator {
-  async generate(prompt: string, _styleId: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string): Promise<GeneratedTheme> {
+  async generate(prompt: string, _styleId: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<GeneratedTheme> {
     const filename = `mock-theme-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.css`;
     const themesDir = path.join(getProjectRoot(), 'storage', 'themes');
     try {
