@@ -64,7 +64,7 @@ function combineWithTimeout(signal?: AbortSignal): AbortSignal {
 // Ollama call from this process: one in flight at a time, others wait
 // their turn. A single global lock, not per-host/per-model -- the
 // simplest thing that removes the real risk.
-// ponytail: global lock, per-account locks if throughput matters
+// ponytail: global lock, per-host/per-model locks if throughput matters
 let ollamaCallLock: Promise<void> = Promise.resolve();
 
 async function withOllamaLock<T>(fn: () => Promise<T>): Promise<T> {

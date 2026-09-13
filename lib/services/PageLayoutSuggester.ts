@@ -101,6 +101,9 @@ export class ClaudeApiPageLayoutSuggester implements PageLayoutSuggester {
 /** No API key configured — deterministic placeholder so local dev/tests without a key still work, same role as MockThemeGenerator/MockComponentGenerator. */
 export class MockPageLayoutSuggester implements PageLayoutSuggester {
   async suggest(_pageName: string, candidates: PageLayoutComponentCandidate[], _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<string[]> {
+    if (_providerOverride) {
+      throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
+    }
     return candidates.map(c => c.id);
   }
 }

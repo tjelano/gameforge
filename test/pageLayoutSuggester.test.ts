@@ -41,6 +41,13 @@ describe('MockPageLayoutSuggester', () => {
     const result = await suggester.suggest('Home', []);
     expect(result).toEqual([]);
   });
+
+  it('throws when given a providerOverride (mock generator cannot honor an ollama request)', async () => {
+    const suggester = new MockPageLayoutSuggester();
+    await expect(suggester.suggest('Home', CANDIDATES, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    })).rejects.toThrow(/mock generator is active/);
+  });
 });
 
 describe('ClaudeApiPageLayoutSuggester', () => {

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 const RECOMMENDED_MODELS = [
   {
     name: 'llama3-groq-tool-use:8b',
-    note: 'Recommended -- the only model in our own testing with real published benchmark evidence for tool-calling reliability.',
+    note: 'Recommended — the only model with real published benchmark evidence for tool-calling reliability (Berkeley Function-Calling Leaderboard).',
   },
 ] as const;
 
@@ -120,7 +120,13 @@ export default function OllamaSettingsPage() {
         buffer = lines.pop() ?? '';
         for (const line of lines) {
           if (!line.trim()) continue;
-          const update = JSON.parse(line) as { status: string; total?: number; completed?: number };
+          const update = JSON.parse(line) as { status?: string; error?: string; total?: number; completed?: number };
+          if (update.error) {
+            throw new Error(update.error);
+          }
+          if (!update.status) {
+            throw new Error('Received an unrecognized progress update from Ollama.');
+          }
           if (update.status === 'success') {
             setPullStatus('Installed');
           } else if (typeof update.total === 'number' && typeof update.completed === 'number' && update.total > 0) {

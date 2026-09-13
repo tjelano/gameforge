@@ -53,6 +53,9 @@ const FIXED_MOCK_TOKENS: ThemeTokens = {
 
 export class MockThemeGenerator implements ThemeGenerator {
   async generate(prompt: string, _styleId: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<GeneratedTheme> {
+    if (_providerOverride) {
+      throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
+    }
     const filename = `mock-theme-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.css`;
     const themesDir = path.join(getProjectRoot(), 'storage', 'themes');
     try {

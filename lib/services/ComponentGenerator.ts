@@ -111,6 +111,9 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
 
 export class MockComponentGenerator implements ComponentGenerator {
   async generate(prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent> {
+    if (_providerOverride) {
+      throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
+    }
     const tokens: ComponentTokens = {
       html: '<button class="btn-primary">Buy now</button>',
       css: '.btn-primary { background: var(--color-accent); color: var(--color-bg); padding: calc(var(--space-unit) * 1.5) calc(var(--space-unit) * 3); border: none; border-radius: var(--radius-base); font-family: var(--font-body); }',

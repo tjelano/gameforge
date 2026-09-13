@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { combineComponentHtml, parseComponentHtml, MockComponentGenerator, ClaudeApiComponentGenerator } from '@/lib/services/ComponentGenerator';
+import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
 import { ANTHROPIC_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { callOllamaTool } from '@/lib/services/ollamaToolCall';
 import { styleService } from '@/lib/services/StyleService';
@@ -49,6 +50,13 @@ describe('MockComponentGenerator', () => {
     const filePath = path.join(tempRoot, 'storage', 'components', result.path);
     const content = await fsPromises.readFile(filePath, 'utf-8');
     expect(content).toContain('<!DOCTYPE html>');
+  });
+
+  it('throws when given a providerOverride (mock generator cannot honor an ollama request)', async () => {
+    const generator = new MockComponentGenerator();
+    const providerOverride: OllamaProviderOverride = { type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b' };
+    await expect(generator.generate('a primary button', 'style-1', undefined, undefined, undefined, undefined, providerOverride))
+      .rejects.toThrow(/mock generator is active/);
   });
 });
 

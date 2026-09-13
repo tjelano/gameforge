@@ -129,6 +129,13 @@ describe('MockThemeGenerator', () => {
     ]);
     expect(a.path).not.toBe(b.path);
   });
+
+  it('throws when given a providerOverride (mock generator cannot honor an ollama request)', async () => {
+    const gen = new MockThemeGenerator();
+    await expect(gen.generate('x', STYLE_ID, undefined, undefined, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    })).rejects.toThrow(/mock generator is active/);
+  });
 });
 
 describe('ClaudeApiThemeGenerator', () => {

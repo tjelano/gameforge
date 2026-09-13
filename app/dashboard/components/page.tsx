@@ -29,6 +29,8 @@ export default function ComponentsPage() {
   const [imageError, setImageError] = useState<string | null>(null);
   const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
   const [provider, setProvider] = useState<'claude' | string>('claude');
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const activeStyleId = styleId || styles[0]?.id || '';
 
@@ -98,6 +100,9 @@ export default function ComponentsPage() {
   }
 
   async function handleRetryWithCorrection(jobId: string) {
+    if (retryingJobId) return;
+    setRetryingJobId(jobId);
+    setRetryError(null);
     try {
       const res = await fetch('/api/jobs/retry-with-correction', {
         method: 'POST',
@@ -105,9 +110,15 @@ export default function ComponentsPage() {
         body: JSON.stringify({ jobId }),
       });
       const body = await res.json();
-      if (body.success) refreshActive();
+      if (!body.success) {
+        setRetryError(body.error ?? 'Could not retry this job.');
+      } else {
+        refreshActive();
+      }
     } catch {
-      // Best-effort -- the job card's own error message is still visible either way.
+      setRetryError('Could not reach the server.');
+    } finally {
+      setRetryingJobId(null);
     }
   }
 
@@ -187,12 +198,18 @@ export default function ComponentsPage() {
         Live queue
       </h2>
       {jobsError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{jobsError}</p>}
+      {retryError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{retryError}</p>}
       {!jobsError && jobs.length === 0 ? (
         <div className="empty-state">Nothing in flight. Queue a generation above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {jobs.map(job => (
-            <JobCard key={job.id} job={job} onRetryWithCorrection={handleRetryWithCorrection} />
+            <JobCard
+              key={job.id}
+              job={job}
+              onRetryWithCorrection={handleRetryWithCorrection}
+              busy={retryingJobId === job.id}
+            />
           ))}
         </div>
       )}
