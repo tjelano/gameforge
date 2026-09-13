@@ -106,3 +106,24 @@ export const PageSchema = z.object({
   updated_at: z.number().int(),
 });
 export type Page = z.infer<typeof PageSchema>;
+
+export const CopilotConversationSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  created_by: z.string().min(1),
+  created_at: z.number().int(),
+  updated_at: z.number().int(),
+});
+export type CopilotConversation = z.infer<typeof CopilotConversationSchema>;
+
+export const CopilotMessageSchema = z.object({
+  id: z.string().uuid(),
+  conversation_id: z.string().uuid(),
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  tool_call: z.string().nullable(), // JSON-serialized {name, input}
+  provider: z.enum(['claude', 'ollama']).nullable(),
+  model: z.string().nullable(),
+  created_at: z.number().int(),
+});
+export type CopilotMessage = z.infer<typeof CopilotMessageSchema>;
