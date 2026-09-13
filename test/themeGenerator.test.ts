@@ -233,7 +233,7 @@ describe('ClaudeApiThemeGenerator', () => {
   });
 
   it('throws with the response status when the API call itself fails', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('rate limited', { status: 429 }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response('rate limited', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
@@ -334,5 +334,31 @@ describe('ClaudeApiThemeGenerator', () => {
 
     const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
     await expect(gen.generate('x', STYLE_ID)).resolves.toBeDefined();
+  });
+
+  it('combines a caller-supplied signal with the internal request timeout, so aborting it aborts the request', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        id: 'msg_8', type: 'message', role: 'assistant',
+        content: [{
+          type: 'tool_use', id: 'tool_1', name: 'emit_theme',
+          input: {
+            colorBackground: '#1a1420', colorForeground: '#f0e6d2', colorAccent: '#e8a33d', colorBorder: '#4a3728',
+            fontHeading: "'Cinzel', serif", fontBody: "'EB Garamond', serif", spaceUnit: '8px', radiusBase: '4px',
+          },
+        }],
+        stop_reason: 'tool_use',
+      }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const gen = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await gen.generate('x', STYLE_ID, undefined, undefined, controller.signal);
+
+    const sentSignal = (fetchMock.mock.calls[0][1] as RequestInit).signal as AbortSignal;
+    expect(sentSignal.aborted).toBe(false);
+    controller.abort();
+    expect(sentSignal.aborted).toBe(true);
   });
 });

@@ -42,41 +42,20 @@ class GitServiceImpl {
   async exportToJson(): Promise<void> {
     await this.ensureDirectoriesExist();
 
-    const styles = await styleService.getAll();
-    const assets = await assetService.getAll();
-    const users = await userService.getAll();
-    const presets = await presetService.getAll();
-    const pages = await pageService.getAll();
+    const exportGroups: { items: { id: string }[]; dir: string; prefix: string }[] = [
+      { items: await styleService.getAll(), dir: 'styles', prefix: 'style' },
+      { items: await assetService.getAll(), dir: 'assets', prefix: 'asset' },
+      { items: await userService.getAll(), dir: 'users', prefix: 'user' },
+      { items: await presetService.getAll(), dir: 'presets', prefix: 'preset' },
+      { items: await pageService.getAll(), dir: 'pages', prefix: 'page' },
+    ];
 
-    const stylesDir = path.join(getProjectRoot(), 'data', 'styles');
-    const assetsDir = path.join(getProjectRoot(), 'data', 'assets');
-    const usersDir = path.join(getProjectRoot(), 'data', 'users');
-    const presetsDir = path.join(getProjectRoot(), 'data', 'presets');
-    const pagesDir = path.join(getProjectRoot(), 'data', 'pages');
-
-    for (const style of styles) {
-      const filePath = path.join(stylesDir, `style-${style.id}.json`);
-      await fsPromises.writeFile(filePath, JSON.stringify(style, null, 2), 'utf-8');
-    }
-
-    for (const asset of assets) {
-      const filePath = path.join(assetsDir, `asset-${asset.id}.json`);
-      await fsPromises.writeFile(filePath, JSON.stringify(asset, null, 2), 'utf-8');
-    }
-
-    for (const user of users) {
-      const filePath = path.join(usersDir, `user-${user.id}.json`);
-      await fsPromises.writeFile(filePath, JSON.stringify(user, null, 2), 'utf-8');
-    }
-
-    for (const preset of presets) {
-      const filePath = path.join(presetsDir, `preset-${preset.id}.json`);
-      await fsPromises.writeFile(filePath, JSON.stringify(preset, null, 2), 'utf-8');
-    }
-
-    for (const page of pages) {
-      const filePath = path.join(pagesDir, `page-${page.id}.json`);
-      await fsPromises.writeFile(filePath, JSON.stringify(page, null, 2), 'utf-8');
+    for (const { items, dir, prefix } of exportGroups) {
+      const targetDir = path.join(getProjectRoot(), 'data', dir);
+      for (const item of items) {
+        const filePath = path.join(targetDir, `${prefix}-${item.id}.json`);
+        await fsPromises.writeFile(filePath, JSON.stringify(item, null, 2), 'utf-8');
+      }
     }
   }
 
@@ -300,7 +279,10 @@ class GitServiceImpl {
       try {
         const content = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'components', asset.image_path), 'utf-8');
         if (hashContent(content) === preHash) {
-          await assetService.update(assetId, { editedExternally: true });
+          // Trusted system reconciliation (git pull/import), not a specific
+          // user's action — bypasses ownership via isAdmin, same as
+          // cleanupOrphanedImages() bypasses the per-user asset model.
+          await assetService.update(assetId, asset.created_by, { editedExternally: true }, true);
         }
       } catch (e: any) {
         if (e.code !== 'ENOENT') console.error(`Failed to re-check trusted component ${asset.image_path} after import:`, e);

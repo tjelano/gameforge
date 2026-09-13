@@ -6,18 +6,23 @@ import { getCurrentUser } from '@/lib/utils/session';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser(req);
-  if (!user) {
-    return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
-  }
+  try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
 
-  const { id } = await params;
-  const thumbnail = await driveService.getThumbnail(id);
-  if (!thumbnail) {
-    return NextResponse.json({ success: false, error: 'No thumbnail available' }, { status: 404 });
-  }
+    const { id } = await params;
+    const thumbnail = await driveService.getThumbnail(id);
+    if (!thumbnail) {
+      return NextResponse.json({ success: false, error: 'No thumbnail available' }, { status: 404 });
+    }
 
-  return new NextResponse(Readable.toWeb(thumbnail.stream) as any, {
-    headers: { 'Content-Type': thumbnail.mimeType },
-  });
+    return new NextResponse(Readable.toWeb(thumbnail.stream) as any, {
+      headers: { 'Content-Type': thumbnail.mimeType },
+    });
+  } catch (error: any) {
+    console.error('Failed to fetch file thumbnail:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
 }

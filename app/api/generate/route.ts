@@ -28,6 +28,11 @@ const GenerateSchema = z.object({
   candidateCount: z.union([z.literal(1), z.literal(3), z.literal(5)]).optional(),
   referenceImage: ReferenceImageSchema.optional(),
   basedOnAssetId: z.string().uuid().optional(),
+  // 16-400 matches PixellabGenerator's own MIN_SIZE/MAX_SIZE clamp range —
+  // validated here too so an out-of-range value is rejected with a clear
+  // 400 instead of being silently clamped deep in the generator.
+  width: z.number().int().min(16).max(400).optional(),
+  height: z.number().int().min(16).max(400).optional(),
 });
 
 // These three keys are computed by THIS route from the validated
@@ -36,7 +41,7 @@ const GenerateSchema = z.object({
 // otherwise inject a raw referenceImageFilename/referenceStrength/
 // basedOnAssetId directly into options and bypass ReferenceImageSchema's
 // size/type checks and basedOnAssetId's uuid format check entirely.
-const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId'] as const;
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height'] as const;
 
 export async function POST(req: NextRequest) {
   try {
@@ -74,6 +79,12 @@ export async function POST(req: NextRequest) {
     }
     if (input.basedOnAssetId) {
       mergedOptions.basedOnAssetId = input.basedOnAssetId;
+    }
+    if (input.width !== undefined) {
+      mergedOptions.width = input.width;
+    }
+    if (input.height !== undefined) {
+      mergedOptions.height = input.height;
     }
 
     const jobInput = {

@@ -216,7 +216,7 @@ describe('GET /api/assets/[id]/export', () => {
     // so it is the reliable "sanitizer would strip this" payload — and the
     // exact case reverse-sync's trustAsEdited path exists for.
     const { assetId } = await makeComponentAsset('Trusted Style', IMG_DOC);
-    await assetService.update(assetId, { editedExternally: true });
+    await assetService.update(assetId, 'user-1', { editedExternally: true });
     const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
     const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
 

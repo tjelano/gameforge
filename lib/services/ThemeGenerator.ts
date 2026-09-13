@@ -20,7 +20,7 @@ export interface GeneratedTheme {
 }
 
 export interface ThemeGenerator {
-  generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedTheme>;
+  generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedTheme>;
 }
 
 export function buildThemePrompt(styleParameters: string, jobPrompt: string, avoidColors: string[] = [], basedOnContent?: string): string {

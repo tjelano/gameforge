@@ -10,6 +10,8 @@ export interface GenerateOptions {
   signal?: AbortSignal;
   referenceImage?: ReferenceImagePayload;
   referenceStrength?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface GeneratedImage {
@@ -31,12 +33,18 @@ export interface ImageGenerator {
 const PLACEHOLDER_SIZE = 64;
 // GameForge's own --accent amber, so a mock placeholder reads as
 // "this is a stand-in," not a broken/empty image.
-const PLACEHOLDER_PNG = createPlaceholderPng(PLACEHOLDER_SIZE, [0xe8, 0xa3, 0x3d, 0xff]);
+const PLACEHOLDER_PNG = createPlaceholderPng(PLACEHOLDER_SIZE);
 
 export class MockGenerator implements ImageGenerator {
   async generate(prompt: string, styleId: string, options?: GenerateOptions): Promise<GeneratedImage> {
     const signal = options?.signal;
     const filename = `mock-${Date.now()}.png`;
+    // Mirror generateUiAsset's approach: use the max of width/height as the PNG size
+    // (since createPlaceholderPng only draws squares), but return metadata with the
+    // actual requested dimensions. Fallback to PLACEHOLDER_SIZE if not specified.
+    const width = typeof options?.width === 'number' ? options.width : PLACEHOLDER_SIZE;
+    const height = typeof options?.height === 'number' ? options.height : PLACEHOLDER_SIZE;
+    const longSide = Math.max(width, height);
 
     await new Promise<void>((resolve, reject) => {
       if (signal?.aborted) {
@@ -52,14 +60,15 @@ export class MockGenerator implements ImageGenerator {
       }
     });
 
+    const placeholder = longSide === PLACEHOLDER_SIZE ? PLACEHOLDER_PNG : createPlaceholderPng(longSide);
     const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
     await fsPromises.mkdir(imagesDir, { recursive: true });
-    await fsPromises.writeFile(path.join(imagesDir, filename), PLACEHOLDER_PNG);
+    await fsPromises.writeFile(path.join(imagesDir, filename), placeholder);
 
     return {
       path: filename,
       prompt,
-      metadata: { width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE, format: 'png' },
+      metadata: { width, height, format: 'png' },
     };
   }
 
@@ -74,7 +83,7 @@ export class MockGenerator implements ImageGenerator {
     // dimensions means a landscape/portrait placeholder won't exactly match
     // the requested aspect ratio — fine for a mock no one inspects pixel-by-pixel.
     const longSide = Math.max(imageSize.width, imageSize.height);
-    const placeholder = createPlaceholderPng(longSide, [0xe8, 0xa3, 0x3d, 0xff]);
+    const placeholder = createPlaceholderPng(longSide);
 
     const imagesDir = path.join(getProjectRoot(), 'storage', 'images');
     await fsPromises.mkdir(imagesDir, { recursive: true });

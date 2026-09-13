@@ -92,6 +92,19 @@ describe('presetService.applyPreset', () => {
     expect(result).toEqual({ error: 'STYLE_NOT_FOUND' });
   });
 
+  it("returns STYLE_NOT_FOUND for a soft-deleted existingStyleId — this is the behavior change: applyPreset() used to call styleService.getById(), which happily queued jobs against a deleted style", async () => {
+    const existing = await styleService.create({ name: 'Deleted Bible', createdBy: 'user-1', parameters: '{}' });
+    await styleService.softDelete(existing.id, 'user-1');
+    const preset = await makeFullPreset();
+
+    const result = await presetService.applyPreset(preset.id, { existingStyleId: existing.id }, 'user-1');
+    expect(result).toEqual({ error: 'STYLE_NOT_FOUND' });
+
+    const db = DatabaseConnection.getInstance();
+    const jobCount = (db.prepare('SELECT COUNT(*) as c FROM jobs').get() as { c: number }).c;
+    expect(jobCount).toBe(0);
+  });
+
   it('returns INVALID_TARGET when called directly with neither newStyleName nor existingStyleId, and creates nothing', async () => {
     // The apply API route enforces "exactly one" via a Zod .refine() before
     // ever calling this method - this test calls the service directly,

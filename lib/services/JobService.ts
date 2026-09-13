@@ -60,10 +60,10 @@ class JobServiceImpl {
     return (await this.getById(id))!;
   }
 
-  /** Resets a job back to pending so the worker picks it up again. Clears result_path — the caller is responsible for freeing the old image file first via a shared safety helper. */
+  /** Resets a job back to pending so the worker picks it up again. Clears result_path — the caller is responsible for freeing the old image file first via a shared safety helper. Also clears error_message so a retried job doesn't carry a stale error from its previous failure while pending/processing. */
   async resetForRetry(id: string): Promise<Job | null> {
     const db = DatabaseConnection.getInstance();
-    db.prepare(`UPDATE jobs SET status = 'pending', result_path = NULL, updated_at = ? WHERE id = ?`)
+    db.prepare(`UPDATE jobs SET status = 'pending', result_path = NULL, error_message = NULL, updated_at = ? WHERE id = ?`)
       .run(Date.now(), id);
     return this.getById(id);
   }

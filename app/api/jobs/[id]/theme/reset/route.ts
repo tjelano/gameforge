@@ -4,15 +4,24 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { jobService } from '@/lib/services/JobService';
 import { ThemeTokensSchema, tokensToCss } from '@/lib/services/ThemeGenerator';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const { id } = await params;
     const job = await jobService.getById(id);
     if (!job) {
       return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
+    }
+    if (job.created_by !== user.id && !user.is_admin) {
+      return NextResponse.json({ success: false, error: 'Only the creator can reset this job.' }, { status: 403 });
     }
     if (job.status !== 'complete') {
       return NextResponse.json({ success: false, error: 'Only a completed job can be reset' }, { status: 409 });

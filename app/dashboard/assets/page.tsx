@@ -11,18 +11,27 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const res = await fetch(`/api/assets?limit=${PAGE_SIZE}&offset=0`);
-      const body = await res.json();
-      if (ignore) return;
-      if (body.success) {
-        setAssets(body.data);
-        setHasMore(body.data.length === PAGE_SIZE);
+      try {
+        const res = await fetch(`/api/assets?limit=${PAGE_SIZE}&offset=0`);
+        const body = await res.json();
+        if (ignore) return;
+        if (body.success) {
+          setAssets(body.data);
+          setHasMore(body.data.length === PAGE_SIZE);
+          setError(null);
+        } else {
+          setError(body.error ?? 'Request failed.');
+        }
+      } catch {
+        if (!ignore) setError('Could not reach the server.');
+      } finally {
+        if (!ignore) setLoading(false);
       }
-      setLoading(false);
     })();
     return () => {
       ignore = true;
@@ -38,7 +47,12 @@ export default function AssetsPage() {
       if (body.success) {
         setAssets(prev => [...prev, ...body.data]);
         setHasMore(body.data.length === PAGE_SIZE);
+        setError(null);
+      } else {
+        setError(body.error ?? 'Request failed.');
       }
+    } catch {
+      setError('Could not reach the server.');
     } finally {
       setLoadingMore(false);
     }
@@ -49,7 +63,9 @@ export default function AssetsPage() {
       <h1 className="page-title">Assets</h1>
       <p className="page-subtitle">Everything you&apos;ve promoted, ready to export to Godot.</p>
 
-      {!loading && assets.length === 0 ? (
+      {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
+
+      {!loading && !error && assets.length === 0 ? (
         <div className="empty-state">
           Nothing promoted yet. Review completed jobs on the <strong>Jobs</strong> page.
         </div>

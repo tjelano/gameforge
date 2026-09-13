@@ -45,7 +45,7 @@ describe('assetService.getActiveThemeAssetsForStyle', () => {
   it('excludes soft-deleted theme assets', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const theme = await assetService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', imagePath: 'x.css', outputKind: 'theme' });
-    await assetService.softDelete(theme.id);
+    await assetService.softDelete(theme.id, 'user-1');
     const result = await assetService.getActiveThemeAssetsForStyle(style.id);
     expect(result).toEqual([]);
   });

@@ -1,6 +1,7 @@
 import fsPromises from 'fs/promises';
 import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
+import { styleService } from '@/lib/services/StyleService';
 import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
 import { parseComponentHtml } from '@/lib/services/componentDocument';
@@ -237,9 +238,13 @@ interface ConvertedComponent {
 const SUBDIR_PATTERN = /^[a-z0-9-]+$/;
 
 class SiteExporterImpl {
-  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' | 'EXPORT_IN_PROGRESS' }> {
+  async exportSite(styleId: string, subdir: string): Promise<SiteExportResult | { error: 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' | 'EXPORT_IN_PROGRESS' | 'STYLE_NOT_FOUND' }> {
     if (!SUBDIR_PATTERN.test(subdir)) {
       return { error: 'INVALID_SUBDIR' };
+    }
+
+    if (!(await styleService.getActiveById(styleId))) {
+      return { error: 'STYLE_NOT_FOUND' };
     }
 
     const exportsRootDir = path.join(getProjectRoot(), 'storage', 'exports');

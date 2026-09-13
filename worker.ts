@@ -91,6 +91,10 @@ async function loadSpriteBasedOnImage(basedOnAssetId: unknown, jobId: string): P
   }
 }
 
+function markJobFailed(db: ReturnType<typeof DatabaseConnection.getInstance>, jobId: string, errorMessage: string): void {
+  db.prepare(`UPDATE jobs SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`).run(errorMessage, Date.now(), jobId);
+}
+
 export async function processJob(job: any): Promise<void> {
   const db = DatabaseConnection.getInstance();
 
@@ -101,7 +105,7 @@ export async function processJob(job: any): Promise<void> {
     // Malformed options JSON is a hard failure, not something to
     // silently ignore or default around — it means the row was
     // written by something that skipped the Zod contract.
-    db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+    markJobFailed(db, job.id, e instanceof Error ? e.message : String(e));
     console.error(`❌ Job ${job.id} has malformed options JSON:`, e);
     return;
   }
@@ -116,7 +120,7 @@ export async function processJob(job: any): Promise<void> {
   if (isUiSheet) {
     const parsed = UiSheetOptionsSchema.safeParse(options);
     if (!parsed.success) {
-      db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+      markJobFailed(db, job.id, parsed.error.message);
       console.error(`❌ Job ${job.id} has invalid UI sheet options:`, parsed.error.message);
       return;
     }
@@ -127,6 +131,8 @@ export async function processJob(job: any): Promise<void> {
     typeof options.referenceImageFilename === 'string' ? options.referenceImageFilename : undefined
   );
   const referenceStrength = typeof options.referenceStrength === 'number' ? options.referenceStrength : undefined;
+  const width = typeof options.width === 'number' ? options.width : undefined;
+  const height = typeof options.height === 'number' ? options.height : undefined;
 
   try {
     let result: { path: string };
@@ -142,10 +148,15 @@ export async function processJob(job: any): Promise<void> {
         break;
       }
       case 'image': {
+        // No AbortController is constructed here — every generator (Theme,
+        // Component, PageLayout, Pixellab/Image) now accepts an optional
+        // signal (see Tasks 18-19), but nothing in this app has a cancel-job
+        // feature to produce one yet. Wiring one up is out of scope until
+        // a cancel-job feature is actually requested.
         const spriteReferenceImage = referenceImage ?? (await loadSpriteBasedOnImage(options.basedOnAssetId, job.id));
         result = sheetOptions
           ? await getImageGenerator().generateUiAsset(job.prompt, sheetOptions.pieces, sheetOptions.imageSize, sheetOptions.colorPalette)
-          : await getImageGenerator().generate(job.prompt, job.style_id, { referenceImage: spriteReferenceImage, referenceStrength });
+          : await getImageGenerator().generate(job.prompt, job.style_id, { referenceImage: spriteReferenceImage, referenceStrength, width, height });
         break;
       }
       default:
@@ -161,7 +172,7 @@ export async function processJob(job: any): Promise<void> {
       .run(result.path, Date.now(), job.id);
     console.log(`✅ Job ${job.id} complete -> ${result.path}`);
   } catch (error: any) {
-    db.prepare(`UPDATE jobs SET status = 'failed', updated_at = ? WHERE id = ?`).run(Date.now(), job.id);
+    markJobFailed(db, job.id, error instanceof Error ? error.message : String(error));
     console.error(`❌ Job ${job.id} failed:`, error.message);
   }
 }

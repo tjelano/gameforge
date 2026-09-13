@@ -10,8 +10,11 @@ import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
 import { PATCH } from '@/app/api/jobs/[id]/component/route';
+import { seedSession } from '@/test/helpers/testSession';
 
 let tempRoot: string;
+let cookieHeader: string;
+let userId: string;
 
 const ORIGINAL: ComponentTokens = {
   html: '<button class="btn-primary">Buy now</button>',
@@ -23,10 +26,10 @@ const EDITED: ComponentTokens = {
 };
 
 async function makeCompleteComponentJob(): Promise<{ jobId: string; filename: string }> {
-  const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+  const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
   const filename = `component-${crypto.randomUUID()}.html`;
   await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', filename), combineComponentHtml(ORIGINAL));
-  const job = await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component' });
+  const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'component', prompt: 'x', outputKind: 'component' });
   DatabaseConnection.getInstance()
     .prepare("UPDATE jobs SET status = 'complete', result_path = ? WHERE id = ?")
     .run(filename, job.id);
@@ -45,6 +48,9 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  const { userId: newUserId, cookieHeader: newCookieHeader } = await seedSession();
+  userId = newUserId;
+  cookieHeader = newCookieHeader;
 });
 
 afterEach(async () => {
@@ -56,7 +62,7 @@ afterEach(async () => {
 function patchRequest(tokens: ComponentTokens): NextRequest {
   return new NextRequest('http://localhost/x', {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
     body: JSON.stringify(tokens),
   });
 }
@@ -103,15 +109,15 @@ describe('PATCH /api/jobs/[id]/component', () => {
   });
 
   it('rejects with 409 when the job is not in complete status', async () => {
-    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
-    const job = await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'component', prompt: 'x', outputKind: 'component' });
+    const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
+    const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'component', prompt: 'x', outputKind: 'component' });
     const res = await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: job.id }) });
     expect(res.status).toBe(409);
   });
 
   it('rejects with 400 when the job is not a component job', async () => {
-    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
-    const job = await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'sprite', prompt: 'x', outputKind: 'image' });
+    const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
+    const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'sprite', prompt: 'x', outputKind: 'image' });
     DatabaseConnection.getInstance().prepare("UPDATE jobs SET status = 'complete', result_path = 'x.png' WHERE id = ?").run(job.id);
     const res = await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: job.id }) });
     expect(res.status).toBe(400);

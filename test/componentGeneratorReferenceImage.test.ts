@@ -68,4 +68,95 @@ describe('ClaudeApiComponentGenerator with a reference image', () => {
     const sentBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(sentBody.messages[0].content).toContain('<button class="btn">Go</button>');
   });
+
+  it('combines a caller-supplied signal with the internal request timeout', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const fetchMock = mockToolUseResponse();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await generator.generate('a button', style.id, undefined, undefined, undefined, controller.signal);
+
+    const sentSignal = (fetchMock.mock.calls[0][1] as RequestInit).signal as AbortSignal;
+    expect(sentSignal.aborted).toBe(false);
+    controller.abort();
+    expect(sentSignal.aborted).toBe(true);
+  });
+});
+
+describe('ClaudeApiComponentGenerator error paths', () => {
+  it('throws when the response has no tool_use block', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'I refuse to use the tool.' }],
+        stop_reason: 'end_turn',
+      }), { status: 200 })
+    ));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await expect(generator.generate('a button', style.id)).rejects.toThrow(/tool_use/i);
+  });
+
+  it('throws when the tool_use input fails html/css schema validation', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        content: [{ type: 'tool_use', id: 't1', name: 'emit_component', input: { html: '<button>Go</button>' } }], // missing css
+        stop_reason: 'tool_use',
+      }), { status: 200 })
+    ));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await expect(generator.generate('a button', style.id)).rejects.toThrow();
+  });
+
+  it('throws a distinct max_tokens error when the response was truncated before completing the tool call', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'Thinking about the ' }],
+        stop_reason: 'max_tokens',
+      }), { status: 200 })
+    ));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await expect(generator.generate('a button', style.id)).rejects.toThrow(/max_tokens/i);
+  });
+
+  it('throws with the response status when the API call itself fails', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('rate limited', { status: 429 })));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await expect(generator.generate('a button', style.id)).rejects.toThrow(/429/);
+  });
+});
+
+describe("ClaudeApiComponentGenerator sanitizes the raw model output before writing", () => {
+  it("writes html with a disallowed attribute/tag stripped, not the model's raw output", async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        content: [{
+          type: 'tool_use', id: 't1', name: 'emit_component',
+          input: {
+            html: '<button onclick="alert(1)">Go</button><script>alert(2)</script>',
+            css: '.x { color: var(--color-accent); }',
+          },
+        }],
+        stop_reason: 'tool_use',
+      }), { status: 200 })
+    ));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.generate('a button', style.id);
+
+    const filePath = path.join(tempRoot, 'storage', 'components', result.path);
+    const content = await fsPromises.readFile(filePath, 'utf-8');
+    expect(content).not.toContain('onclick');
+    expect(content).not.toContain('<script>');
+    expect(content).toContain('<button>Go</button>');
+  });
 });

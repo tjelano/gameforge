@@ -26,15 +26,17 @@ class AssetServiceImpl {
     return (await this.getById(id))!;
   }
 
-  async update(id: string, patch: {
+  /** Only the creator, or an admin, may edit an asset. Mirrors StyleService.update(). */
+  async update(id: string, requestingUserId: string, patch: {
     prompt?: string;
     assetType?: string;
     nineSliceMargins?: NineSliceMargins | null;
     states?: string[];
     editedExternally?: boolean;
-  }): Promise<Asset | null> {
+  }, isAdmin: boolean = false): Promise<Asset | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
     const existing = await this.getById(id);
-    if (!existing) return null;
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
 
     const nineSliceMargins = patch.nineSliceMargins !== undefined
@@ -51,7 +53,7 @@ class AssetServiceImpl {
       editedExternally,
       id
     );
-    return this.getById(id);
+    return (await this.getById(id))!;
   }
   /** All non-deleted assets, newest first. */
   async getActiveAssets(): Promise<Asset[]> {
@@ -133,7 +135,11 @@ class AssetServiceImpl {
     return rows.map(row => AssetSchema.parse(row));
   }
 
-  async softDelete(id: string): Promise<void> {
+  /** Only the creator, or an admin, may delete an asset. Mirrors update() above. */
+  async softDelete(id: string, requestingUserId: string, isAdmin: boolean = false): Promise<void | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
+    const existing = await this.getById(id);
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
     db.prepare('UPDATE assets SET is_deleted = 1 WHERE id = ?').run(id);
   }

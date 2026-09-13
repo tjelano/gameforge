@@ -9,13 +9,6 @@ class UserServiceImpl {
     return rows.map(row => UserSchema.parse(row));
   }
 
-  /** No soft-delete concept for users (unlike styles/assets) — this exists
-   *  so call sites can express "the users I'd show someone" without
-   *  assuming getAll()'s ordering/shape is stable long-term. */
-  async getActiveUsers(): Promise<User[]> {
-    return this.getAll();
-  }
-
   async getById(id: string): Promise<User | null> {
     const db = DatabaseConnection.getInstance();
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id);

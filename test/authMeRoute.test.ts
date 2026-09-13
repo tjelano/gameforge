@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -47,5 +47,16 @@ describe('GET /api/auth/me', () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.data).toBeNull();
+  });
+
+  it('returns a clean 500 instead of crashing when the session lookup throws', async () => {
+    const { sessionService } = await import('@/lib/services/SessionService');
+    const spy = vi.spyOn(sessionService, 'getUserByToken').mockRejectedValueOnce(new Error('db exploded'));
+    const req = new NextRequest('http://localhost/api/auth/me', { headers: { Cookie: 'session=whatever' } });
+    const res = await GET(req);
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.success).toBe(false);
+    spy.mockRestore();
   });
 });

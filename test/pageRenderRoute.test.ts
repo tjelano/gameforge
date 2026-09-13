@@ -73,7 +73,7 @@ describe('GET /api/pages/[id]/render', () => {
       '<!DOCTYPE html><html><head><style>.title { color: blue; }</style></head><body><h1 class="title">Hero</h1></body></html>', 'hero');
 
     const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([navAsset.id, heroAsset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([navAsset.id, heroAsset.id]) });
 
     const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
     expect(res.status).toBe(200);
@@ -91,7 +91,7 @@ describe('GET /api/pages/[id]/render', () => {
       const validAsset = await makeComponentAsset(style.id, 'valid.html',
         '<!DOCTYPE html><html><head><style>.a {}</style></head><body><p>Still Here</p></body></html>');
       const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
-      await pageService.update(page.id, {
+      await pageService.update(page.id, 'user-1', {
         componentAssetIds: JSON.stringify(['00000000-0000-0000-0000-000000000000', validAsset.id]),
       });
 
@@ -109,7 +109,7 @@ describe('GET /api/pages/[id]/render', () => {
     const hostileAsset = await makeComponentAsset(style.id, 'hostile.html',
       '<!DOCTYPE html><html><head><style>.a {}</style></head><body><button onclick="alert(1)">Go</button><script>alert(document.cookie)</script></body></html>');
     const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([hostileAsset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([hostileAsset.id]) });
 
     const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
     expect(res.status).toBe(200);
@@ -126,7 +126,7 @@ describe('GET /api/pages/[id]/render', () => {
     const validAsset = await makeComponentAsset(style.id, 'valid.html',
       '<!DOCTYPE html><html><head><style>.a {}</style></head><body><p>Still Here</p></body></html>');
     const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([hostileAsset.id, validAsset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([hostileAsset.id, validAsset.id]) });
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -148,9 +148,9 @@ describe('GET /api/pages/[id]/render', () => {
     // check this route stripped it back out on every page preview/download.
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_DOC);
-    await assetService.update(asset.id, { editedExternally: true });
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
     const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
     expect(res.status).toBe(200);
@@ -163,7 +163,7 @@ describe('GET /api/pages/[id]/render', () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await makeComponentAsset(style.id, 'untrusted.html', IMG_DOC);
     const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
-    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
 
     const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
     expect(res.status).toBe(200);

@@ -13,13 +13,25 @@ const SiteExportSchema = z.object({
 // type - keeping this as a named Record key type (not Record<string, ...>)
 // means a future error kind added there but forgotten here fails `tsc`
 // instead of silently resolving to `undefined` at runtime.
-type ExportSiteErrorKind = 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' | 'EXPORT_IN_PROGRESS';
+type ExportSiteErrorKind = 'NOTHING_TO_EXPORT' | 'ALREADY_EXISTS' | 'INVALID_SUBDIR' | 'EXPORT_IN_PROGRESS' | 'STYLE_NOT_FOUND';
 
 const ERROR_MESSAGES: Record<ExportSiteErrorKind, string> = {
   NOTHING_TO_EXPORT: 'This Style Bible has no pages to export.',
   ALREADY_EXISTS: 'That folder name is already used — pick another.',
   INVALID_SUBDIR: 'subdir must contain only lowercase letters, numbers, and hyphens.',
   EXPORT_IN_PROGRESS: 'Another export to this folder is already running — try again in a moment.',
+  STYLE_NOT_FOUND: 'This Style Bible was deleted.',
+};
+
+// Every other NOT_FOUND-shaped error in this codebase maps to 404 - this one
+// used to map to 400 along with every other error kind above. Only
+// STYLE_NOT_FOUND gets its own status; everything else still maps to 400.
+const ERROR_STATUS: Record<ExportSiteErrorKind, number> = {
+  NOTHING_TO_EXPORT: 400,
+  ALREADY_EXISTS: 400,
+  INVALID_SUBDIR: 400,
+  EXPORT_IN_PROGRESS: 400,
+  STYLE_NOT_FOUND: 404,
 };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -40,7 +52,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const result = await siteExporter.exportSite(id, input.subdir);
 
     if ('error' in result) {
-      return NextResponse.json({ success: false, error: ERROR_MESSAGES[result.error] }, { status: 400 });
+      return NextResponse.json({ success: false, error: ERROR_MESSAGES[result.error] }, { status: ERROR_STATUS[result.error] });
     }
 
     return NextResponse.json({ success: true, data: result });

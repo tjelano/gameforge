@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
 
 export default function StylesPage() {
-  const { styles, loading, refresh } = useStyles();
+  const { styles, loading, error: stylesError, refresh } = useStyles();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [forkingId, setForkingId] = useState<string | null>(null);
+  const [forkError, setForkError] = useState<string | null>(null);
   const [importName, setImportName] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -18,14 +20,22 @@ export default function StylesPage() {
     e.preventDefault();
     if (!name.trim() || creating) return;
     setCreating(true);
+    setCreateError(null);
     try {
-      await fetch('/api/styles', {
+      const res = await fetch('/api/styles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim() }),
       });
+      const body = await res.json();
+      if (!body.success) {
+        setCreateError(body.error ?? 'Could not create Style Bible.');
+        return;
+      }
       setName('');
       await refresh();
+    } catch {
+      setCreateError('Could not reach the server.');
     } finally {
       setCreating(false);
     }
@@ -65,9 +75,17 @@ export default function StylesPage() {
 
   async function handleFork(styleId: string) {
     setForkingId(styleId);
+    setForkError(null);
     try {
-      await fetch(`/api/styles/${styleId}/fork`, { method: 'POST' });
+      const res = await fetch(`/api/styles/${styleId}/fork`, { method: 'POST' });
+      const body = await res.json();
+      if (!body.success) {
+        setForkError(body.error ?? 'Could not fork this Style Bible.');
+        return;
+      }
       await refresh();
+    } catch {
+      setForkError('Could not reach the server.');
     } finally {
       setForkingId(null);
     }
@@ -92,6 +110,7 @@ export default function StylesPage() {
           {creating ? 'Creating…' : 'Create'}
         </button>
       </form>
+      {createError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -16, marginBottom: 16 }}>{createError}</p>}
 
       <form className="card" onSubmit={handleImport} style={{ marginBottom: 32, maxWidth: 420 }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Import from design tokens</div>
@@ -113,7 +132,10 @@ export default function StylesPage() {
         </button>
       </form>
 
-      {!loading && styles.length === 0 ? (
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
+      {forkError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{forkError}</p>}
+
+      {!loading && !stylesError && styles.length === 0 ? (
         <div className="empty-state">No Style Bibles yet. Create the first one above.</div>
       ) : (
         <div className="grid">

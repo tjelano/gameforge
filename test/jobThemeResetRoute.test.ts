@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
@@ -10,8 +11,11 @@ import { jobService } from '@/lib/services/JobService';
 import { tokensToCss, parseThemeCss, type ThemeTokens } from '@/lib/services/ThemeGenerator';
 import { PATCH } from '@/app/api/jobs/[id]/theme/route';
 import { POST } from '@/app/api/jobs/[id]/theme/reset/route';
+import { seedSession } from '@/test/helpers/testSession';
 
 let tempRoot: string;
+let cookieHeader: string;
+let userId: string;
 
 const ORIGINAL: ThemeTokens = {
   colorBackground: '#1c1a17', colorForeground: '#ede7dc', colorAccent: '#e8a33d', colorBorder: '#3c352a',
@@ -20,10 +24,10 @@ const ORIGINAL: ThemeTokens = {
 const EDITED: ThemeTokens = { ...ORIGINAL, colorAccent: '#2c7be5' };
 
 async function makeCompleteThemeJob(): Promise<{ jobId: string; filename: string }> {
-  const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+  const style = await styleService.create({ name: 'x', createdBy: userId, parameters: '{}' });
   const filename = `job-${crypto.randomUUID()}.css`;
   await fsPromises.writeFile(path.join(tempRoot, 'storage', 'themes', filename), tokensToCss(ORIGINAL));
-  const job = await jobService.create({ styleId: style.id, createdBy: 'user-1', assetType: 'theme', prompt: 'x', outputKind: 'theme' });
+  const job = await jobService.create({ styleId: style.id, createdBy: userId, assetType: 'theme', prompt: 'x', outputKind: 'theme' });
   DatabaseConnection.getInstance()
     .prepare("UPDATE jobs SET status = 'complete', result_path = ? WHERE id = ?")
     .run(filename, job.id);
@@ -42,6 +46,9 @@ beforeEach(async () => {
   }
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  const { userId: newUserId, cookieHeader: newCookieHeader } = await seedSession();
+  userId = newUserId;
+  cookieHeader = newCookieHeader;
 });
 
 afterEach(async () => {
@@ -53,9 +60,13 @@ afterEach(async () => {
 function patchRequest(tokens: ThemeTokens): NextRequest {
   return new NextRequest('http://localhost/api/jobs/x/theme', {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
     body: JSON.stringify(tokens),
   });
+}
+
+function resetRequest(): NextRequest {
+  return new NextRequest('http://localhost/x', { method: 'POST', headers: { Cookie: cookieHeader } });
 }
 
 describe('POST /api/jobs/[id]/theme/reset', () => {
@@ -63,7 +74,7 @@ describe('POST /api/jobs/[id]/theme/reset', () => {
     const { jobId, filename } = await makeCompleteThemeJob();
     await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
 
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -75,12 +86,12 @@ describe('POST /api/jobs/[id]/theme/reset', () => {
 
   it('returns 404 when the job has never been edited (no originalTokens captured)', async () => {
     const { jobId } = await makeCompleteThemeJob();
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     expect(res.status).toBe(404);
   });
 
   it('returns 404 for a nonexistent job', async () => {
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: '00000000-0000-0000-0000-000000000000' }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: '00000000-0000-0000-0000-000000000000' }) });
     expect(res.status).toBe(404);
   });
 
@@ -89,7 +100,7 @@ describe('POST /api/jobs/[id]/theme/reset', () => {
     await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
     DatabaseConnection.getInstance().prepare("UPDATE jobs SET status = 'promoted' WHERE id = ?").run(jobId);
 
-    const res = await POST(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     expect(res.status).toBe(409);
 
     const css = await fsPromises.readFile(path.join(tempRoot, 'storage', 'themes', filename), 'utf-8');

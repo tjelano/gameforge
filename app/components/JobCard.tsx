@@ -129,6 +129,12 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, busy }: JobCardPro
           {job.prompt}
         </div>
 
+        {job.status === 'failed' && job.error_message && (
+          <div style={{ fontSize: 12, color: 'var(--reject)', marginBottom: 12 }}>
+            {job.error_message}
+          </div>
+        )}
+
         {(onPromote || onDiscard || onRetry) && (
           <div style={{ display: 'flex', gap: 8 }}>
             {hasPieces && job.result_path && (

@@ -7,6 +7,7 @@ import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/comp
 import { styleService } from '@/lib/services/StyleService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
+import { callClaudeTool } from '@/lib/services/claudeToolCall';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 
@@ -22,7 +23,7 @@ export interface GeneratedComponent {
 }
 
 export interface ComponentGenerator {
-  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedComponent>;
+  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedComponent>;
 }
 
 const TOOL_INPUT_SCHEMA = {
@@ -33,15 +34,6 @@ const TOOL_INPUT_SCHEMA = {
   },
   required: ['html', 'css'],
 };
-
-type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
-interface AnthropicMessageResponse {
-  content: Array<{ type: string } & Record<string, unknown>>;
-  stop_reason: string;
-}
-
-const ANTHROPIC_VERSION = '2023-06-01';
-const REQUEST_TIMEOUT_MS = 60_000;
 
 function buildComponentPrompt(styleParameters: string, jobPrompt: string, componentType?: string, basedOnContent?: string): string {
   const typeHint = componentType ? `Component type: ${componentType}.\n\n` : '';
@@ -59,7 +51,7 @@ Respond by calling the emit_component tool with the component's html and css.`;
 export class ClaudeApiComponentGenerator implements ComponentGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedComponent> {
+  async generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedComponent> {
     const style = await styleService.getById(styleId);
     const fullPrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType, basedOnContent);
 
@@ -70,44 +62,19 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
         ]
       : fullPrompt;
 
-    const res = await fetch(this.provider.requestUrl, {
-      method: 'POST',
-      headers: {
-        ...this.provider.buildAuthHeaders(this.apiKey),
-        'anthropic-version': ANTHROPIC_VERSION,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.provider.model,
-        max_tokens: 4096,
-        tools: [
-          {
-            name: 'emit_component',
-            description: 'Emit a single website UI component as HTML and CSS.',
-            input_schema: TOOL_INPUT_SCHEMA,
-          },
-        ],
-        tool_choice: { type: 'tool', name: 'emit_component' },
-        messages: [{ role: 'user', content }],
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    const toolInput = await callClaudeTool({
+      provider: this.provider,
+      apiKey: this.apiKey,
+      toolName: 'emit_component',
+      toolDescription: 'Emit a single website UI component as HTML and CSS.',
+      inputSchema: TOOL_INPUT_SCHEMA,
+      messages: [{ role: 'user', content }],
+      signal,
+      operationLabel: 'component generation',
+      truncatedMessage: 'the component could not be generated',
     });
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Anthropic component generation failed via ${this.provider.name} (${res.status}): ${body || res.statusText}`);
-    }
-
-    const data = (await res.json()) as AnthropicMessageResponse;
-    if (data.stop_reason === 'max_tokens') {
-      throw new Error(`Anthropic response (via ${this.provider.name}) was truncated (stop_reason: max_tokens) before completing the tool call — the component could not be generated.`);
-    }
-    const toolUse = data.content.find((block): block is ToolUseBlock => block.type === 'tool_use');
-    if (!toolUse) {
-      throw new Error(`Anthropic response (via ${this.provider.name}) contained no tool_use block for emit_component.`);
-    }
-
-    const raw = z.object({ html: z.string(), css: z.string() }).parse(toolUse.input);
+    const raw = z.object({ html: z.string(), css: z.string() }).parse(toolInput);
     const tokens: ComponentTokens = {
       html: sanitizeComponentHtml(raw.html),
       css: sanitizeComponentCss(raw.css),

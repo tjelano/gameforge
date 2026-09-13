@@ -75,7 +75,7 @@ describe('GitService presets sync', () => {
       themePrompt: null,
       components: '[]',
     });
-    await presetService.softDelete(preset.id);
+    await presetService.softDelete(preset.id, 'user-1');
     await gitService.exportToJson();
 
     DatabaseConnection.resetForTests();

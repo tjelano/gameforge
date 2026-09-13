@@ -38,15 +38,23 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     // guard the second run's setState calls would race the first's.
     let ignore = false;
     (async () => {
-      const res = await fetch(`/api/assets/${id}`);
-      const body = await res.json();
-      if (ignore || !body.success) return;
-      setAsset(body.data);
-      if (body.data.nine_slice_margins) {
-        setMargins(JSON.parse(body.data.nine_slice_margins));
-        setNineSliceEnabled(true);
+      try {
+        const res = await fetch(`/api/assets/${id}`);
+        const body = await res.json();
+        if (ignore) return;
+        if (!body.success) {
+          setError(body.error ?? 'Could not load this asset.');
+          return;
+        }
+        setAsset(body.data);
+        if (body.data.nine_slice_margins) {
+          setMargins(JSON.parse(body.data.nine_slice_margins));
+          setNineSliceEnabled(true);
+        }
+        setStates(JSON.parse(body.data.states));
+      } catch {
+        if (!ignore) setError('Could not reach the server.');
       }
-      setStates(JSON.parse(body.data.states));
     })();
     return () => {
       ignore = true;
@@ -290,6 +298,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  if (error && !asset) return <p style={{ color: 'var(--reject)', fontSize: 13 }}>{error}</p>;
   if (!asset) return <p className="page-subtitle">Loading…</p>;
 
   return (
@@ -492,9 +501,15 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
             <div style={{ fontWeight: 600, marginBottom: 12 }}>States</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
               {states.map(s => (
-                <span key={s} className="badge" style={{ cursor: 'pointer' }} onClick={() => setStates(states.filter(x => x !== s))}>
+                <button
+                  key={s}
+                  type="button"
+                  className="badge"
+                  style={{ cursor: 'pointer', background: 'none' }}
+                  onClick={() => setStates(states.filter(x => x !== s))}
+                >
                   {s} x
-                </span>
+                </button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>

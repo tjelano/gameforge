@@ -534,7 +534,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
                 )}
                 {syncDiff.notImportableFolders.map(slug => (
                   <p key={slug} style={{ fontSize: 13, color: 'var(--ink-dim)' }}>
-                    Folder "{slug}" doesn't match GameForge's naming convention and can't be imported as a page.
+                    {`Folder "${slug}" doesn't match GameForge's naming convention and can't be imported as a page.`}
                   </p>
                 ))}
                 <button className="btn btn-primary" onClick={handleApplySync} disabled={applyingSync} style={{ marginTop: 8 }}>

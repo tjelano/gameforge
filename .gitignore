@@ -11,3 +11,4 @@ storage/exports/
 *.tsbuildinfo
 .DS_Store
 .worktrees/
+.playwright-mcp/

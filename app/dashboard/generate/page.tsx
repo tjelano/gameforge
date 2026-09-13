@@ -11,9 +11,10 @@ const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB raw file - keeps the base64 payload comfortably under the server's 10MB base64-string ceiling
 
 export default function GeneratePage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const jobs = useJobStore(s => s.jobs);
   const refreshActive = useJobStore(s => s.refreshActive);
+  const jobsError = useJobStore(s => s.error);
   usePolling(refreshActive, 2000);
 
   const [styleId, setStyleId] = useState('');
@@ -23,6 +24,11 @@ export default function GeneratePage() {
   const [error, setError] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<{ base64: string; mediaType: string } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  // Mirrors PixellabGenerator.ts's DEFAULT_SIZE (64) - not imported
+  // directly, since that module pulls in Node-only fs/crypto imports
+  // unsuitable for this 'use client' page.
+  const SPRITE_SIZE_PRESETS = [32, 64, 128] as const;
+  const [spriteSize, setSpriteSize] = useState<number>(64);
 
   const activeStyleId = styleId || styles[0]?.id || '';
 
@@ -69,6 +75,8 @@ export default function GeneratePage() {
           styleId: activeStyleId,
           assetType,
           prompt: prompt.trim(),
+          width: spriteSize,
+          height: spriteSize,
           ...(referenceImage ? { referenceImage } : {}),
         }),
       });
@@ -95,7 +103,9 @@ export default function GeneratePage() {
         an asset or discard it.
       </p>
 
-      {!stylesLoading && styles.length === 0 ? (
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
+
+      {!stylesLoading && !stylesError && styles.length === 0 ? (
         <div className="empty-state" style={{ marginBottom: 32 }}>
           No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page before generating art.
         </div>
@@ -125,6 +135,15 @@ export default function GeneratePage() {
             {referenceImage && !imageError && <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 4 }}>Image attached.</p>}
           </div>
 
+          <div className="field">
+            <label htmlFor="spriteSize">Size</label>
+            <select id="spriteSize" value={spriteSize} onChange={e => setSpriteSize(Number(e.target.value))}>
+              {SPRITE_SIZE_PRESETS.map(size => (
+                <option key={size} value={size}>{size}x{size}</option>
+              ))}
+            </select>
+          </div>
+
           {error && (
             <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -8, marginBottom: 16 }}>{error}</p>
           )}
@@ -138,7 +157,8 @@ export default function GeneratePage() {
       <h2 className="frame-label" style={{ marginBottom: 12, fontSize: 12 }}>
         Live queue
       </h2>
-      {jobs.length === 0 ? (
+      {jobsError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{jobsError}</p>}
+      {!jobsError && jobs.length === 0 ? (
         <div className="empty-state">Nothing in flight. Queue a generation above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

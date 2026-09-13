@@ -7,6 +7,7 @@ import { styleService } from '@/lib/services/StyleService';
 import { assetService } from '@/lib/services/AssetService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
+import { callClaudeTool } from '@/lib/services/claudeToolCall';
 import {
   ThemeTokensSchema,
   tokensToCss,
@@ -15,9 +16,6 @@ import {
   type ThemeGenerator,
   type GeneratedTheme,
 } from '@/lib/services/ThemeGenerator';
-
-const ANTHROPIC_VERSION = '2023-06-01';
-const REQUEST_TIMEOUT_MS = 60_000;
 
 const TOOL_INPUT_SCHEMA = {
   type: 'object' as const,
@@ -33,18 +31,6 @@ const TOOL_INPUT_SCHEMA = {
   },
   required: ['colorBackground', 'colorForeground', 'colorAccent', 'colorBorder', 'fontHeading', 'fontBody', 'spaceUnit', 'radiusBase'],
 };
-
-type ToolUseBlock = {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  input: unknown;
-};
-
-interface AnthropicMessageResponse {
-  content: Array<{ type: string } & Record<string, unknown>>;
-  stop_reason: string;
-}
 
 /**
  * Real Claude Messages API, called directly via fetch (no
@@ -63,7 +49,7 @@ interface AnthropicMessageResponse {
 export class ClaudeApiThemeGenerator implements ThemeGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string): Promise<GeneratedTheme> {
+  async generate(prompt: string, styleId: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal): Promise<GeneratedTheme> {
     const style = await styleService.getById(styleId);
     let existingThemes: Awaited<ReturnType<typeof assetService.getActiveThemeAssetsForStyle>> = [];
     try {
@@ -112,46 +98,19 @@ export class ClaudeApiThemeGenerator implements ThemeGenerator {
         ]
       : fullPrompt;
 
-    const res = await fetch(this.provider.requestUrl, {
-      method: 'POST',
-      headers: {
-        ...this.provider.buildAuthHeaders(this.apiKey),
-        'anthropic-version': ANTHROPIC_VERSION,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.provider.model,
-        max_tokens: 4096,
-        tools: [
-          {
-            name: 'emit_theme',
-            description: 'Emit a website design token set matching the requested aesthetic.',
-            input_schema: TOOL_INPUT_SCHEMA,
-          },
-        ],
-        tool_choice: { type: 'tool', name: 'emit_theme' },
-        messages: [{ role: 'user', content }],
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    const toolInput = await callClaudeTool({
+      provider: this.provider,
+      apiKey: this.apiKey,
+      toolName: 'emit_theme',
+      toolDescription: 'Emit a website design token set matching the requested aesthetic.',
+      inputSchema: TOOL_INPUT_SCHEMA,
+      messages: [{ role: 'user', content }],
+      signal,
+      operationLabel: 'theme generation',
+      truncatedMessage: 'the theme could not be generated',
     });
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Anthropic theme generation failed via ${this.provider.name} (${res.status}): ${body || res.statusText}`);
-    }
-
-    const data = (await res.json()) as AnthropicMessageResponse;
-    if (data.stop_reason === 'max_tokens') {
-      throw new Error(
-        `Anthropic response (via ${this.provider.name}) was truncated (stop_reason: max_tokens) before completing the tool call — the theme could not be generated.`
-      );
-    }
-    const toolUse = data.content.find((block): block is ToolUseBlock => block.type === 'tool_use');
-    if (!toolUse) {
-      throw new Error(`Anthropic response (via ${this.provider.name}) contained no tool_use block for emit_theme.`);
-    }
-
-    const tokens = ThemeTokensSchema.parse(toolUse.input);
+    const tokens = ThemeTokensSchema.parse(toolInput);
     const filename = `theme-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.css`;
 
     const themesDir = path.join(getProjectRoot(), 'storage', 'themes');

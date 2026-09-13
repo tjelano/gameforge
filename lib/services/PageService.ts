@@ -36,13 +36,19 @@ class PageServiceImpl {
     return (await this.getById(id))!;
   }
 
-  /** No ownership check - pages are shared, any logged-in user may edit any page. */
-  async update(id: string, patch: {
-    name?: string;
-    componentAssetIds?: string;
-  }): Promise<Page | null> {
+  /** Only the creator, or an admin, may edit a page. Mirrors StyleService.update(). */
+  async update(
+    id: string,
+    requestingUserId: string,
+    patch: {
+      name?: string;
+      componentAssetIds?: string;
+    },
+    isAdmin: boolean = false
+  ): Promise<Page | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
     const existing = await this.getById(id);
-    if (!existing) return null;
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
     db.prepare(`
       UPDATE pages SET name = ?, component_asset_ids = ?, updated_at = ? WHERE id = ?
@@ -52,10 +58,14 @@ class PageServiceImpl {
       Date.now(),
       id
     );
-    return this.getById(id);
+    return (await this.getById(id))!;
   }
 
-  async softDelete(id: string): Promise<void> {
+  /** Only the creator, or an admin, may delete a page. Mirrors update() above. */
+  async softDelete(id: string, requestingUserId: string, isAdmin: boolean = false): Promise<void | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
+    const existing = await this.getById(id);
+    if (!existing) return { error: 'NOT_FOUND' };
+    if (existing.created_by !== requestingUserId && !isAdmin) return { error: 'FORBIDDEN' };
     const db = DatabaseConnection.getInstance();
     db.prepare('UPDATE pages SET is_deleted = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
   }

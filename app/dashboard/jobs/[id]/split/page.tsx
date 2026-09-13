@@ -27,26 +27,34 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
     // they're uploaded twice at split time).
     let ignore = false;
     (async () => {
-      const res = await fetch(`/api/jobs/${id}`);
-      const body = await res.json();
-      if (ignore || !body.success) return;
-      setJob(body.data);
-
-      const options = JSON.parse(body.data.options);
-      const img = new Image();
-      img.onload = () => {
+      try {
+        const res = await fetch(`/api/jobs/${id}`);
+        const body = await res.json();
         if (ignore) return;
-        setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
-        // Piece coordinates are already in the same 0-512-long-side space
-        // this editor renders its display canvas at (DISPLAY_LONG_SIDE
-        // below) — no conversion needed, they're valid display-pixel
-        // coordinates as-is. The real image can be a different actual
-        // pixel size (e.g. 688px); that only matters later, at crop time.
-        for (const piece of options.pieces as PlacedPiece[]) {
-          draggable.addBox({ ...piece, included: true });
+        if (!body.success) {
+          setError(body.error ?? 'Could not load this job.');
+          return;
         }
-      };
-      img.src = `/api/images/${body.data.result_path}`;
+        setJob(body.data);
+
+        const options = JSON.parse(body.data.options);
+        const img = new Image();
+        img.onload = () => {
+          if (ignore) return;
+          setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
+          // Piece coordinates are already in the same 0-512-long-side space
+          // this editor renders its display canvas at (DISPLAY_LONG_SIDE
+          // below) — no conversion needed, they're valid display-pixel
+          // coordinates as-is. The real image can be a different actual
+          // pixel size (e.g. 688px); that only matters later, at crop time.
+          for (const piece of options.pieces as PlacedPiece[]) {
+            draggable.addBox({ ...piece, included: true });
+          }
+        };
+        img.src = `/api/images/${body.data.result_path}`;
+      } catch {
+        if (!ignore) setError('Could not reach the server.');
+      }
     })();
     return () => {
       ignore = true;
@@ -144,6 +152,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
+  if (error && !job) return <p style={{ color: 'var(--reject)', fontSize: 13 }}>{error}</p>;
   if (!job) return <p className="page-subtitle">Loading…</p>;
 
   return (
@@ -189,6 +198,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
             />
             <button
               onClick={() => draggable.updateBox(box.id, { included: !box.included })}
+              aria-label={box.included ? 'Exclude piece from split' : 'Include piece in split'}
               style={{ position: 'absolute', top: -8, right: -8, width: 16, height: 16, fontSize: 10, lineHeight: 1 }}
             >
               {box.included ? 'x' : '+'}

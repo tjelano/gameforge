@@ -63,16 +63,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     const { id } = await params;
-    const existing = await styleService.getById(id);
-    if (!existing) return NextResponse.json({ success: false, error: 'Style not found' }, { status: 404 });
-    if (existing.created_by !== user.id && !user.is_admin) {
+    const result = await styleService.softDelete(id, user.id, !!user.is_admin);
+
+    if (result && 'error' in result) {
+      if (result.error === 'NOT_FOUND') {
+        return NextResponse.json({ success: false, error: 'Style not found' }, { status: 404 });
+      }
       return NextResponse.json({
         success: false,
         error: 'Only the creator can delete this style.',
       }, { status: 403 });
     }
 
-    await styleService.softDelete(id);
     return NextResponse.json({ success: true, data: { id } });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

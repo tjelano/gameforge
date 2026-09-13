@@ -122,8 +122,8 @@ export function PageEditor({
               <div key={assetId} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
                 <span className="badge">{asset?.asset_type ?? 'unknown'}</span>
                 <span style={{ flex: 1, fontSize: 13 }}>{asset?.prompt ?? assetId}</span>
-                <button type="button" className="btn" onClick={() => moveUp(i)} disabled={i === 0}>↑</button>
-                <button type="button" className="btn" onClick={() => moveDown(i)} disabled={i === componentAssetIds.length - 1}>↓</button>
+                <button type="button" className="btn" onClick={() => moveUp(i)} disabled={i === 0} aria-label="Move up">↑</button>
+                <button type="button" className="btn" onClick={() => moveDown(i)} disabled={i === componentAssetIds.length - 1} aria-label="Move down">↓</button>
                 <button type="button" className="btn" onClick={() => toggleComponent(assetId)}>Remove</button>
               </div>
             );

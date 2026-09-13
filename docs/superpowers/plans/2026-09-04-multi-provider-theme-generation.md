@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Note (added during a later audit):** kie.ai support described below was never shipped — the final implementation only has `anthropic`/`cheaperinference` (see `lib/services/claudeApiProviders.ts`). This section is historical, not a guide to current behavior.
+
 **Goal:** Let GameForge's website-theme generation call cheaperinference.com or kie.ai (in addition to the official Anthropic API), selected by one env var, with no behavior change when that var is left unset.
 
 **Architecture:** Extract the three per-vendor differences (request URL, auth header shape, model name) into a plain `ClaudeApiProvider` profile object. Rename the existing `AnthropicThemeGenerator` to `ClaudeApiThemeGenerator` and parameterize it by a profile instead of hardcoding Anthropic's own values — every other line of that class (request building, timeout, `ThemeTokensSchema` validation, CSS writing, error diagnosis) stays exactly as it is today, since it's the same underlying Messages API shape regardless of which host answers it. `getThemeGenerator()` gains a new `THEME_API_PROVIDER` env var to pick which profile is active; unset behaves identically to today.

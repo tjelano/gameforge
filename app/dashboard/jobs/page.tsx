@@ -8,6 +8,7 @@ import { JobCard } from '@/app/components/JobCard';
 export default function JobsPage() {
   const jobs = useJobStore(s => s.jobs);
   const refreshActive = useJobStore(s => s.refreshActive);
+  const storeError = useJobStore(s => s.error);
   usePolling(refreshActive, 2000);
 
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -37,8 +38,10 @@ export default function JobsPage() {
       })
     );
 
-  const handleDiscard = (jobId: string) =>
-    withBusy(jobId, () => fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }));
+  const handleDiscard = (jobId: string) => {
+    if (!window.confirm("Discard this job? This can't be undone from the UI.")) return;
+    return withBusy(jobId, () => fetch(`/api/jobs/${jobId}`, { method: 'DELETE' }));
+  };
 
   const handleRetry = (jobId: string) =>
     withBusy(jobId, () =>
@@ -56,13 +59,13 @@ export default function JobsPage() {
         Review what came back. Promote a keeper to an asset, discard a reject, or retry a failed generation.
       </p>
 
-      {error && (
+      {(error || storeError) && (
         <p className="card" style={{ borderColor: 'var(--reject-dim)', color: 'var(--reject)', marginBottom: 16 }}>
-          {error}
+          {error || storeError}
         </p>
       )}
 
-      {jobs.length === 0 ? (
+      {!(error || storeError) && jobs.length === 0 ? (
         <div className="empty-state">No recent jobs. Generate something first.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

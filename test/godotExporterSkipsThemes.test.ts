@@ -51,7 +51,8 @@ afterEach(async () => {
 
 describe('GodotExporter.exportToGodot() skips theme assets', () => {
   it('exports only the image asset', async () => {
-    const result = await godotExporter.exportToGodot('godot-test');
+    const result = await godotExporter.exportToGodot(STYLE_ID, 'godot-test');
+    if ('error' in result) throw new Error(`Unexpected export error: ${result.error}`);
     expect(result.exported).toBe(1);
     expect(result.skipped).toBe(0);
 

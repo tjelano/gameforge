@@ -65,7 +65,7 @@ async function seedComponentAsset(filename: string, document: string, editedExte
     imagePath: filename,
     outputKind: 'component',
   });
-  if (editedExternally) await assetService.update(asset.id, { editedExternally: true });
+  if (editedExternally) await assetService.update(asset.id, 'user-1', { editedExternally: true });
 }
 
 describe('GET /api/components/[filename]', () => {

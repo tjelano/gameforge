@@ -85,7 +85,7 @@ describe('POST /api/styles/[id]/pages/suggest-layout', () => {
     const deletedComponent = await assetService.create({
       styleId: style.id, createdBy: userId, assetType: 'hero', prompt: 'A deleted hero', imagePath: 'hero.html', outputKind: 'component',
     });
-    await assetService.softDelete(deletedComponent.id);
+    await assetService.softDelete(deletedComponent.id, userId);
 
     const res = await callRoute(style.id, { pageName: 'Home' }, cookieHeader);
     const body = await res.json();

@@ -11,9 +11,10 @@ const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024; // 5MB raw file - keeps the base64 payload comfortably under the server's 10MB base64-string ceiling
 
 export default function ThemesPage() {
-  const { styles, loading: stylesLoading } = useStyles();
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
   const jobs = useJobStore(s => s.jobs).filter(j => j.output_kind === 'theme');
   const refreshActive = useJobStore(s => s.refreshActive);
+  const jobsError = useJobStore(s => s.error);
   usePolling(refreshActive, 2000);
 
   const [styleId, setStyleId] = useState('');
@@ -97,7 +98,9 @@ export default function ThemesPage() {
         keeps every generation until you promote it to an asset or discard it — same as pixel art.
       </p>
 
-      {!stylesLoading && styles.length === 0 ? (
+      {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
+
+      {!stylesLoading && !stylesError && styles.length === 0 ? (
         <div className="empty-state" style={{ marginBottom: 32 }}>
           No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page before generating a theme.
         </div>
@@ -148,7 +151,8 @@ export default function ThemesPage() {
       <h2 className="frame-label" style={{ marginBottom: 12, fontSize: 12 }}>
         Live queue
       </h2>
-      {jobs.length === 0 ? (
+      {jobsError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{jobsError}</p>}
+      {!jobsError && jobs.length === 0 ? (
         <div className="empty-state">Nothing in flight. Queue a generation above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

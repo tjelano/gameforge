@@ -493,10 +493,12 @@ git commit -m "feat: embed page-id comments and write export manifest on export"
 
 **Interfaces:**
 - Consumes: `readManifest` from `@/lib/services/ExportManifest` (Task 2).
-- Produces: `SiteExportResult` gains a `skippedComponents: string[]` field (component names
-  skipped because their on-disk file diverged from the manifest since last export/sync) — not
-  consumed by any later task in this plan directly, but is the export result's new observable
-  contract; test it directly.
+- Produces: `SiteExportResult` gains `skippedComponents: string[]` (component names skipped
+  because their on-disk file diverged from the manifest since last export/sync) and
+  `skippedPages: string[]` (page IDs skipped for the same reason — a hand-edited `page.tsx` is
+  never silently overwritten either, mirroring the component protection exactly) — neither is
+  consumed by any later task in this plan directly, but both are the export result's new
+  observable contract; test them directly.
 - Produces: `exportSite()` no longer refuses `ALREADY_EXISTS` when the existing directory's
   manifest matches the requested `styleId` — it re-exports into it instead.
 
@@ -569,13 +571,37 @@ Add to `test/siteExporter.test.ts`:
     const afterReExport = await fsPromises.readFile(componentPath, 'utf-8');
     expect(afterReExport).toContain('// hand-edited');
   });
+
+  it('skips overwriting a page.tsx that was hand-edited since the last export, and reports it', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'comp.html', COMPONENT_DOC);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const first = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in first) throw new Error(`Unexpected export error: ${first.error}`);
+
+    // Simulate a hand-edit to the page file itself (e.g. a manually reordered
+    // component tag or added JSX), not just to a component.
+    const pageFilePath = path.join(first.targetDir, 'app', 'page.tsx');
+    const original = await fsPromises.readFile(pageFilePath, 'utf-8');
+    await fsPromises.writeFile(pageFilePath, original + '\n{/* hand-edited */}\n');
+
+    const second = await siteExporter.exportSite(style.id, 'my-site');
+    if ('error' in second) throw new Error(`Unexpected export error: ${second.error}`);
+    expect(second.skippedPages).toEqual([page.id]);
+
+    const afterReExport = await fsPromises.readFile(pageFilePath, 'utf-8');
+    expect(afterReExport).toContain('hand-edited');
+  });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run test/siteExporter.test.ts`
 Expected: FAIL — the first two new tests fail because re-export currently always returns
-`ALREADY_EXISTS`; the skip test fails because `skippedComponents` doesn't exist yet.
+`ALREADY_EXISTS`; the two skip tests fail because `skippedComponents`/`skippedPages` don't exist
+yet.
 
 - [ ] **Step 3: Implement**
 
@@ -593,6 +619,7 @@ export interface SiteExportResult {
   componentsExported: number;
   targetDir: string;
   skippedComponents: string[];
+  skippedPages: string[];
 }
 ```
 
@@ -689,9 +716,108 @@ with:
       }
 ```
 
+Now do the exact same thing for page files. Task 3's page-writing code (the `homePageFile` write
+followed by the `for (let i = 1; ...)` loop) currently overwrites `page.tsx` unconditionally on
+every export — that's fine for a first export, but on a re-export it would silently destroy a
+hand-edit to a page file (e.g. a manually reordered component tag) exactly the way an unprotected
+component write would. Replace that block:
+
+```typescript
+      const manifestPages: ExportManifest['pages'] = [];
+
+      const slugs = this.buildPageSlugs(pages);
+      await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
+
+      const homePageFile = this.buildPageFile(pages[0], pageComponentNames[0], components);
+      await fsPromises.writeFile(path.join(targetDir, 'app', 'page.tsx'), homePageFile);
+      manifestPages.push({
+        id: pages[0].id,
+        name: pages[0].name,
+        slug: slugs[0],
+        componentAssetIds: JSON.parse(pages[0].component_asset_ids),
+        pageFileHash: hashContent(homePageFile),
+      });
+
+      for (let i = 1; i < pages.length; i++) {
+        const pageDir = path.join(targetDir, 'app', slugs[i]);
+        await fsPromises.mkdir(pageDir, { recursive: true });
+        const pageFile = this.buildPageFile(pages[i], pageComponentNames[i], components);
+        await fsPromises.writeFile(path.join(pageDir, 'page.tsx'), pageFile);
+        manifestPages.push({
+          id: pages[i].id,
+          name: pages[i].name,
+          slug: slugs[i],
+          componentAssetIds: JSON.parse(pages[i].component_asset_ids),
+          pageFileHash: hashContent(pageFile),
+        });
+      }
+```
+
+with:
+
+```typescript
+      const skippedPages: string[] = [];
+      const manifestPages: ExportManifest['pages'] = [];
+
+      const slugs = this.buildPageSlugs(pages);
+      await fsPromises.writeFile(path.join(targetDir, 'app', 'layout.tsx'), this.buildLayoutFile(pages, slugs));
+
+      // Same hash-check-and-skip pattern as the component loop above, applied
+      // to page files: only overwrite a page.tsx if its on-disk content still
+      // matches what GameForge itself last wrote there (per the PRIOR
+      // manifest) - anything else means a human touched it since, and it
+      // must not be silently clobbered.
+      const writePageIfUnedited = async (pageId: string, pageFile: string, pageFilePath: string): Promise<void> => {
+        const priorEntry = existingManifest?.pages.find(p => p.id === pageId);
+        if (priorEntry) {
+          let onDiskHash: string | null = null;
+          try {
+            onDiskHash = hashContent(await fsPromises.readFile(pageFilePath, 'utf-8'));
+          } catch {
+            // No file on disk (e.g. deleted by hand) - nothing to preserve.
+          }
+          if (onDiskHash !== null && onDiskHash !== priorEntry.pageFileHash) {
+            skippedPages.push(pageId);
+            return;
+          }
+        }
+        await fsPromises.writeFile(pageFilePath, pageFile);
+      };
+
+      const homePageFile = this.buildPageFile(pages[0], pageComponentNames[0], components);
+      await writePageIfUnedited(pages[0].id, homePageFile, path.join(targetDir, 'app', 'page.tsx'));
+      manifestPages.push({
+        id: pages[0].id,
+        name: pages[0].name,
+        slug: slugs[0],
+        componentAssetIds: JSON.parse(pages[0].component_asset_ids),
+        pageFileHash: hashContent(homePageFile),
+      });
+
+      for (let i = 1; i < pages.length; i++) {
+        const pageDir = path.join(targetDir, 'app', slugs[i]);
+        await fsPromises.mkdir(pageDir, { recursive: true });
+        const pageFile = this.buildPageFile(pages[i], pageComponentNames[i], components);
+        await writePageIfUnedited(pages[i].id, pageFile, path.join(pageDir, 'page.tsx'));
+        manifestPages.push({
+          id: pages[i].id,
+          name: pages[i].name,
+          slug: slugs[i],
+          componentAssetIds: JSON.parse(pages[i].component_asset_ids),
+          pageFileHash: hashContent(pageFile),
+        });
+      }
+```
+
+Note `manifestPages` always records the freshly-computed hash (what GameForge currently intends to
+write), never the on-disk hash — identical reasoning to the component manifest entries below: a
+skipped page's divergence keeps being correctly detected on every future export/sync until it's
+actually reconciled, exactly like a skipped component's.
+
 Finally, update the manifest's `components` entries to always reflect GameForge's own expected
 content (not the on-disk hand-edited content, so a divergence keeps being detected on every future
-export/sync until it's actually reconciled), and return `skippedComponents` in the result:
+export/sync until it's actually reconciled), and return `skippedComponents`/`skippedPages` in the
+result:
 
 ```typescript
       const manifest: ExportManifest = {
@@ -706,7 +832,7 @@ export/sync until it's actually reconciled), and return `skippedComponents` in t
       };
       await writeManifest(targetDir, manifest);
 
-      return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents };
+      return { pagesExported: pages.length, componentsExported: components.length, targetDir, skippedComponents, skippedPages };
 ```
 
 (replacing the old `return { pagesExported: ..., componentsExported: ..., targetDir };` line).
@@ -721,7 +847,8 @@ Expected: PASS (all tests, including the 4 new ones)
 Run: `npx vitest run`
 Expected: all pass. Check `test/siteExportRoute.test.ts` in particular, since it exercises the
 export API route end-to-end and its assertions on the result shape may need `skippedComponents:
-[]` added if it does exact-shape equality checks — read that file and adjust if needed.
+[]` and `skippedPages: []` added if it does exact-shape equality checks — read that file and
+adjust if needed.
 
 - [ ] **Step 6: Commit**
 
@@ -741,6 +868,8 @@ git commit -m "feat: support re-exporting into an existing directory without clo
 **Interfaces:**
 - Produces: `exportSite()` now serializes concurrent calls for the same `(styleId, subdir)` —
   tested directly, not consumed by name by any other task.
+- Produces: `isExportInProgress(subdir: string): Promise<boolean>` — a read-only lock check,
+  consumed by Task 7's preview/apply routes so a sync never races a concurrent re-export.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -755,7 +884,7 @@ import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
-import { siteExporter } from '@/lib/services/SiteExporter';
+import { siteExporter, isExportInProgress } from '@/lib/services/SiteExporter';
 
 let tempRoot: string;
 
@@ -832,6 +961,30 @@ describe('siteExporter.exportSite concurrency', () => {
     expect(result).toHaveProperty('error');
     if (!('error' in result)) throw new Error('expected an error result');
     expect(result.error).toBe('EXPORT_IN_PROGRESS');
+  });
+});
+
+describe('isExportInProgress', () => {
+  it('returns false when no lock directory exists', async () => {
+    await setUpStyleWithOnePage('my-site');
+    expect(await isExportInProgress('my-site')).toBe(false);
+  });
+
+  it('returns true while a live lock is held', async () => {
+    await setUpStyleWithOnePage('my-site');
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(Date.now()));
+    expect(await isExportInProgress('my-site')).toBe(true);
+  });
+
+  it('returns false once the lock has gone stale', async () => {
+    await setUpStyleWithOnePage('my-site');
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    const staleTimestamp = Date.now() - 10 * 60 * 1000;
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(staleTimestamp));
+    expect(await isExportInProgress('my-site')).toBe(false);
   });
 });
 ```
@@ -937,6 +1090,23 @@ async function acquireExportLock(exportsRootDir: string, subdir: string): Promis
     },
   };
 }
+
+/**
+ * Read-only check for callers that don't want to hold the lock themselves
+ * (Task 7's sync preview/apply routes) - they just need to avoid racing a
+ * re-export that's actively in flight. Mirrors acquireExportLock's own
+ * staleness logic exactly, so it never reports a truly-dead lock as "in
+ * progress" and blocks a sync on a crashed export forever.
+ */
+export async function isExportInProgress(subdir: string): Promise<boolean> {
+  const lockDir = path.join(getProjectRoot(), 'storage', 'exports', '.locks', `${subdir}.lock`);
+  try {
+    await fsPromises.access(lockDir);
+  } catch {
+    return false;
+  }
+  return !(await isLockStale(lockDir));
+}
 ```
 
 Update `SiteExportResult`'s error union and `exportSite`'s signature to include the new error kind:
@@ -989,7 +1159,7 @@ one, now before the lock.
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/siteExporterLock.test.ts`
-Expected: PASS (3 tests)
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: Run the full suite**
 
@@ -1449,7 +1619,9 @@ git commit -m "feat: add ExportSync diff computation for reverse-sync"
 
 **Interfaces:**
 - Consumes: `computeSyncDiff` from `@/lib/services/ExportSync` (Task 6); `pageService.create`,
-  `pageService.update`, `pageService.softDelete` (existing).
+  `pageService.update`, `pageService.softDelete` (existing); `isExportInProgress` from
+  `@/lib/services/SiteExporter` (Task 5) — both routes check it before touching the export
+  directory or the DB, so a sync never races a concurrent re-export.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1528,6 +1700,17 @@ describe('POST /api/styles/[id]/export-sync/preview', () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.newPages).toHaveLength(1);
+  });
+
+  it('returns 409 when a re-export is in progress for this subdir', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(Date.now()));
+
+    const res = await previewPost(req({ subdir: 'my-site' }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
+    expect(res.status).toBe(409);
   });
 });
 
@@ -1619,6 +1802,20 @@ describe('POST /api/styles/[id]/export-sync/apply', () => {
     const pages = await pageService.getActivePagesForStyle(style.id);
     expect(pages.map(p => p.name)).not.toContain('Fake');
   });
+
+  it('returns 409 and writes nothing when a re-export is in progress for this subdir', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(Date.now()));
+
+    const res = await applyPost(req({ subdir: 'my-site' }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
+    expect(res.status).toBe(409);
+
+    const pages = await pageService.getActivePagesForStyle(style.id);
+    expect(pages).toHaveLength(0);
+  });
 });
 ```
 
@@ -1637,6 +1834,7 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getCurrentUser } from '@/lib/utils/session';
 import { computeSyncDiff } from '@/lib/services/ExportSync';
+import { isExportInProgress } from '@/lib/services/SiteExporter';
 
 export const dynamic = 'force-dynamic';
 
@@ -1659,6 +1857,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const input = PreviewSchema.parse(await req.json());
     if (!SUBDIR_PATTERN.test(input.subdir)) {
       return NextResponse.json({ success: false, error: 'Invalid subdir' }, { status: 400 });
+    }
+    // Don't read a manifest or export directory a concurrent re-export might
+    // be mid-write on - same lock SiteExporter itself holds during export,
+    // checked here read-only rather than acquired.
+    if (await isExportInProgress(input.subdir)) {
+      return NextResponse.json({ success: false, error: 'An export is currently in progress for this folder. Try again in a moment.' }, { status: 409 });
     }
 
     const exportDir = path.join(getProjectRoot(), 'storage', 'exports', input.subdir);
@@ -1691,6 +1895,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getCurrentUser } from '@/lib/utils/session';
 import { computeSyncDiff } from '@/lib/services/ExportSync';
 import { pageService } from '@/lib/services/PageService';
+import { isExportInProgress } from '@/lib/services/SiteExporter';
 
 export const dynamic = 'force-dynamic';
 
@@ -1714,6 +1919,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const input = ApplySchema.parse(await req.json());
     if (!SUBDIR_PATTERN.test(input.subdir)) {
       return NextResponse.json({ success: false, error: 'Invalid subdir' }, { status: 400 });
+    }
+    // apply writes to the DB from whatever it reads on disk - must not race
+    // a re-export that could be mid-write on the same manifest/files.
+    if (await isExportInProgress(input.subdir)) {
+      return NextResponse.json({ success: false, error: 'An export is currently in progress for this folder. Try again in a moment.' }, { status: 409 });
     }
 
     const exportDir = path.join(getProjectRoot(), 'storage', 'exports', input.subdir);
@@ -1750,7 +1960,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run test/exportSyncRoutes.test.ts`
-Expected: PASS (9 tests)
+Expected: PASS (11 tests)
 
 - [ ] **Step 6: Run the full suite**
 
@@ -2297,3 +2507,6 @@ git commit -m "feat: add promoted-component edit UI with trusted paste-back"
   markup with "trust this" checked, confirm it saves and shows the hand-edited badge, re-export
   into the same directory and confirm the hand-edited component's files are skipped (not
   overwritten) while everything else refreshes normally.
+- [ ] Also hand-edit a `page.tsx` directly (not just a component) and re-export without syncing
+  first — confirm that file is skipped too (not silently overwritten), matching the protection
+  components already get.

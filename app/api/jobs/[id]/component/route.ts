@@ -7,15 +7,24 @@ import { jobService } from '@/lib/services/JobService';
 import { DatabaseConnection } from '@/lib/database';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const { id } = await params;
     const job = await jobService.getById(id);
     if (!job) {
       return NextResponse.json({ success: false, error: 'Job not found' }, { status: 404 });
+    }
+    if (job.created_by !== user.id && !user.is_admin) {
+      return NextResponse.json({ success: false, error: 'Only the creator can edit this job.' }, { status: 403 });
     }
     if (job.status !== 'complete') {
       return NextResponse.json({ success: false, error: 'Only a completed job can be edited' }, { status: 409 });

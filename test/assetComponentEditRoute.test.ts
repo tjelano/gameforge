@@ -108,6 +108,30 @@ describe('PATCH /api/assets/[id]/component', () => {
     expect((await assetService.getById(asset.id))!.edited_externally).toBe(0);
   });
 
+  it('returns 403 for a non-owner, non-admin user and does not write the file', async () => {
+    const { userId: ownerId } = await seedSession('Owner');
+    const { cookieHeader: attackerCookie } = await seedSession('Attacker');
+    const style = await styleService.create({ name: 'S', createdBy: ownerId, parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, ownerId);
+
+    const filePath = path.join(tempRoot, 'storage', 'components', 'comp.html');
+    const before = await fsPromises.readFile(filePath, 'utf-8');
+
+    const res = await PATCH(
+      req({ html: '<button>Hacked</button>', css: '.btn{color:red;}' }, attackerCookie),
+      { params: Promise.resolve({ id: asset.id }) }
+    );
+    expect(res.status).toBe(403);
+
+    // Prove the write never happened - not just that the status code was right.
+    const after = await fsPromises.readFile(filePath, 'utf-8');
+    expect(after).toBe(before);
+    expect(after).not.toContain('Hacked');
+
+    const unchanged = await assetService.getById(asset.id);
+    expect(unchanged!.edited_externally).toBe(0);
+  });
+
   it('writes the file via combineComponentHtml either way', async () => {
     const { cookieHeader, userId } = await seedSession();
     const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });

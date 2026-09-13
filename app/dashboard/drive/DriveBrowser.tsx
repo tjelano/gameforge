@@ -160,6 +160,7 @@ export function DriveBrowser({
 
   async function handleTrash(itemId: string) {
     if (busyItemId) return;
+    if (!window.confirm(`Move "${items.find(i => i.id === itemId)?.name ?? 'this item'}" to trash?`)) return;
     setBusyItemId(itemId);
     setError(null);
     try {
@@ -247,7 +248,9 @@ export function DriveBrowser({
           <button className="btn" onClick={() => setShowNewFolderForm(!showNewFolderForm)}>
             New folder
           </button>
+          <label htmlFor="drive-search" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>Search this folder</label>
           <input
+            id="drive-search"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search this folder…"
@@ -258,7 +261,8 @@ export function DriveBrowser({
 
       {showNewFolderForm && (
         <form onSubmit={handleCreateFolder} style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Folder name" autoFocus />
+          <label htmlFor="drive-new-folder-name" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>New folder name</label>
+          <input id="drive-new-folder-name" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Folder name" autoFocus />
           <button className="btn btn-primary" type="submit" disabled={creatingFolder || !newFolderName.trim()}>
             {creatingFolder ? 'Creating…' : 'Create'}
           </button>
@@ -268,13 +272,17 @@ export function DriveBrowser({
       {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
       {loading && items.length === 0 ? (
         <p className="page-subtitle">Loading…</p>
+      ) : !loading && items.length === 0 && !error ? (
+        <div className="empty-state">
+          {selectMode ? 'This folder is empty.' : 'This folder is empty. Upload a file or create a new folder above.'}
+        </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
           {items.map(item => {
             const isFolder = item.mimeType === FOLDER_MIME;
             const isBusy = busyItemId === item.id;
             return (
-              <div key={item.id} className="card" style={{ padding: 10, cursor: isFolder ? 'pointer' : 'default', opacity: isBusy ? 0.5 : 1 }} onClick={() => isFolder && openFolder(item)}>
+              <div key={item.id} className="card" style={{ padding: 10, opacity: isBusy ? 0.5 : 1 }}>
                 {!isFolder && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -285,15 +293,23 @@ export function DriveBrowser({
                   />
                 )}
                 {renamingId === item.id ? (
-                  <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 4 }}>
                     <input value={renameValue} onChange={e => setRenameValue(e.target.value)} style={{ fontSize: 12, width: '100%' }} autoFocus />
                     <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => handleRename(item.id)} disabled={isBusy}>OK</button>
                   </div>
+                ) : isFolder ? (
+                  <button
+                    type="button"
+                    onClick={() => openFolder(item)}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', fontSize: 13, wordBreak: 'break-word' }}
+                  >
+                    📁 {item.name}
+                  </button>
                 ) : (
-                  <div style={{ fontSize: 13, wordBreak: 'break-word' }}>{isFolder ? '📁 ' : ''}{item.name}</div>
+                  <div style={{ fontSize: 13, wordBreak: 'break-word' }}>{item.name}</div>
                 )}
                 {!selectMode && renamingId !== item.id && (
-                  <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
                     {!isFolder && item.webViewLink && (
                       <a href={item.webViewLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Open</a>
                     )}
