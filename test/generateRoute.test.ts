@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
+import { jobService } from '@/lib/services/JobService';
 import { seedSession } from './helpers/testSession';
 import { POST } from '@/app/api/generate/route';
 
@@ -146,5 +147,39 @@ describe('POST /api/generate with referenceImage', () => {
     expect(options.referenceStrength).toBeUndefined();
     expect(options.basedOnAssetId).toBeUndefined();
     expect(options.harmlessKey).toBe('kept');
+  });
+
+  it('rejects an ollama provider combined with a reference image', async () => {
+    const res = await POST(req({
+      styleId, assetType: 'theme', prompt: 'warm', outputKind: 'theme',
+      provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434',
+      referenceImage: { base64: 'AAAA', mediaType: 'image/png' },
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/reference image/i);
+  });
+
+  it('rejects an ollama provider for image (sprite) generation', async () => {
+    const res = await POST(req({
+      styleId, assetType: 'button', prompt: 'a button', outputKind: 'image',
+      provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434',
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/image/i);
+  });
+
+  it('stores provider/model/ollamaHost in the job options when an ollama provider is given for a theme job', async () => {
+    const res = await POST(req({
+      styleId, assetType: 'theme', prompt: 'warm', outputKind: 'theme',
+      provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434',
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const storedOptions = JSON.parse((await jobService.getById(body.data.id))!.options);
+    expect(storedOptions.provider).toBe('ollama');
+    expect(storedOptions.model).toBe('llama3-groq-tool-use:8b');
+    expect(storedOptions.ollamaHost).toBe('http://localhost:11434');
   });
 });
