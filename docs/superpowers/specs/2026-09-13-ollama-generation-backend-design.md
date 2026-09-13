@@ -198,10 +198,17 @@ CI (`ubuntu-latest`, no GPU, no Ollama daemon) can never run a real model. Every
 
 - `ollamaToolCall.ts`: request-shape assertions (native `/api/chat`, `stream: false`, the one tool,
   `options.num_ctx` set); response-handling cases for a clean `tool_calls` response, a nested
-  stringified-argument response, no `tool_calls` at all (hard-fail path), and the model dumping the
-  call into `content` instead (same hard-fail, not a crash).
+  stringified-argument response, a malformed/truncated stringified argument (maps to the hard-fail
+  error, not a raw Zod error), no `tool_calls` at all (hard-fail path), the model dumping the call
+  into `content` instead (same hard-fail, not a crash), and a `prompt_eval_count >= num_ctx`
+  response (treated as truncation). Also: two concurrent calls in the same test process only issue
+  one `fetch` at a time — the second doesn't fire until the first's promise settles — proving the
+  mutex actually serializes rather than just existing unused.
 - Model-pull progress parsing: a faked NDJSON stream, asserting the parser tolerates a missing
-  `completed` field and only treats `status:"success"` as terminal.
+  `completed` field, computes `completed/total` correctly on the mid-stream lines, and on the
+  terminal `status:"success"` line (which carries neither field) jumps straight to 100% rather than
+  computing a division and getting `NaN`. Also: a pull that never resolves is cut off by the
+  configured timeout rather than hanging the test (or the request) forever.
 - The Settings "Test connection" route: mocked reachable/unreachable cases.
 - **Explicitly not automated**: whether a given real model is actually reliable at tool-calling.
   That needs a real local Ollama + real multi-GB weights, which can't and shouldn't run in CI — it's
