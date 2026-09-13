@@ -271,6 +271,12 @@ describe('CopilotConversationService', () => {
     const b = await copilotConversationService.create({ title: 'B', createdBy: 'user-1' });
     await copilotConversationService.create({ title: 'Other user', createdBy: 'user-2' });
 
+    // touch()'s updated_at must land strictly after b's own created_at/updated_at
+    // for the assertion below to be meaningful -- without this gap, a fast
+    // synchronous run could tie all three Date.now() calls to the same
+    // millisecond, making the expected order a coincidence rather than a
+    // real assertion of touch()'s effect.
+    await new Promise(resolve => setTimeout(resolve, 20));
     await copilotConversationService.touch(a.id);
 
     const list = await copilotConversationService.listForUser('user-1');
@@ -280,7 +286,7 @@ describe('CopilotConversationService', () => {
   it('touch bumps updated_at', async () => {
     const convo = await copilotConversationService.create({ title: 'A', createdBy: 'user-1' });
     const before = convo.updated_at;
-    await new Promise(resolve => setTimeout(resolve, 2));
+    await new Promise(resolve => setTimeout(resolve, 20)); // comfortably above typical Date.now() clock-tick resolution
     await copilotConversationService.touch(convo.id);
     const after = await copilotConversationService.getById(convo.id);
     expect(after!.updated_at).toBeGreaterThan(before);
@@ -460,11 +466,20 @@ class CopilotMessageServiceImpl {
     return CopilotMessageSchema.parse(row);
   }
 
-  /** Oldest first — the natural order for replaying into a model's `messages` array. */
+  /**
+   * Oldest first — the natural order for replaying into a model's `messages`
+   * array. `rowid` is SQLite's implicit insertion-order column (present on
+   * every normal, non-WITHOUT-ROWID table, which this is); it's the
+   * tiebreaker for two messages landing on the same created_at millisecond
+   * (a real possibility: the route appends the user message, then the
+   * assistant's reply, and a mocked/very fast model call in tests can make
+   * both happen within the same tick) -- `created_at` alone doesn't
+   * guarantee a stable order for ties.
+   */
   async listByConversation(conversationId: string): Promise<CopilotMessage[]> {
     const db = DatabaseConnection.getInstance();
     const rows = db.prepare(
-      'SELECT * FROM copilot_messages WHERE conversation_id = ? ORDER BY created_at ASC'
+      'SELECT * FROM copilot_messages WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC'
     ).all(conversationId);
     return rows.map(row => CopilotMessageSchema.parse(row));
   }
@@ -974,7 +989,8 @@ Expected: PASS
 
 - [ ] **Step 5: Write the failing test for callClaudeMessage**
 
-Append to `test/claudeToolCall.test.ts`:
+Append to `test/claudeToolCall.test.ts` — this file already imports `ANTHROPIC_PROVIDER` at its top
+(used by the pre-existing `callClaudeTool` tests), so only the new function needs importing:
 
 ```ts
 import { callClaudeMessage } from '@/lib/services/claudeToolCall';
@@ -1157,7 +1173,9 @@ git commit -m "feat: add resolveClaudeProvider() and callClaudeMessage() for opt
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `test/ollamaToolCall.test.ts`:
+Append to `test/ollamaToolCall.test.ts` — this file already defines a local `jsonResponse(body, ok,
+status)` helper near its top (used by the pre-existing `callOllamaTool` tests); the new `describe`
+block below reuses that same helper, no new one needed:
 
 ```ts
 import { callOllamaMessage } from '@/lib/services/ollamaToolCall';
@@ -1570,6 +1588,8 @@ describe('buildCopilotSystemPrompt', () => {
   it('does not throw when the knowledge doc is missing -- falls back to an empty section', async () => {
     await fsPromises.rm(path.join(tempRoot, 'docs', 'copilot-knowledge.md'));
     const prompt = await buildCopilotSystemPrompt();
+    expect(prompt).not.toContain('Themes live at /dashboard/themes.'); // the deleted file's own content must be gone, not silently cached
+    expect(prompt).toContain('"styles"'); // the live-context section still assembles fine on its own
     expect(prompt).toContain('clarifying question');
   });
 });
@@ -1907,17 +1927,25 @@ export async function POST(req: NextRequest) {
       }
       providerUsed = 'claude';
       modelUsed = resolved.provider.model;
-      result = await callClaudeMessage({
-        provider: resolved.provider,
-        apiKey: resolved.apiKey,
-        toolName: tool.name,
-        toolDescription: tool.description,
-        inputSchema: tool.inputSchema,
-        messages: turnMessages,
-        system: systemPrompt,
-        operationLabel: 'copilot message',
-        truncatedMessage: 'the reply could not be completed',
-      });
+      try {
+        result = await callClaudeMessage({
+          provider: resolved.provider,
+          apiKey: resolved.apiKey,
+          toolName: tool.name,
+          toolDescription: tool.description,
+          inputSchema: tool.inputSchema,
+          messages: turnMessages,
+          system: systemPrompt,
+          operationLabel: 'copilot message',
+          truncatedMessage: 'the reply could not be completed',
+        });
+      } catch (e: any) {
+        // Same 502 treatment as the Ollama branch above -- a resolved,
+        // configured provider that still fails mid-call (HTTP failure,
+        // truncation) is a transient upstream problem, not the "isn't
+        // configured" case resolveClaudeProvider() already caught as 503.
+        return NextResponse.json({ success: false, error: e.message }, { status: 502 });
+      }
     }
 
     let toolCall: { name: string; input: unknown } | undefined;
