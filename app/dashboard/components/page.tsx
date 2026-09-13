@@ -97,6 +97,20 @@ export default function ComponentsPage() {
     }
   }
 
+  async function handleRetryWithCorrection(jobId: string) {
+    try {
+      const res = await fetch('/api/jobs/retry-with-correction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const body = await res.json();
+      if (body.success) refreshActive();
+    } catch {
+      // Best-effort -- the job card's own error message is still visible either way.
+    }
+  }
+
   return (
     <>
       <h1 className="page-title">Components</h1>
@@ -178,7 +192,7 @@ export default function ComponentsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {jobs.map(job => (
-            <JobCard key={job.id} job={job} />
+            <JobCard key={job.id} job={job} onRetryWithCorrection={handleRetryWithCorrection} />
           ))}
         </div>
       )}
