@@ -51,9 +51,17 @@ system refresh (Sentient/Satoshi fonts, a Persimmon color palette). Unrelated to
 GameForge already has most of the hard parts built, from the Ollama generation work:
 
 - **Provider selection**: `lib/services/claudeApiProviders.ts` (`ANTHROPIC_PROVIDER` /
-  `CHEAPERINFERENCE_PROVIDER`) and the `THEME_API_PROVIDER` env-var switch already used by
-  `ThemeGenerator.ts`/`ComponentGenerator.ts`/`PageLayoutSuggester.ts` — reused as-is for the
-  copilot's "Claude" option. No new provider-selection code.
+  `CHEAPERINFERENCE_PROVIDER`) and the `THEME_API_PROVIDER` env-var switch, reused for the copilot's
+  "Claude" option — but the actual resolution logic (read `THEME_API_PROVIDER`, pick the provider
+  object, read the matching API-key env var, throw if misconfigured) is today copy-pasted three times,
+  once each as a private block inside `ThemeGenerator.ts`/`ComponentGenerator.ts`/
+  `PageLayoutSuggester.ts`'s own lazy-singleton getters — none of it is exported for a fourth caller to
+  reuse. This feature adds a fourth caller, which crosses the line into "extract on sight": add one
+  exported function, `resolveClaudeProvider()` in `lib/services/claudeApiProviders.ts`, returning
+  `{ provider: ClaudeApiProvider; apiKey: string } | { error: string }` (the `error` string being the
+  exact "isn't configured" message used in "Error handling" below). The copilot route calls this
+  directly; the three existing generators are not changed by this spec (out of scope — they keep their
+  own inline copies unless a later cleanup task touches them).
 - **Ollama host/model discovery**: `lib/hooks/useOllamaModels.ts` already fetches the installed model
   list and configured host — reused as-is for the copilot's model picker, same `<select>` pattern as
   `app/dashboard/themes/page.tsx` / `app/dashboard/components/page.tsx`.
@@ -65,7 +73,11 @@ GameForge already has most of the hard parts built, from the Ollama generation w
   parameter tweak to them — see "New tool-call helpers" below.
 - **Live project grounding**: `app/api/context/route.ts` already exists and already returns current
   styles, asset counts, and in-flight job counts — reused as-is, called once per copilot message and
-  folded into the system prompt.
+  folded into the system prompt. That route itself has no auth check today (a pre-existing gap, already
+  flagged in `2026-09-08-image-input-design.md`'s correction about sibling serving routes — not
+  something this spec introduces or is responsible for fixing). It's called server-side, from inside
+  `/api/copilot/message` which is itself auth-gated, so this feature doesn't newly expose it; it's just
+  as reachable directly as it was before this spec.
 - **Ownership pattern**: `PageService.ts`/`PresetService`-style `{error: 'NOT_FOUND' | 'FORBIDDEN'}`
   returns, scoped by `created_by` — reused for the new conversation service (see "Ownership" below).
 
@@ -204,9 +216,12 @@ a 2-person tool; the truncated first message is informative enough in a short li
   with (`z.enum(['claude','ollama']).optional()` + a `superRefine` requiring `model`+`ollamaHost`
   together), reused rather than re-invented. The panel's local picker state (one `<select>` holding
   either `'claude'` or a model name, same as the Themes/Components pages) translates to this wire shape
-  client-side exactly like those pages already do. If `conversationId` is omitted, creates a new
-  conversation first. Appends the user's message, calls the resolved provider, appends the assistant's
-  reply (including `tool_call` if one was made), and returns
+  client-side exactly like those pages already do. If `conversationId` is supplied, the route loads it
+  first and returns `{error: 'FORBIDDEN'}` (403) if `created_by` doesn't match the requesting user, or
+  `{error: 'NOT_FOUND'}` (404) if it doesn't exist — same ownership check as `GET .../[id]`, not
+  skipped just because this route writes instead of reads. If `conversationId` is omitted, creates a
+  new conversation first. Appends the user's message, calls the resolved provider, appends the
+  assistant's reply (including `tool_call` if one was made), and returns
   `{ conversationId, reply: { text, toolCall? } }`.
 
 All three routes require a logged-in user (`getCurrentUser(req)` from `lib/utils/session.ts`, the same
@@ -249,8 +264,8 @@ helper `app/api/auth/me/route.ts` and the export-sync apply route already use) a
   (same style as the existing `claudeToolCall`/`ollamaToolCall` tests), covering: text-only reply, reply
   with a tool call, and (Ollama only) the case where `tool_calls` is absent and `content` is returned
   as plain text.
-- `navigate_to_page`'s enum: one test asserting it's generated from `NavRail.LINKS` rather than
-  duplicated, so the two can't silently drift.
+- `navigate_to_page`'s enum: one test asserting it's derived from `lib/dashboardRoutes.ts`'s
+  `DASHBOARD_ROUTES` rather than a second hardcoded list, so the two can't silently drift.
 - `/api/copilot/message`: integration-style test covering the "no Claude key configured" 503 path
   explicitly, given that exact bug class's history in this codebase.
 
