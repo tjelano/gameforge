@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useStyles } from '@/lib/hooks/useStyles';
 import { usePolling } from '@/lib/hooks/usePolling';
+import { useOllamaModels } from '@/lib/hooks/useOllamaModels';
 import { useJobStore } from '@/lib/store/useJobStore';
 import { JobCard } from '@/app/components/JobCard';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
@@ -26,6 +27,8 @@ export default function ComponentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<{ base64: string; mediaType: string } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
+  const [provider, setProvider] = useState<'claude' | string>('claude');
 
   const activeStyleId = styleId || styles[0]?.id || '';
 
@@ -74,6 +77,9 @@ export default function ComponentsPage() {
           prompt: `${componentType}: ${prompt.trim()}`,
           outputKind: 'component',
           ...(referenceImage ? { referenceImage } : {}),
+          ...(provider !== 'claude' && !referenceImage
+            ? { provider: 'ollama', model: provider, ollamaHost: ollamaHost }
+            : {}),
         }),
       });
       const body = await res.json();
@@ -137,6 +143,20 @@ export default function ComponentsPage() {
             <input id="referenceImage" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} />
             {imageError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 4 }}>{imageError}</p>}
             {referenceImage && !imageError && <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 4 }}>Image attached.</p>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="provider">Model</label>
+            <select
+              id="provider"
+              value={referenceImage ? 'claude' : provider}
+              disabled={!!referenceImage}
+              onChange={e => setProvider(e.target.value)}
+            >
+              <option value="claude">Claude</option>
+              {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
+            </select>
+            {referenceImage && <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>Ollama isn't available with a reference image attached.</p>}
           </div>
 
           {error && (
