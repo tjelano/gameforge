@@ -109,4 +109,36 @@ describe('worker.ts routes theme jobs to ThemeGenerator', () => {
     expect(updated.status).toBe('failed');
     expect(updated.result_path).toBeNull();
   });
+
+  it('passes a providerOverride to the theme generator when the job options request ollama', async () => {
+    const generateSpy = vi.fn().mockResolvedValue({ path: 'theme-x.css', prompt: 'warm' });
+    vi.spyOn(await import('@/lib/services/ThemeGenerator'), 'getThemeGenerator').mockReturnValue({ generate: generateSpy });
+
+    const job = {
+      id: 'job-1', style_id: 'style-1', prompt: 'warm', output_kind: 'theme',
+      options: JSON.stringify({ provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434' }),
+    };
+    const { processJob } = await import('@/worker');
+    await processJob(job as any);
+
+    expect(generateSpy).toHaveBeenCalledWith('warm', 'style-1', undefined, undefined, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+  });
+
+  it('passes a providerOverride to the component generator when the job options request ollama', async () => {
+    const generateSpy = vi.fn().mockResolvedValue({ path: 'component-x.html', prompt: 'a button' });
+    vi.spyOn(await import('@/lib/services/ComponentGenerator'), 'getComponentGenerator').mockReturnValue({ generate: generateSpy });
+
+    const job = {
+      id: 'job-2', style_id: 'style-1', prompt: 'a button', output_kind: 'component',
+      options: JSON.stringify({ provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434' }),
+    };
+    const { processJob } = await import('@/worker');
+    await processJob(job as any);
+
+    expect(generateSpy).toHaveBeenCalledWith('a button', 'style-1', undefined, undefined, undefined, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+  });
 });

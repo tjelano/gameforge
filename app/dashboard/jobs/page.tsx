@@ -52,6 +52,15 @@ export default function JobsPage() {
       })
     );
 
+  const handleRetryWithCorrection = (jobId: string) =>
+    withBusy(jobId, () =>
+      fetch('/api/jobs/retry-with-correction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      })
+    );
+
   return (
     <>
       <h1 className="page-title">Jobs</h1>
@@ -76,6 +85,7 @@ export default function JobsPage() {
               onPromote={handlePromote}
               onDiscard={handleDiscard}
               onRetry={handleRetry}
+              onRetryWithCorrection={handleRetryWithCorrection}
               busy={busyId === job.id}
             />
           ))}

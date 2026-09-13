@@ -9,6 +9,9 @@ import { MockThemeGenerator, ThemeTokensSchema, buildThemePrompt, tokensToCss, t
 import { ClaudeApiThemeGenerator } from '@/lib/services/ClaudeApiThemeGenerator';
 import { ANTHROPIC_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { assetService } from '@/lib/services/AssetService';
+import { callOllamaTool } from '@/lib/services/ollamaToolCall';
+
+vi.mock('@/lib/services/ollamaToolCall', () => ({ callOllamaTool: vi.fn() }));
 
 let tempRoot: string;
 const STYLE_ID = '66666666-6666-6666-6666-666666666666';
@@ -125,6 +128,13 @@ describe('MockThemeGenerator', () => {
       gen.generate('x', STYLE_ID),
     ]);
     expect(a.path).not.toBe(b.path);
+  });
+
+  it('throws when given a providerOverride (mock generator cannot honor an ollama request)', async () => {
+    const gen = new MockThemeGenerator();
+    await expect(gen.generate('x', STYLE_ID, undefined, undefined, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    })).rejects.toThrow(/mock generator is active/);
   });
 });
 
@@ -360,5 +370,21 @@ describe('ClaudeApiThemeGenerator', () => {
     expect(sentSignal.aborted).toBe(false);
     controller.abort();
     expect(sentSignal.aborted).toBe(true);
+  });
+
+  it('calls callOllamaTool instead of callClaudeTool when a providerOverride is given', async () => {
+    (callOllamaTool as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      colorBackground: '#000', colorForeground: '#fff', colorAccent: '#f00', colorBorder: '#333',
+      fontHeading: 'serif', fontBody: 'sans', spaceUnit: '8px', radiusBase: '4px',
+    });
+    const generator = new ClaudeApiThemeGenerator('fake-key', ANTHROPIC_PROVIDER);
+    await generator.generate('warm', STYLE_ID, undefined, undefined, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+    expect(callOllamaTool).toHaveBeenCalledWith(expect.objectContaining({
+      host: 'http://localhost:11434',
+      model: 'llama3-groq-tool-use:8b',
+      toolName: 'emit_theme',
+    }));
   });
 });

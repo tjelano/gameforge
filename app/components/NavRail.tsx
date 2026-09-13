@@ -19,6 +19,7 @@ const LINKS = [
   { href: '/dashboard/settings/aseprite', label: 'Aseprite' },
   { href: '/dashboard/settings/seed-themes', label: 'Seed Themes' },
   { href: '/dashboard/settings/google-drive', label: 'Google Drive' },
+  { href: '/dashboard/settings/ollama', label: 'Ollama' },
 ];
 
 export function NavRail() {

@@ -58,7 +58,7 @@ describe('processJob with a reference image', () => {
     await processJob(job);
 
     const generateFn = generateSpy.mock.results[0].value.generate;
-    expect(generateFn).toHaveBeenCalledWith('match this', style.id, { base64: 'ZmFrZQ==', mediaType: 'image/png' }, undefined);
+    expect(generateFn).toHaveBeenCalledWith('match this', style.id, { base64: 'ZmFrZQ==', mediaType: 'image/png' }, undefined, undefined, undefined);
   });
 
   it('loads the based-on asset\'s current content and passes it to the theme generator', async () => {
@@ -80,7 +80,7 @@ describe('processJob with a reference image', () => {
     await processJob(job);
 
     const generateFn = generateSpy.mock.results[0].value.generate;
-    expect(generateFn).toHaveBeenCalledWith('brighten it', style.id, undefined, ':root { --color-accent: #f80; }');
+    expect(generateFn).toHaveBeenCalledWith('brighten it', style.id, undefined, ':root { --color-accent: #f80; }', undefined, undefined);
   });
 
   it('completes normally when neither referenceImageFilename nor basedOnAssetId is set', async () => {
@@ -96,7 +96,7 @@ describe('processJob with a reference image', () => {
     await processJob(job);
 
     const generateFn = generateSpy.mock.results[0].value.generate;
-    expect(generateFn).toHaveBeenCalledWith('x', style.id, undefined, undefined);
+    expect(generateFn).toHaveBeenCalledWith('x', style.id, undefined, undefined, undefined, undefined);
   });
 });
 
