@@ -16,12 +16,12 @@ All 7 handlers have **no authentication check at all** — not "weak," not "bypa
 
 ## Scope decision: login-only, not ownership, not admin-only
 
-Every other ownership check added by the audit-fixes plan exists because the mutated resource (a style, asset, job, preset, page) has a `created_by` owner. None of these 7 handlers touch an owned resource — they touch global app state (the git working tree, a local settings value, orphaned files on disk). There is no existing "admin-only, no-owner" gate anywhere in this codebase to extend (checked: every `is_admin` reference in `app/api` is an ownership-bypass, not a standalone gate). Decided: require **any logged-in user** (mirror `app/api/assets/from-job/route.ts`'s existing pattern exactly — `getCurrentUser(req)`, 401 with `{ success: false, error: 'Not logged in' }` if null), not admin-only. Cost if wrong: low and reversible — tightening this later from "any user" to "admin only" is a one-line change to one condition per file, not a re-architecture.
+Every other ownership check added by the audit-fixes plan exists because the mutated resource (a style, asset, job, preset, page) has a `created_by` owner. None of these 7 handlers touch an owned resource — they touch global app state (the git working tree, a local settings value, orphaned files on disk). There is no existing "admin-only, no-owner" gate anywhere in this codebase to extend (checked: every `is_admin` reference in `app/api` is an ownership-bypass, not a standalone gate). Decided: require **any logged-in user** (mirror the existing pattern used throughout this codebase (e.g. `app/api/assets/route.ts`) — `getCurrentUser(req)`, 401 with `{ success: false, error: 'Not logged in' }` if null), not admin-only. Cost if wrong: low and reversible — tightening this later from "any user" to "admin only" is a one-line change to one condition per file, not a re-architecture.
 
 ## Global Constraints
 
 - No new npm dependencies.
-- Mirror `app/api/assets/from-job/route.ts:12-17` exactly: `import { getCurrentUser } from '@/lib/utils/session';`, then as the first statement inside the handler's `try` block (or first statement if there is no `try`):
+- Mirror the existing pattern at, e.g., `app/api/assets/route.ts:43-46`: `import { getCurrentUser } from '@/lib/utils/session';`, then as the first statement inside the handler's `try` block (or first statement if there is no `try`):
   ```typescript
   const user = await getCurrentUser(req);
   if (!user) {
