@@ -327,7 +327,8 @@ git commit -m "feat: add callOllamaTool, the Ollama-backed sibling of callClaude
 Same mechanical change applied 3 times — batched into one task per this project's own "batch small same-shape work" convention, since splitting it into 3 separate review gates for an identical pattern would be pure overhead.
 
 **Files:**
-- Modify: `lib/services/ThemeGenerator.ts`
+- Modify: `lib/services/ThemeGenerator.ts` (interface + `MockThemeGenerator` signature only — this file only re-exports/imports `ClaudeApiThemeGenerator`, it doesn't define it)
+- Modify: `lib/services/ClaudeApiThemeGenerator.ts` (**correction, found during Task 2's own implementation**: `ClaudeApiThemeGenerator` is defined in its own file, not inside `ThemeGenerator.ts` as originally written here — the dispatch logic below belongs in this file)
 - Modify: `lib/services/ComponentGenerator.ts`
 - Modify: `lib/services/PageLayoutSuggester.ts`
 - Modify: `test/themeGenerator.test.ts`
