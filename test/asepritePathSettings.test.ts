@@ -6,14 +6,26 @@ import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { GET as getPath, PUT as putPath } from '@/app/api/settings/aseprite-path/route';
+import { seedSession } from '@/test/helpers/testSession';
 
 let tempRoot: string;
+let cookieHeader: string;
 
-function putRequest(body: unknown): NextRequest {
+function putRequest(body: unknown, withCookie = true): NextRequest {
   return new NextRequest('http://localhost/api/settings/aseprite-path', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(withCookie ? { Cookie: cookieHeader } : {}),
+    },
     body: JSON.stringify(body),
+  });
+}
+
+function getRequest(withCookie = true): NextRequest {
+  return new NextRequest('http://localhost/api/settings/aseprite-path', {
+    method: 'GET',
+    headers: withCookie ? { Cookie: cookieHeader } : undefined,
   });
 }
 
@@ -30,6 +42,7 @@ beforeEach(async () => {
 
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  ({ cookieHeader } = await seedSession());
 });
 
 afterEach(async () => {
@@ -39,8 +52,18 @@ afterEach(async () => {
 });
 
 describe('GET/PUT /api/settings/aseprite-path', () => {
+  it('401s on GET when not logged in', async () => {
+    const res = await getPath(getRequest(false));
+    expect(res.status).toBe(401);
+  });
+
+  it('401s on PUT when not logged in', async () => {
+    const res = await putPath(putRequest({ path: 'C:\\Aseprite\\Aseprite.exe' }, false));
+    expect(res.status).toBe(401);
+  });
+
   it('GET returns an empty path when nothing has been saved', async () => {
-    const res = await getPath();
+    const res = await getPath(getRequest());
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.data.path).toBe('');
@@ -52,7 +75,7 @@ describe('GET/PUT /api/settings/aseprite-path', () => {
     expect(putBody.success).toBe(true);
     expect(putBody.data.path).toBe('C:\\Aseprite\\Aseprite.exe');
 
-    const getRes = await getPath();
+    const getRes = await getPath(getRequest());
     const getBody = await getRes.json();
     expect(getBody.data.path).toBe('C:\\Aseprite\\Aseprite.exe');
   });
@@ -65,7 +88,7 @@ describe('GET/PUT /api/settings/aseprite-path', () => {
     expect(body.success).toBe(true);
     expect(body.data.path).toBe('');
 
-    const getRes = await getPath();
+    const getRes = await getPath(getRequest());
     const getBody = await getRes.json();
     expect(getBody.data.path).toBe('');
   });

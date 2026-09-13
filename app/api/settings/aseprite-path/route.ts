@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { settingsService } from '@/lib/services/SettingsService';
 import { ASEPRITE_PATH_SETTING_KEY } from '@/lib/config';
 import { isDriveLetterRootedPath } from '@/lib/services/shared/editDecision';
+import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,8 +23,13 @@ const SetPathSchema = z.object({
     }),
 });
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const savedPath = await settingsService.get(ASEPRITE_PATH_SETTING_KEY);
     return NextResponse.json({ success: true, data: { path: savedPath ?? '' } });
   } catch (error: any) {
@@ -34,6 +40,11 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const body = await req.json();
     const parsed = SetPathSchema.safeParse(body);
     if (!parsed.success) {

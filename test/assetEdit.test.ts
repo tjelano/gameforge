@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { NextRequest } from 'next/server';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
+import { seedSession } from '@/test/helpers/testSession';
 
 // This feature's path validation is deliberately Windows-only
 // (isDriveLetterRootedPath requires a genuine C:\ drive letter — see
@@ -41,13 +42,17 @@ const spawnMock = vi.fn((..._args: unknown[]) => makeFakeChild());
 vi.mock('child_process', () => ({ spawn: (...args: unknown[]) => spawnMock(...args) }));
 
 let tempRoot: string;
+let cookieHeader: string;
 const STYLE_ID = '99999999-9999-9999-9999-999999999999';
 const ASSET_WITH_IMAGE_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const ASSET_NO_IMAGE_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const ASSET_UNSAFE_PATH_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
-function editRequest(): NextRequest {
-  return new NextRequest('http://localhost/api/assets/x/edit', { method: 'POST' });
+function editRequest(withCookie = true): NextRequest {
+  return new NextRequest('http://localhost/api/assets/x/edit', {
+    method: 'POST',
+    headers: withCookie ? { Cookie: cookieHeader } : undefined,
+  });
 }
 
 beforeEach(async () => {
@@ -66,6 +71,7 @@ beforeEach(async () => {
 
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
+  ({ cookieHeader } = await seedSession());
   const db = DatabaseConnection.getInstance();
   db.prepare(
     `INSERT INTO styles (id, name, created_by, parameters, is_deleted, created_at, updated_at)
@@ -95,6 +101,13 @@ afterEach(async () => {
 });
 
 describe('POST /api/assets/[id]/edit', () => {
+  it('401s when not logged in', async () => {
+    const { POST } = await import('@/app/api/assets/[id]/edit/route');
+    const res = await POST(editRequest(false), { params: Promise.resolve({ id: ASSET_WITH_IMAGE_ID }) });
+    expect(res.status).toBe(401);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('404s when the asset does not exist', async () => {
     const { POST } = await import('@/app/api/assets/[id]/edit/route');
     const res = await POST(editRequest(), { params: Promise.resolve({ id: 'no-such-asset' }) });
