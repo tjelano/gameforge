@@ -65,7 +65,7 @@ afterEach(async () => {
 });
 
 describe('POST /api/git/pull', () => {
-  it('401s when not logged in, without calling gitService', async () => {
+  it('401s when not logged in and an account already exists, without calling gitService', async () => {
     const { POST } = await import('@/app/api/git/pull/route');
     const res = await POST(request(false));
     expect(res.status).toBe(401);
@@ -75,6 +75,24 @@ describe('POST /api/git/pull', () => {
   it('200s and calls gitService.pull() when logged in', async () => {
     const { POST } = await import('@/app/api/git/pull/route');
     const res = await POST(request());
+    expect(res.status).toBe(200);
+    expect(pullMock).toHaveBeenCalledTimes(1);
+  });
+
+  // The login screen's "Pull from git first" button (app/login/LoginForm.tsx)
+  // only renders when zero accounts exist, and a session always joins to a
+  // real user row — so that button can never carry a session. Mirrors
+  // app/api/auth/login/route.ts's own existing bootstrap exception for
+  // account creation: allow this route with no session ONLY while zero
+  // accounts exist, closing back to a hard login requirement the moment one
+  // does (the other 401 test above already proves that half).
+  it('allows pull with no session when zero accounts exist yet (the login screen bootstrap flow)', async () => {
+    const db = DatabaseConnection.getInstance();
+    db.prepare('DELETE FROM sessions').run();
+    db.prepare('DELETE FROM users').run();
+
+    const { POST } = await import('@/app/api/git/pull/route');
+    const res = await POST(request(false));
     expect(res.status).toBe(200);
     expect(pullMock).toHaveBeenCalledTimes(1);
   });
