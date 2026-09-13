@@ -36,7 +36,10 @@ const GenerateSchema = z.object({
   provider: z.enum(['claude', 'ollama']).optional(),
   model: z.string().min(1).optional(),
   ollamaHost: z.string().regex(/^https?:\/\//).optional(),
-});
+}).refine(
+  input => input.provider !== 'ollama' || (!!input.model && !!input.ollamaHost),
+  { message: 'model and ollamaHost are required when provider is "ollama"' }
+);
 
 // These three keys are computed by THIS route from the validated
 // referenceImage/basedOnAssetId fields below - options is a generic,
@@ -44,7 +47,7 @@ const GenerateSchema = z.object({
 // otherwise inject a raw referenceImageFilename/referenceStrength/
 // basedOnAssetId directly into options and bypass ReferenceImageSchema's
 // size/type checks and basedOnAssetId's uuid format check entirely.
-const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost'] as const;
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested'] as const;
 
 export async function POST(req: NextRequest) {
   try {

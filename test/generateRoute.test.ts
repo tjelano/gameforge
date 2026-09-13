@@ -182,4 +182,24 @@ describe('POST /api/generate with referenceImage', () => {
     expect(storedOptions.model).toBe('llama3-groq-tool-use:8b');
     expect(storedOptions.ollamaHost).toBe('http://localhost:11434');
   });
+
+  it('rejects an ollama provider with no model/ollamaHost with a 400', async () => {
+    const res = await POST(req({
+      styleId, assetType: 'theme', prompt: 'warm', outputKind: 'theme',
+      provider: 'ollama',
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it('strips a client-injected ollamaCorrectionRequested smuggled inside options', async () => {
+    const res = await POST(req({
+      styleId,
+      assetType: 'sprite',
+      prompt: 'a goblin',
+      options: { ollamaCorrectionRequested: true },
+    }));
+    const body = await res.json();
+    const options = JSON.parse(body.data.options);
+    expect(options.ollamaCorrectionRequested).toBeUndefined();
+  });
 });
