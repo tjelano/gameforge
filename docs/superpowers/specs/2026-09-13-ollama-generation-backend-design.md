@@ -27,6 +27,15 @@ generators that already share `callClaudeTool()` (`lib/services/claudeToolCall.t
 **Out of scope:**
 - Sprite/image generation (`PixellabGenerator`/`MockGenerator`) — local vision/image models are a
   much less mature area than local text models; Pixellab/Mock stays as-is.
+- **Reference-image input to the in-scope generators.** Found while re-reading the actual generator
+  code before writing this spec (not caught during brainstorming): `ClaudeApiThemeGenerator` and
+  `ComponentGenerator` both accept an optional reference image as multimodal content alongside the
+  text prompt. Stacking "local model" + "vision-capable" + "reliable tool-calling" is a materially
+  higher, separately-unverified bar than the text-only case this spec is built on. Resolution: the
+  Ollama option is **not offered in the per-generation picker when a reference image is attached** —
+  Claude remains the only choice for that specific generation. Revisit only once the text-only path
+  has real usage and a vision-capable model is independently validated the same way the text models
+  are.
 - The AI copilot (separate spec, item 2 above).
 - The visual design system change (separate, unrelated task).
 - Any automatic retry of a failed tool-call — see "Failure handling" below.
@@ -82,9 +91,28 @@ assumed — see Appendix):
 - `stream: false` — avoids a real, documented bug where Ollama's OpenAI-compat layer drops
   streamed `tool_calls` deltas. Non-streaming isn't affected by that bug either way, and matches
   how `callClaudeTool` already works (no streaming anywhere in the existing Claude integration).
-- `options.num_ctx` set explicitly, sized to the tool's schema + prompt.
+- `options.num_ctx` set explicitly. All 3 in-scope schemas are small and flat (verified directly —
+  `ClaudeApiThemeGenerator`'s is 8 plain string fields, `ComponentGenerator`'s is 2, `PageLayoutSuggester`'s
+  is one array of integers; none use `oneOf`/`anyOf`/enum, so Ollama's JSON-Schema subset support is
+  not a blocker here), so a single generous constant (e.g. 8192) comfortably covers prompt + schema
+  + output for all 3 without needing a per-call token-estimation formula. Guard against the silent-
+  truncation failure mode directly: if the response's `prompt_eval_count` (Ollama reports this)
+  comes back at or above `num_ctx`, treat it as a truncation, not a clean response.
 - `tools: [{ type: 'function', function: { name: toolName, description: toolDescription,
   parameters: inputSchema } }]` (Ollama's tool shape, not Anthropic's).
+
+### Concurrency
+
+GameForge's worker (`worker.ts`) claims and processes up to `WORKER_BATCH_SIZE` (default 5) jobs
+**concurrently** via `Promise.allSettled` — verified directly, not assumed. That's fine for Claude
+(a cloud API that scales independently of this machine), but firing several concurrent generations
+at one local Ollama daemon on typical consumer hardware (one GPU, finite VRAM) risks real resource
+contention — OOM, severe slowdown, or requests queueing inside Ollama in a way this design's
+timeouts don't account for. `ollamaToolCall.ts` holds a simple module-level mutex: only one Ollama
+call in flight at a time from this process, regardless of how many jobs the batch concurrently
+claims; any other queued Ollama call just waits its turn. A single global lock, not a per-host or
+per-model scheme — the simplest thing that removes the real risk; revisit only if real usage shows
+it's a throughput bottleneck worth the added complexity.
 
 ### Response handling
 
@@ -93,7 +121,10 @@ assumed — see Appendix):
 - **`message.tool_calls` present, but an argument value is a JSON-encoded string instead of a real
   nested object/array** → a real, documented quirk (nested tool-call arguments come back
   stringified, not structured) — `JSON.parse()` that specific field before validating against the
-  Zod schema.
+  Zod schema. That parse is wrapped in its own try/catch: a malformed/truncated string (the model
+  cut off mid-JSON) maps to the same specific hard-fail error as "no tool call at all," not a raw
+  Zod validation error — the latter would read as "your request was invalid," which is wrong; the
+  request was fine, the model's output wasn't.
 - **No `tool_calls` at all** (model just returned plain text, possibly in `content`) → **hard-fail**
   with a specific error ("this model didn't produce structured output — try a different model, or
   retry with a correction"), surfaced through the exact same job-failure-message path Task 22 of
@@ -113,7 +144,10 @@ well. This design:
 - Offers a **manual "Retry with correction"** action on a job that failed this specific way: re-runs
   the same request with one added instruction telling the model it must call the tool. This is
   deliberately a separate action from the existing generic job-retry (Task 21's retry/backoff,
-  which handles transient 429/5xx errors — a different failure class entirely), not a variant of it.
+  which handles transient 429/5xx errors — a different failure class entirely), not a variant of
+  it. Lives in the job's failure-detail view (where `jobs.error_message` is already shown), clearly
+  labeled as distinct from the generic retry button, not placed next to it as a same-looking
+  alternative.
 
 ## Model selection & recommendation
 
@@ -148,7 +182,13 @@ aseprite` page:
   per line, `{"status":"pulling manifest"}` → repeated `{"status":"pulling <digest>","digest":...,
   "total":<bytes>,"completed":<bytes>}` (note: `completed` is absent until the download actually
   starts — the progress bar needs to handle that, not assume it's always present) →
-  `{"status":"success"}` as the only real terminal signal. Button flips to "Installed" on success.
+  `{"status":"success"}` as the only real terminal signal, with **no `total`/`completed` fields at
+  all on that line**. The progress calculation checks `status === 'success'` first and jumps
+  straight to 100% in that case — it never computes `completed/total` on the terminal line, which
+  would otherwise divide by zero. The pull request itself carries an `AbortSignal.timeout` (a
+  generous one — multi-GB downloads are slow; a few minutes, not the 60s used elsewhere) so an
+  abandoned or hung request doesn't run forever; Ollama resumes partial pulls on retry, so timing
+  out isn't destructive.
 
 ## Testing
 
