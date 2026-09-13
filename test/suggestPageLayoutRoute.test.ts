@@ -167,5 +167,6 @@ describe('POST /api/styles/[id]/pages/suggest-layout', () => {
     expect(suggestSpy).toHaveBeenCalledWith('Home', expect.any(Array), undefined, {
       type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
     });
+    vi.restoreAllMocks();
   });
 });
