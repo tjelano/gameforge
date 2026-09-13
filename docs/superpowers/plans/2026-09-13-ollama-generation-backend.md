@@ -580,6 +580,7 @@ git commit -m "feat: thread an Ollama provider override through the 3 tool-calli
 - Modify: `worker.ts`
 - Modify: `test/generateRoute.test.ts`
 - Modify: `test/workerThemeRouting.test.ts`
+- Modify: `test/workerReferenceImage.test.ts` (**correction, found during Task 3's own implementation**: this pre-existing file has 3 assertions that call `toHaveBeenCalledWith(...)` on the theme generator with the OLD 4-positional-arg shape; once `worker.ts`'s `case 'theme':` branch always passes the 2 new trailing args, these 3 assertions fail on arg-count alone unless each gains `, undefined, undefined` at the end — no change to what's being tested, just matching the real, wider call signature)
 
 **Interfaces:**
 - Consumes: `ThemeGenerator.generate(...,providerOverride?)`, `ComponentGenerator.generate(...,providerOverride?)` (Task 2).
@@ -655,11 +656,17 @@ it('passes a providerOverride to the component generator when the job options re
   };
   await processJob(job as any);
 
-  expect(generateSpy).toHaveBeenCalledWith('a button', 'style-1', undefined, undefined, undefined, {
+  expect(generateSpy).toHaveBeenCalledWith('a button', 'style-1', undefined, undefined, undefined, undefined, {
     type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
   });
 });
 ```
+
+(**Correction, found during Task 3's own implementation**: the line above originally had one fewer
+`undefined` — `ComponentGenerator.generate()`'s real, Task-2-established signature is 7 positional
+parameters [`prompt, styleId, componentType?, referenceImage?, basedOnContent?, signal?,
+providerOverride?`], and the worker.ts call site below already calls it with all 7; the expected-args
+assertion needs 6 values before the override object, not 5, to match.)
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
