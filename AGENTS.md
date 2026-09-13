@@ -44,6 +44,16 @@ A session has no memory of prior sessions unless it checks for one. Do this firs
    the same reason a clean test run is worth having even when you expected it to pass. Verify every
    finding from either mode against the actual code/plan text yourself before acting — you are the
    final arbiter, not DeepSeek; expect roughly 1-in-5 "Important" findings to hold up, not more.
+5. **Run `npm run lint` as a standard part of every task's own verification, not just `npx vitest
+   run && npx tsc --noEmit`.** CI (`.github/workflows/ci.yml`) runs Typecheck, Lint, and Test as 3
+   separate required steps — a plan whose tasks/reviewers only ever ran the first and third will
+   pass every gate locally and still fail CI on push. This has happened twice already (PR #23's
+   `react-hooks/set-state-in-effect` + pre-existing `react/no-unescaped-entities`; the
+   `2026-09-13-ollama-generation-backend` plan's own identical `no-unescaped-entities` pair plus a
+   fresh `set-state-in-effect` in a brand-new effect, caught only after the PR was already open).
+   Lint locally before pushing, not after CI fails — `npx eslint app lib worker.ts` (scoping to the
+   real source tree; a bare `npx eslint .` also sweeps other git worktrees and `.next` build
+   artifacts on this machine and produces thousands of irrelevant hits).
 
 ## Shipped Features (chronological, by merged PR — see `git log --merges --oneline main` for the
 authoritative, up-to-date list; this is a snapshot as of PR #22)
