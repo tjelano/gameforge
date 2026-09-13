@@ -1926,36 +1926,48 @@ afterEach(async () => {
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
+// The route's schema requires jobId to be a real UUID (z.string().uuid(), matching the sibling
+// /api/jobs/retry/route.ts and how JobService.create() actually generates ids via
+// crypto.randomUUID()) -- a non-UUID literal like 'job-1' fails Zod validation and returns a
+// generic 400 before any of the route's own business-logic checks run. Found during this task's
+// own implementation: with non-UUID literals, 2 of these 4 tests failed outright on the wrong
+// status code, and a 3rd "passed" for the wrong reason (it expects 400 and got one, but from Zod
+// rejecting the malformed id, not from the business-logic branch its name claims to exercise).
+const JOB_ID_1 = '00000000-0000-0000-0000-000000000001';
+const JOB_ID_2 = '00000000-0000-0000-0000-000000000002';
+const JOB_ID_3 = '00000000-0000-0000-0000-000000000003';
+const JOB_ID_4 = '00000000-0000-0000-0000-000000000004';
+
 describe('POST /api/jobs/retry-with-correction', () => {
   it('401s when not logged in', async () => {
-    insertJob('job-1', 'failed', OLLAMA_NO_TOOL_CALL_ERROR_PREFIX, { provider: 'ollama' });
+    insertJob(JOB_ID_1, 'failed', OLLAMA_NO_TOOL_CALL_ERROR_PREFIX, { provider: 'ollama' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(new NextRequest('http://localhost/api/jobs/retry-with-correction', { method: 'POST', body: JSON.stringify({ jobId: 'job-1' }) }));
+    const res = await POST(new NextRequest('http://localhost/api/jobs/retry-with-correction', { method: 'POST', body: JSON.stringify({ jobId: JOB_ID_1 }) }));
     expect(res.status).toBe(401);
   });
 
   it('rejects a job that did not fail with the ollama-no-tool-call error', async () => {
-    insertJob('job-2', 'failed', 'some other network error', { provider: 'ollama' });
+    insertJob(JOB_ID_2, 'failed', 'some other network error', { provider: 'ollama' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(req('job-2'));
+    const res = await POST(req(JOB_ID_2));
     expect(res.status).toBe(400);
   });
 
   it('rejects a job that is not failed', async () => {
-    insertJob('job-3', 'complete', null, { provider: 'ollama' });
+    insertJob(JOB_ID_3, 'complete', null, { provider: 'ollama' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(req('job-3'));
+    const res = await POST(req(JOB_ID_3));
     expect(res.status).toBe(409);
   });
 
   it('resets the job to pending with ollamaCorrectionRequested set, preserving the rest of options', async () => {
-    insertJob('job-4', 'failed', `${OLLAMA_NO_TOOL_CALL_ERROR_PREFIX} for emit_theme`, { provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434' });
+    insertJob(JOB_ID_4, 'failed', `${OLLAMA_NO_TOOL_CALL_ERROR_PREFIX} for emit_theme`, { provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434' });
     const { POST } = await import('@/app/api/jobs/retry-with-correction/route');
-    const res = await POST(req('job-4'));
+    const res = await POST(req(JOB_ID_4));
     expect(res.status).toBe(200);
 
     const db = DatabaseConnection.getInstance();
-    const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get('job-4') as any;
+    const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(JOB_ID_4) as any;
     expect(row.status).toBe('pending');
     expect(row.error_message).toBeNull();
     const options = JSON.parse(row.options);
