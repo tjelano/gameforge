@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { assetService } from '@/lib/services/AssetService';
 import { settingsService } from '@/lib/services/SettingsService';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
+import { getCurrentUser } from '@/lib/utils/session';
 import {
   decideEditAction,
   isSafeStoredFilename,
@@ -23,8 +24,13 @@ export const dynamic = 'force-dynamic';
 // forget, don't wait for Aseprite to close" design.
 const SPAWN_ERROR_WAIT_MS = 300;
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+    }
+
     const { id } = await params;
     const asset = await assetService.getById(id);
     if (!asset) {
