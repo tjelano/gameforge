@@ -136,4 +136,36 @@ describe('POST /api/styles/[id]/pages/suggest-layout', () => {
       vi.resetModules();
     }
   });
+
+  it('rejects an ollama provider without a model', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const res = await callRoute(style.id, { pageName: 'Home', provider: 'ollama' }, cookieHeader);
+    expect(res.status).toBe(400);
+  });
+
+  it('passes a providerOverride through to the suggester when ollama is requested', async () => {
+    // The preceding test (`returns a 500...`) calls vi.resetModules() in its
+    // finally block, which orphans this file's top-level static `POST`
+    // import from any module instance created by a later dynamic import().
+    // Spying on a dynamically-imported PageLayoutSuggester module and then
+    // calling the statically-imported POST would silently never hit the
+    // spy (0 calls) -- confirmed by running it that way first. Importing a
+    // fresh POST here too (same pattern as that preceding test's
+    // `freshPost`) keeps it on the same module instance as the spy.
+    const suggestSpy = vi.fn().mockResolvedValue([]);
+    vi.spyOn(await import('@/lib/services/PageLayoutSuggester'), 'getPageLayoutSuggester').mockReturnValue({ suggest: suggestSpy });
+    const { POST: freshPost } = await import('@/app/api/styles/[id]/pages/suggest-layout/route');
+
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+
+    await freshPost(req({
+      pageName: 'Home', provider: 'ollama', model: 'llama3-groq-tool-use:8b', ollamaHost: 'http://localhost:11434',
+    }, cookieHeader), { params: Promise.resolve({ id: style.id }) });
+
+    expect(suggestSpy).toHaveBeenCalledWith('Home', expect.any(Array), undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+  });
 });
