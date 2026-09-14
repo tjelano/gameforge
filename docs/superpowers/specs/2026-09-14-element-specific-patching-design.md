@@ -197,26 +197,37 @@ it" won't work well without sibling context — out of scope for this iteration.
 Necessary for the feature's most common real use case ("make this blue"); HTML-only patching would
 defer all styling to full regeneration.
 
-Rules are **not** targeted by the element's existing class. A class-selector rule is exactly as
-specific as any other single-class rule already in the stylesheet (CSS specificity is positional,
-not semantic), so a patch appended at the end of `tokens.css` can lose to an existing
-higher-or-equal-specificity rule already styling that element (e.g. a `.card .foo` rule at 0,2,0
-beats an appended `.foo` at 0,1,0 outright, and even an equal-specificity rule earlier in the file
-only loses on source-order — fragile to rely on). Instead, patches target the element's own
-`data-gf-id` via an attribute selector: `[data-gf-id="<n>"] { ... }`, appended at the end of
-`tokens.css`. This doesn't need a class to exist on the element at all (no more "if the element has
-no class, invent one" case), and gives every patch a dedicated, unshared selector that only ever
-matches the one element it was written for — no risk of a patch accidentally restyling siblings
-that share a class. Known, accepted limitation for this iteration: an existing rule with genuinely
-higher specificity than a single attribute selector (e.g. a multi-level descendant selector) can
-still visually override a patch: computing and out-specifying arbitrary existing selectors is out
+Rules are **not** targeted by the element's existing class, and **not** by a `[data-gf-id]`
+attribute selector either — the first loses specificity to existing compound rules (a `.card .foo`
+rule at 0,2,0 beats an appended `.foo` at 0,1,0 outright), and the second, while safe from that
+problem, creates a real cross-cutting bug: `data-gf-id` is stripped from every element on export
+(it's a GameForge-internal handle, never meant to reach the user's real site), and an attribute
+selector that references the now-stripped attribute matches nothing — every patch's styling would
+silently vanish from the exported site the moment it left GameForge, even though it displays
+correctly in GameForge's own preview (which never strips the attribute). That gap would only
+surface after export, invisible until then.
+
+Instead: the server assigns a dedicated class, `gf-<n>` (where `n` is the element's `data-gf-id`,
+so it's already guaranteed unique), the first time an element is patched — added to the element's
+`class` attribute alongside whatever classes the AI/hand-editor gave it, never removed by export
+(classes are ordinary content, not internal handles). Rules target `.gf-<n> { ... }`, appended at
+the end of `tokens.css`. Same specificity as `[data-gf-id]` (0,1,0), same "always matches exactly
+this one element" property, but survives export intact. Known, accepted limitation for this
+iteration: an existing rule with genuinely higher specificity than a single class selector can
+still visually override a patch — computing and out-specifying arbitrary existing selectors is out
 of scope here (see "Out of scope").
 
-**New `ComponentGenerator.patchElement()` method**: takes the element's `outerHTML` and the
-instruction; returns a replacement `outerHTML` fragment and an optional CSS declaration list (not
-a full rule — the server wraps it in the `[data-gf-id="<n>"] { ... }` selector itself, so the AI
-never needs to know or reproduce the element's id). Prompted narrowly: change only what's asked,
-preserve the element's `data-gf-id` and other untouched attributes.
+**New `ComponentGenerator.patchElement()` method**: takes the element's `outerHTML`, the
+instruction, and the element's *currently effective* declarations — its original stylesheet
+rule(s) plus, if it's been patched before, its existing `.gf-<n>` rule's declarations layered on
+top (i.e. what's actually visually active right now, not just what the AI wrote originally).
+Returns a replacement `outerHTML` fragment and an optional CSS declaration list (not a full rule —
+the server wraps it in the `.gf-<n> { ... }` selector). The prompt states explicitly that the
+server *replaces* the element's existing `.gf-<n>` rule wholesale with whatever's returned — the
+model must return its complete intended declaration set (absolute values, not a diff), or a second
+patch that only mentions one property will silently drop everything an earlier patch set. Prompted
+narrowly on the HTML side too: change only what's asked, preserve the element's `data-gf-id` and
+other untouched attributes.
 
 ## Splicing the patch back into the stored document
 
@@ -225,24 +236,28 @@ Locating and replacing a specific element's subtree needs real HTML-tree manipul
 it has no supported way to excise and replace an entire subtree. This uses `htmlparser2` directly
 (already a transitive dependency via `sanitize-html`, no new package) for the find-and-replace step.
 
-1. Client-side, before the AI call: fetch the stored file's current content hash (a cheap `HEAD` or
-   small `GET` against a hash endpoint, computed server-side over the raw stored file) at the
-   moment select mode is entered, and hold it alongside the selected `data-gf-id`. This is a
-   *document*-level revision check, not a per-element one — an earlier draft of this design tried
-   to hash the selected element's own `outerHTML` client-side and compare it against a
-   server-recomputed hash, which doesn't work: `inspectFrame.ts` deliberately never exposes
-   `outerHTML` (see finding 2 above), and even if it did, a browser-serialized fragment and an
-   `htmlparser2`-reserialized one differ on attribute order/quoting/whitespace, so the hashes
-   would mismatch even with no real change. A whole-document hash sidesteps both problems.
-2. `ComponentGenerator.patchElement()` runs — **without holding any file lock**. This is a
-   potentially-slow network call; nothing about it touches the file, so nothing needs to
-   serialize against it yet.
+1. **Where the revision hash comes from:** the served preview document is not byte-identical to
+   the stored file (it's re-sanitized and has theme CSS appended — see `GET
+   /api/components/[filename]`), so the client cannot hash what it receives and expect it to match
+   a server-side hash of the stored file. Instead, the route computes a hash over the raw stored
+   file's bytes (before re-sanitization) and embeds it as a `<meta name="gf-rev" content="...">` in
+   the document it serves. `inspectFrame.ts` reads this the same way it reads any other frame
+   attribute — no new endpoint, no widening of what the module exposes. The client holds this value
+   from the moment select mode is entered, alongside the selected `data-gf-id`.
+2. **Two-phase staleness check.** A cheap, unlocked check first: before calling the AI at all, the
+   server re-hashes the current stored file and compares it to the client-sent revision; a mismatch
+   fails immediately with `ELEMENT_CHANGED`, no AI call spent. Only if that passes does
+   `ComponentGenerator.patchElement()` run — still without holding any file lock, since nothing
+   about the AI call touches the file. The same hash is re-checked a second time after the AI call,
+   under the mutex (step 4 below) — the unlocked pre-check is an optimization to avoid wasting
+   inference calls on requests already known to be stale, not a replacement for the locked one,
+   since the document can still change during the AI call itself.
 3. Acquire a per-filename in-process async mutex (assumes a single Node process — true for
    `next dev` and single-instance `next start`; if GameForge ever runs multiple instances behind a
    load balancer, this stops being sufficient and `CONFLICT` silently degrades to last-writer-wins).
-4. Re-read the stored file. Compare its current content hash against the one the client sent; a
-   mismatch means the document changed since selection (another patch, or a full regenerate) —
-   fail with `ELEMENT_CHANGED`, release the mutex, no write.
+4. Re-read the stored file, re-hash it, and re-compare against the client-sent revision (the locked
+   half of the two-phase check from step 2) — a mismatch here means the document changed during the
+   AI call itself; fail with `ELEMENT_CHANGED`, release the mutex, no write.
 5. `parseComponentHtml` the freshly-read file into `{ html, css }`. Walk the HTML (via
    `htmlparser2`) for the element whose `data-gf-id` matches the target — more than one match is
    ambiguous, treated as `ELEMENT_NOT_FOUND` (see "Duplicate ids" above); no match likewise.
@@ -250,29 +265,41 @@ it has no supported way to excise and replace an entire subtree. This uses `html
    silently discards disallowed tags/attributes rather than throwing (confirmed against its actual
    implementation — only `sanitizeComponentCss` raises), this flow adds an explicit check the
    general sanitizer doesn't provide: reject if the sanitized fragment is empty/whitespace-only,
-   and reject if it doesn't parse to exactly one root element.
-7. If the AI returned a CSS declaration list, wrap it as `[data-gf-id="<n>"] { <declarations> }`
-   and run that through `sanitizeComponentCss`.
+   and reject if it doesn't parse to exactly one root element. This same rejection
+   (`SANITIZE_REJECTED`) also covers the round-trip check in step 10 failing, and as a defense
+   ahead of that check specifically, a fragment containing a raw `</body>`, `</head>`, or `</style>`
+   sequence anywhere (including inside an allowed attribute value) is rejected here too, before
+   splicing — the round-trip assertion in step 10 is the postcondition backstop, not the only check.
+7. Determine the target class: if this is the element's first patch, assign it `gf-<data-gf-id>`
+   and add that class to the element's `class` attribute (alongside any existing classes); if it's
+   already been patched, reuse its existing `gf-<n>` class. If the AI returned a CSS declaration
+   list, wrap it as `.gf-<n> { <declarations> }` and run that through `sanitizeComponentCss`.
 8. Call `assignElementIds(sanitizedFragment, { preserveRootId: targetId, startAt: max(existing
-   data-gf-id in the freshly-read document) + 1 })`. Assert the resulting document has no duplicate
-   ids before proceeding.
+   data-gf-id in the freshly-read document) + 1 })`. This mode strips **every** `data-gf-id` in the
+   fragment except the root's, unconditionally — including one an AI-returned descendant might
+   already carry (from context, or a hallucination) — and assigns fresh ones to all of them,
+   the same distrust-incoming-ids posture the full-write mode already has, just scoped to
+   non-root elements only. Assert the resulting combined document has no duplicate ids as a
+   precondition to writing, not only checked after.
 9. Replace the old element's subtree with the sanitized new one; if a CSS rule was produced and a
-   rule for that exact `[data-gf-id="<n>"]` selector already exists (from an earlier patch),
-   replace it; otherwise append it.
+   rule for that exact `.gf-<n>` selector already exists (from an earlier patch), replace it
+   wholesale (per the layering contract in "Patch generation" above — the AI's returned
+   declarations must already be the complete set); otherwise append it.
 10. `combineComponentHtml` back into a full document. Immediately `parseComponentHtml` that result
     again and assert it round-trips to the same `{ html, css }` tokens before writing — this
     format's `parseComponentHtml`/`combineComponentHtml` are naive `indexOf` splits on literal
-    `<style>`/`</style>`/`<body>`/`</body>` markers, and while `sanitizeComponentCss` already
-    guards its own input against embedding those literal strings, this is a different, later stage
-    (post-serialization, whole-document) — the round-trip assertion catches any way a marker
-    sequence could still have ended up somewhere it corrupts the next read, without having to
-    reason precisely about every serializer's escaping guarantees.
-11. Write to storage through the same write path `ComponentGenerator`'s other write methods use —
-    this must (a) not set `edited_externally`, since a patch is not a hand-edit, and (b) update the
-    asset's recorded prompt/notes the same way `generate()` does, appending the patch instruction
-    rather than leaving the stored history describing a document that no longer matches. Without
-    this, "Out of scope: undo/redo beyond whatever GameForge's existing edit history already
-    covers" (below) would be a false promise — there'd be no history covering patches at all.
+    `<style>`/`</style>`/`<body>`/`</body>` markers; step 6 already rejects a fragment carrying one
+    of those sequences before it gets this far, and this is the postcondition that catches any way
+    one could still have ended up somewhere it corrupts the next read, without having to reason
+    precisely about every serializer's escaping guarantees. A failure here is `SANITIZE_REJECTED`.
+11. Write the combined document to `storage/components/<filename>` the same way
+    `ComponentGenerator`'s other write paths do (direct `fs` write, same directory, same naming).
+    Separately, call `assetService.update(assetId, requestingUserId, { prompt: <existing
+    assets.prompt + the patch instruction appended> })` (`lib/services/AssetService.ts:30` — the
+    same ownership-checked update path the app already uses elsewhere, `editedExternally` left
+    unset so a patch is never mistaken for a hand-edit) so the asset's recorded history reflects
+    the patch, and the gallery / any future `basedOnContent` call don't describe a document that no
+    longer matches.
 12. Release the mutex. Client re-fetches the preview (cache-busting the iframe `src`) rather than
     patching the live DOM in place.
 
@@ -297,12 +324,15 @@ authorization model, it matches the established one.
   same same-origin DOM write access `allow-same-origin` grants) — not computed as parent-page
   coordinates, which would need to account for the iframe's own offset, parent scroll, internal
   frame scroll, and the `scale()` transform the breakpoint-preview toolbar (PR #30) applies at a
-  Mobile/Tablet breakpoint. Two things this requires beyond just "inject a positioned div": the
-  highlight must have `pointer-events: none`, or it becomes the actual hover/click target instead
-  of the element underneath it, defeating its own purpose; and it needs a hard style reset (an
-  `all: initial`-equivalent), since it's a child of the component's own `<body>` and would
-  otherwise inherit arbitrary AI-generated or hand-written CSS from the very component it's
-  overlaying. Re-injected after every frame `load`.
+  Mobile/Tablet breakpoint. Two things this requires beyond just "inject a positioned div": it
+  needs a hard style reset, since it's a child of the component's own `<body>` and would otherwise
+  inherit arbitrary AI-generated or hand-written CSS from the very component it's overlaying; and
+  it must end up non-interactive, or it becomes the actual hover/click target instead of the
+  element underneath it. Order matters for both in the same declaration block: `all: initial`
+  resets *every* property, including ones the highlight itself needs, so it must come first, with
+  `position: fixed`, the geometry (`top`/`left`/`width`/`height`), `z-index`, and `pointer-events:
+  none` declared *after* it — reversing the order would have the reset silently win and put
+  `pointer-events` back to `auto`. Re-injected in this same order after every frame `load`.
 - Clicking locks the selection and opens a small side panel: selected element's tag/class, a text
   input for the instruction, and an Apply button (disabled, with an inline explanation, if the
   selected element has no `data-gf-id` — see "Trusted/hand-edited components"). Reuses the
@@ -335,17 +365,23 @@ generic failure message:
 - Sibling/parent context in patch prompts ("match the one next to it").
 - Multi-element (rectangle-select) patching.
 - Pseudo-class-targeted patches ("add a hover effect").
-- Out-specifying an existing rule with genuinely higher specificity than a single attribute
+- Out-specifying an existing rule with genuinely higher specificity than a single class
   selector (see "CSS scope").
+- Disambiguating a hover/click that resolves (via the nearest-ancestor walk) to a different
+  element than the one under the cursor, when a hand-added child has no `data-gf-id` of its own.
+  The side panel does show the resolved element's tag/class before Apply, which is a partial
+  mitigation; a more explicit "will patch: `<parent>`" affordance is deferred.
 - Undo/redo beyond whatever GameForge's existing edit history already covers (now true — see
   Splicing step 11).
 
 ## Testing
 
 In addition to the usual unit coverage for the new functions above:
-- A regression test asserting the component-serving route's CSP header (imported from its shared
-  constant, not re-typed) is present with `img-src data:` (or stricter) — this is now a required
-  invariant of the sandbox relaxation, not an unrelated hardening detail.
+- A regression test asserting the component-serving route's CSP header equals a pinned literal
+  value (contains `default-src 'none'`, no `script-src` override, `img-src` is `data:` or
+  stricter) — not merely that the route's header matches the constant it imports, which would only
+  prove two references to one variable are equal and couldn't catch the constant itself regressing
+  to something less strict.
 - A test asserting every `PreviewFrame` call site's *rendered* `sandbox` attribute (not source
   text) is exactly `''` or `'allow-same-origin'`, and that no other component in the app renders an
   `<iframe sandbox=...>`.
@@ -353,10 +389,13 @@ In addition to the usual unit coverage for the new functions above:
   sanitizer/ID-assignment boundary).
 - A concurrency test: two patches (or a patch and a regenerate) racing the same file resolve to one
   applied write and one `ELEMENT_CHANGED`/`CONFLICT`, never a silently lost update.
-- Negative tests for the AI-returned CSS declaration list wrapping: confirm the server-built
-  selector is always exactly `[data-gf-id="<n>"]` regardless of what the AI returns (the AI never
-  supplies a selector, only declarations, so there's no selector-injection surface to test against
-  on that input — but a test still confirms the wrapping is applied correctly for a representative
-  declaration list).
+- An export test: a patched component, run through `SiteExporter`, still visually applies its
+  patch — i.e. the `.gf-<n>` class and its rule both survive export, unlike `data-gf-id` itself
+  (which export still strips). This is the regression this iteration exists to prevent.
 - A test asserting a patch preserves the target element's `data-gf-id` unchanged while any new
-  descendants introduced by the patch receive fresh, non-colliding ids.
+  descendants introduced by the patch — including ones the AI's fragment already carried an id on
+  — receive fresh, non-colliding ids.
+- A test asserting a second patch to the same element replaces its `.gf-<n>` rule (not both rules
+  present), and that a patch omitting a previously-set property is treated as intentional (the
+  prompt's layering contract, not the server, is what's responsible for the model returning a
+  complete declaration set).
