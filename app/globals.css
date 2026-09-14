@@ -441,3 +441,37 @@ select {
   font-size: 12px;
   margin-top: 2px;
 }
+
+.stat-cards {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.stat-card-label {
+  font-size: 12px;
+  color: var(--accent-2);
+  margin-bottom: 8px;
+}
+
+.stat-card-value {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.activity-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.activity-row-meta {
+  color: var(--ink-faint);
+  font-size: 11px;
+  margin-top: 2px;
+}
