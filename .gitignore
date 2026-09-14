@@ -12,3 +12,4 @@ storage/exports/
 .DS_Store
 .worktrees/
 .playwright-mcp/
+.superpowers/

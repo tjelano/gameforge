@@ -1,18 +1,20 @@
 import type { Metadata } from 'next';
-import { Space_Grotesk, Inter, IBM_Plex_Mono } from 'next/font/google';
+import { IBM_Plex_Mono } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 import { NavRail } from '@/app/components/NavRail';
 import { CopilotPanel } from '@/app/components/CopilotPanel';
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ['latin'],
-  variable: '--font-space-grotesk',
-  weight: ['500', '700'],
+const sentient = localFont({
+  src: '../public/fonts/Sentient-Variable.woff2',
+  variable: '--font-sentient',
+  display: 'swap',
 });
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
+const satoshi = localFont({
+  src: '../public/fonts/Satoshi-Variable.woff2',
+  variable: '--font-satoshi',
+  display: 'swap',
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -28,7 +30,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable} ${plexMono.variable}`}>
+    <html lang="en" className={`${sentient.variable} ${satoshi.variable} ${plexMono.variable}`}>
       <body>
         <div className="shell">
           <NavRail />
