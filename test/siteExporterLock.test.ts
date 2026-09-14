@@ -160,6 +160,49 @@ describe('siteExporter.exportSite concurrency', () => {
     expect(manifest.styleId).toBe(style.id);
     expect(manifest.pages).toHaveLength(1);
   });
+
+  it('backs off cleanly (EXPORT_IN_PROGRESS, not a throw) when tryRecoverStaleLock hits ENOTEMPTY', async () => {
+    // Regression test for the ENOTEMPTY branch in tryRecoverStaleLock (see the comment
+    // above that branch in lib/services/SiteExporter.ts) - found via a real, twice-
+    // reproduced GitHub Actions Linux CI failure on unrelated PR #30, byte-identical
+    // ENOTEMPTY error both times.
+    //
+    // This mocks fsPromises.rename (matching the same vi.spyOn/mockRestore pattern
+    // siteExporter.test.ts already uses around exportSite() calls) rather than
+    // reproducing the race via real OS behavior (e.g. pre-creating a non-empty
+    // garbageDir and letting rename() reject naturally). That was tried first and
+    // rejected: a non-empty rename destination throws ENOTEMPTY on POSIX, but on
+    // Windows (this project's own dev machine) the equivalent collision throws EPERM
+    // instead - a different, already-separately-handled branch - so a real-OS version
+    // of this test would silently exercise the wrong line here while still passing,
+    // giving zero regression protection for this specific fix outside Linux CI.
+    // Mocking the one syscall pins the exact `e?.code === 'ENOTEMPTY'` line
+    // deterministically on every platform this suite runs on.
+    const style = await setUpStyleWithOnePage('my-site');
+
+    const lockDir = path.join(tempRoot, 'storage', 'exports', '.locks', 'my-site.lock');
+    await fsPromises.mkdir(lockDir, { recursive: true });
+    const staleTimestamp = Date.now() - 10 * 60 * 1000; // 10 minutes ago - well past the 2-minute staleness window
+    await fsPromises.writeFile(path.join(lockDir, 'heartbeat'), String(staleTimestamp));
+
+    const renameSpy = vi.spyOn(fsPromises, 'rename').mockImplementationOnce(async () => {
+      const err: any = new Error('ENOTEMPTY: directory not empty, rename injected for test');
+      err.code = 'ENOTEMPTY';
+      throw err;
+    });
+    try {
+      const result = await siteExporter.exportSite(style.id, 'my-site');
+
+      // Must back off cleanly with EXPORT_IN_PROGRESS, never an uncaught rename error -
+      // this is exactly what the `e?.code === 'ENOTEMPTY'` branch guarantees.
+      expect(result).toHaveProperty('error');
+      if (!('error' in result)) throw new Error('expected an error result');
+      expect(result.error).toBe('EXPORT_IN_PROGRESS');
+      expect(renameSpy).toHaveBeenCalled();
+    } finally {
+      renameSpy.mockRestore();
+    }
+  });
 });
 
 describe('isExportInProgress', () => {
