@@ -42,6 +42,27 @@ class JobServiceImpl {
     return rows.map(row => JobSchema.parse(row));
   }
 
+  /**
+   * The most recently resolved jobs (promoted, discarded, or failed) --
+   * unlike getActive()'s ACTIVE_WINDOW_MS, this has no time window at all,
+   * just a row-count cap. Powers the dashboard Overview page's recent-
+   * activity feed, a different consumer with a different need (a short
+   * "what happened lately" list, not "what's still worth showing as active
+   * in a live-polling queue"). Deliberately excludes 'complete' -- that
+   * status means "generation finished, awaiting your promote/discard
+   * decision," not a resolved outcome yet, so it isn't something that
+   * "happened" in the activity-feed sense until it becomes one of the
+   * three statuses below.
+   */
+  async getRecentlyResolved(limit: number): Promise<Job[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare(`
+      SELECT * FROM jobs WHERE status IN ('promoted', 'discarded', 'failed')
+      ORDER BY updated_at DESC LIMIT ?
+    `).all(limit);
+    return rows.map(row => JobSchema.parse(row));
+  }
+
   async create(input: {
     styleId: string;
     createdBy: string;
