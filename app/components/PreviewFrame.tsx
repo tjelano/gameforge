@@ -50,12 +50,35 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border 
     wrapperRef.current?.requestFullscreen();
   }
 
+  function handleBreakpointClick(e: React.MouseEvent, bp: Breakpoint) {
+    // Same reason as handleFullscreenClick above — AssetCard wraps its whole card (including
+    // this toolbar, once fullscreen) in a <Link>. Without this, clicking a breakpoint button
+    // bubbles up and navigates away instead of just switching breakpoints.
+    e.preventDefault();
+    e.stopPropagation();
+    setBreakpoint(bp);
+  }
+
+  // CSS `transform: scale()` on the iframe doesn't shrink its contribution to the WRAPPER's
+  // layout size — without an explicit size here, the wrapper lays out at the iframe's full
+  // unscaled width/height even though only the scaled-down portion is painted. JobCard's and
+  // AssetCard's thumbnail boxes center their content (`align-items: center`) and clip it
+  // (`overflow: hidden`), so an oversized wrapper gets vertically centered right out of the
+  // visible, clipped area — taking the fullscreen button (positioned near the wrapper's top)
+  // with it, making it unreachable by a real click even though it looks fine visually scaled
+  // down in a screenshot. Sizing the wrapper to the actually-painted box fixes that.
+  const wrapperSizeStyle =
+    scale && typeof width === 'number' ? { width: width * scale, height: height * scale } : undefined;
+
   return (
     <div
       ref={wrapperRef}
       className="preview-frame-wrapper"
       data-breakpoint={breakpoint}
-      style={border ? { border: '1px solid var(--border)', borderRadius: 'var(--radius)' } : undefined}
+      style={{
+        ...wrapperSizeStyle,
+        ...(border ? { border: '1px solid var(--border)', borderRadius: 'var(--radius)' } : undefined),
+      }}
     >
       <iframe
         srcDoc={srcDoc}
@@ -79,7 +102,7 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border 
               type="button"
               className="preview-frame-breakpoint-btn"
               data-active={breakpoint === bp ? 'true' : 'false'}
-              onClick={() => setBreakpoint(bp)}
+              onClick={(e) => handleBreakpointClick(e, bp)}
             >
               {bp[0].toUpperCase() + bp.slice(1)}
             </button>

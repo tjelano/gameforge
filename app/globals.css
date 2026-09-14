@@ -506,11 +506,18 @@ select {
   background: rgba(10, 10, 10, 0.85);
 }
 
+/* !important on width/height: scaled thumbnails (JobCard/AssetCard) now set an explicit small
+   width/height inline style on the wrapper itself (see PreviewFrame.tsx) so its normal-flow
+   layout box matches what's actually painted, instead of the iframe's full unscaled size. That
+   inline style must be overridden back to 100% while fullscreen, same reasoning as the iframe
+   rule below. */
 .preview-frame-wrapper:fullscreen {
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg);
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* !important: PreviewFrame sets scale/width/height as inline styles (React `style` prop),
