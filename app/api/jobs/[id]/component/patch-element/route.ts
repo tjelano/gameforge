@@ -21,7 +21,12 @@ function statusForError(error: PatchError): number {
     case 'CONFLICT': return 409;
     case 'SANITIZE_REJECTED': return 400;
     case 'WRITE_FAILED': return 500;
+    default: return 500; // defense-in-depth if PatchError ever grows a case without this switch being updated
   }
+}
+
+function messageForError(error: PatchError): string {
+  return 'message' in error ? error.message : error.code;
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -63,7 +68,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: false, error: 'This component has not been promoted to an asset yet' }, { status: 400 });
     }
 
-    const input = PatchElementSchema.parse(await req.json());
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const input = PatchElementSchema.parse(body);
 
     const result = await applyElementPatch({
       filename: job.result_path,
@@ -77,7 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
 
     if (!result.ok) {
-      return NextResponse.json({ success: false, error: result.error.code }, { status: statusForError(result.error) });
+      return NextResponse.json({ success: false, error: messageForError(result.error) }, { status: statusForError(result.error) });
     }
 
     return NextResponse.json({ success: true, data: result });

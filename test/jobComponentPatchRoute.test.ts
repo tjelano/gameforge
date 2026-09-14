@@ -87,9 +87,9 @@ describe('POST /api/jobs/[id]/component/patch-element', () => {
   });
 
   it('returns 403 when the requesting user is not the job creator or an admin', async () => {
-    // seedSession() in beforeEach is the FIRST user created globally, so it is already admin.
-    // A genuine "neither creator nor admin" case needs its own non-admin owner and stranger.
-    await userService.create({ name: 'Unrelated Admin' }); // absorbs first-user-is-admin; irrelevant here
+    // seedSession() in beforeEach already created the first user in this test's fresh DB (and that
+    // slot is the one that becomes admin), so owner and stranger below are both created after it
+    // and are both non-admin — a genuine "neither creator nor admin" case.
     const owner = await userService.create({ name: 'Owner' });
     const stranger = await userService.create({ name: 'Stranger' });
     const { token } = await sessionService.create(stranger.id);
@@ -106,6 +106,17 @@ describe('POST /api/jobs/[id]/component/patch-element', () => {
   it('returns 400 when the component has not been promoted to an asset yet', async () => {
     const { jobId } = await makeCompleteComponentJob(userId, false);
     const res = await POST(postRequest(VALID_BODY), { params: Promise.resolve({ id: jobId }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for a malformed JSON body instead of a 500', async () => {
+    const { jobId } = await makeCompleteComponentJob();
+    const req = new NextRequest('http://localhost/x', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+      body: 'not valid json{',
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: jobId }) });
     expect(res.status).toBe(400);
   });
 
@@ -136,17 +147,21 @@ describe('POST /api/jobs/[id]/component/patch-element', () => {
   });
 
   it.each([
-    [{ code: 'ELEMENT_CHANGED' }, 409],
-    [{ code: 'ELEMENT_NOT_FOUND' }, 404],
-    [{ code: 'SANITIZE_REJECTED', message: 'nope' }, 400],
-    [{ code: 'CONFLICT' }, 409],
-    [{ code: 'COMPONENT_NOT_FOUND' }, 404],
-    [{ code: 'WRITE_FAILED', message: 'disk full' }, 500],
-  ] as const)('maps a PatchError %o to status %i', async (error, status) => {
+    [{ code: 'ELEMENT_CHANGED' }, 409, 'ELEMENT_CHANGED'],
+    [{ code: 'ELEMENT_NOT_FOUND' }, 404, 'ELEMENT_NOT_FOUND'],
+    [{ code: 'SANITIZE_REJECTED', message: 'nope' }, 400, 'nope'],
+    [{ code: 'CONFLICT' }, 409, 'CONFLICT'],
+    [{ code: 'COMPONENT_NOT_FOUND' }, 404, 'COMPONENT_NOT_FOUND'],
+    [{ code: 'WRITE_FAILED', message: 'disk full' }, 500, 'disk full'],
+  ] as const)('maps a PatchError %o to status %i, surfacing its message when present', async (error, status, expectedError) => {
     const { jobId } = await makeCompleteComponentJob();
     vi.spyOn(await import('@/lib/services/componentPatchService'), 'applyElementPatch').mockResolvedValue({ ok: false, error });
 
     const res = await POST(postRequest(VALID_BODY), { params: Promise.resolve({ id: jobId }) });
+    const body = await res.json();
     expect(res.status).toBe(status);
+    // SANITIZE_REJECTED/WRITE_FAILED carry a diagnostic `message` (e.g. which CSS rule was
+    // rejected) that would otherwise be silently discarded in favor of the generic code.
+    expect(body.error).toBe(expectedError);
   });
 });
