@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface PreviewFrameProps {
   title: string;
@@ -15,12 +15,32 @@ interface PreviewFrameProps {
   border?: boolean;
 }
 
+const BREAKPOINTS = ['mobile', 'tablet', 'desktop'] as const;
+type Breakpoint = (typeof BREAKPOINTS)[number];
+
 // Fullscreens the WRAPPER div, not the iframe. The iframe keeps sandbox="" (no scripts,
 // no same-origin) — requestFullscreen is called by this top-level page's own script on an
 // element it owns, so it needs no sandbox relaxation. See globals.css for the
-// .preview-frame-wrapper:fullscreen rules that reset the scale-down transform.
+// .preview-frame-wrapper:fullscreen rules that reset the scale-down transform and apply
+// per-breakpoint iframe widths.
 export function PreviewFrame({ title, width, height, scale, srcDoc, src, border }: PreviewFrameProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [breakpoint, setBreakpoint] = useState<Breakpoint>('desktop');
+
+  // `fullscreenchange` fires on `document`, not scoped to one element — many PreviewFrame
+  // instances can be mounted at once (e.g. one per page on the style hub), so every
+  // instance's listener fires on every fullscreen change anywhere. Check that THIS
+  // instance's wrapper is the one that's actually fullscreen before reacting.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      const active = document.fullscreenElement === wrapperRef.current;
+      setIsFullscreen(active);
+      if (!active) setBreakpoint('desktop');
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   function handleFullscreenClick(e: React.MouseEvent) {
     // Defensive on every call site, not just the ones currently wrapped in a <Link> —
@@ -34,6 +54,7 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border 
     <div
       ref={wrapperRef}
       className="preview-frame-wrapper"
+      data-breakpoint={breakpoint}
       style={border ? { border: '1px solid var(--border)', borderRadius: 'var(--radius)' } : undefined}
     >
       <iframe
@@ -50,15 +71,31 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border 
           transformOrigin: scale ? 'top left' : undefined,
         }}
       />
-      <button
-        type="button"
-        className="preview-frame-fullscreen-btn"
-        title="View fullscreen"
-        aria-label="View fullscreen"
-        onClick={handleFullscreenClick}
-      >
-        ⛶
-      </button>
+      {isFullscreen ? (
+        <div className="preview-frame-breakpoint-toolbar">
+          {BREAKPOINTS.map((bp) => (
+            <button
+              key={bp}
+              type="button"
+              className="preview-frame-breakpoint-btn"
+              data-active={breakpoint === bp ? 'true' : 'false'}
+              onClick={() => setBreakpoint(bp)}
+            >
+              {bp[0].toUpperCase() + bp.slice(1)}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="preview-frame-fullscreen-btn"
+          title="View fullscreen"
+          aria-label="View fullscreen"
+          onClick={handleFullscreenClick}
+        >
+          ⛶
+        </button>
+      )}
     </div>
   );
 }

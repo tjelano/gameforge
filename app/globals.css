@@ -521,3 +521,45 @@ select {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Mobile/tablet breakpoint toggle (fullscreen only) — same !important-over-inline-styles
+   reason as above. Desktop reuses the 100%-width rule directly above; no separate rule. */
+.preview-frame-wrapper:fullscreen[data-breakpoint='mobile'] iframe {
+  width: 375px !important;
+  height: 100% !important;
+}
+
+.preview-frame-wrapper:fullscreen[data-breakpoint='tablet'] iframe {
+  width: 768px !important;
+  height: 100% !important;
+}
+
+.preview-frame-breakpoint-toolbar {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+}
+
+.preview-frame-breakpoint-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(10, 10, 10, 0.6);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.preview-frame-breakpoint-btn:hover {
+  background: rgba(10, 10, 10, 0.85);
+}
+
+.preview-frame-breakpoint-btn[data-active='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
