@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Space_Grotesk, Inter, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import { NavRail } from '@/app/components/NavRail';
+import { CopilotPanel } from '@/app/components/CopilotPanel';
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="shell">
           <NavRail />
           <main className="main">{children}</main>
+          <CopilotPanel />
         </div>
       </body>
     </html>
