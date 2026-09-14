@@ -418,3 +418,26 @@ select {
   color: var(--ink);
   cursor: pointer;
 }
+
+.settings-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.settings-item:hover {
+  border-color: var(--accent-dim);
+}
+
+.settings-item-desc {
+  color: var(--ink-dim);
+  font-size: 12px;
+  margin-top: 2px;
+}
