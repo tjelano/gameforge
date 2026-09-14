@@ -3,7 +3,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { z } from 'zod';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
-import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
 import { styleService } from '@/lib/services/StyleService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
@@ -91,7 +91,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
 
     const raw = z.object({ html: z.string(), css: z.string() }).parse(toolInput);
     const tokens: ComponentTokens = {
-      html: sanitizeComponentHtml(raw.html),
+      html: assignElementIds(sanitizeComponentHtml(raw.html)),
       css: sanitizeComponentCss(raw.css),
     };
 

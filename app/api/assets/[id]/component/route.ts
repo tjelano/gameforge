@@ -6,7 +6,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getCurrentUser } from '@/lib/utils/session';
 import { assetService } from '@/lib/services/AssetService';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
-import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,12 +44,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let tokens: ComponentTokens;
     if (trustAsEdited) {
       // Explicitly trusted, unsanitized paste-back of externally-edited code
-      // - the whole point of this path (see the reverse-sync design spec).
+      // - the whole point of this path (see the reverse-sync design spec). Never gets
+      // data-gf-id: trusted content is never selectable for click-to-select patching.
       tokens = { html: input.html, css: input.css };
     } else {
       try {
         tokens = {
-          html: sanitizeComponentHtml(input.html),
+          html: assignElementIds(sanitizeComponentHtml(input.html)),
           css: sanitizeComponentCss(input.css),
         };
       } catch (e: any) {

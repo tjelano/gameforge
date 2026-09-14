@@ -5,7 +5,7 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { jobService } from '@/lib/services/JobService';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
-import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
 import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let originalTokens: ComponentTokens;
     try {
       originalTokens = {
-        html: sanitizeComponentHtml(parsed.html),
+        html: assignElementIds(sanitizeComponentHtml(parsed.html)),
         css: sanitizeComponentCss(parsed.css),
       };
     } catch (e: any) {

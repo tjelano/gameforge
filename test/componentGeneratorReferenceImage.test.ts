@@ -157,6 +157,6 @@ describe("ClaudeApiComponentGenerator sanitizes the raw model output before writ
     const content = await fsPromises.readFile(filePath, 'utf-8');
     expect(content).not.toContain('onclick');
     expect(content).not.toContain('<script>');
-    expect(content).toContain('<button>Go</button>');
+    expect(content).toContain('<button data-gf-id="1">Go</button>');
   });
 });

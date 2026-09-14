@@ -74,4 +74,16 @@ describe('ClaudeApiComponentGenerator', () => {
     });
     expect(callOllamaTool).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'emit_component' }));
   });
+
+  it('assigns data-gf-id to every element on write', async () => {
+    vi.spyOn(styleService, 'getById').mockResolvedValueOnce(null);
+    (callOllamaTool as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ html: '<button>Go</button>', css: '.btn{}' });
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.generate('a button', 'style-1', undefined, undefined, undefined, undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+    const filePath = path.join(tempRoot, 'storage', 'components', result.path);
+    const content = await fsPromises.readFile(filePath, 'utf-8');
+    expect(content).toMatch(/data-gf-id="\d+"/);
+  });
 });
