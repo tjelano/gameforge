@@ -6,6 +6,7 @@ import type { Asset } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { DriveBrowser } from '@/app/dashboard/drive/DriveBrowser';
+import { PreviewFrame } from '@/app/components/PreviewFrame';
 
 export default function AssetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
@@ -308,12 +309,15 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
 
       {asset.output_kind === 'theme' && asset.image_path && (
         <>
-          <iframe
-            srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
-            title={`Theme preview: ${asset.prompt}`}
-            sandbox=""
-            style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}
-          />
+          <div style={{ marginBottom: 12 }}>
+            <PreviewFrame
+              srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
+              title={`Theme preview: ${asset.prompt}`}
+              width={480}
+              height={320}
+              border
+            />
+          </div>
           {contrast && (
             <p style={{ fontSize: 13, color: contrast.meetsAA ? 'var(--keeper)' : 'var(--reject)', marginBottom: 12 }}>
               Contrast: {contrast.ratio.toFixed(2)}:1 — {contrast.meetsAA ? 'passes' : 'fails'} WCAG AA
@@ -332,12 +336,15 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
 
       {asset.output_kind === 'component' && asset.image_path && (
         <>
-          <iframe
-            src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
-            title={`Component preview: ${asset.prompt}`}
-            sandbox=""
-            style={{ width: 480, height: 320, border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}
-          />
+          <div style={{ marginBottom: 12 }}>
+            <PreviewFrame
+              src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
+              title={`Component preview: ${asset.prompt}`}
+              width={480}
+              height={320}
+              border
+            />
+          </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <a className="btn" href={`/api/assets/${id}/export?format=html`} download>
               Download HTML

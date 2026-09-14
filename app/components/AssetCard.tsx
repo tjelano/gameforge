@@ -6,6 +6,7 @@ import Link from 'next/link';
 import type { Asset } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 import { DriveBrowser } from '@/app/dashboard/drive/DriveBrowser';
+import { PreviewFrame } from '@/app/components/PreviewFrame';
 
 export function AssetCard({ asset }: { asset: Asset }) {
   const states: string[] = (() => {
@@ -77,18 +78,20 @@ export function AssetCard({ asset }: { asset: Asset }) {
         }}
       >
         {asset.output_kind === 'theme' && asset.image_path ? (
-          <iframe
+          <PreviewFrame
             srcDoc={buildThemePreviewHtml(`/api/themes/${asset.image_path}`)}
             title={`Theme preview: ${asset.prompt}`}
-            sandbox=""
-            style={{ width: 320, height: 320, border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left' }}
+            width={320}
+            height={320}
+            scale={0.5}
           />
         ) : asset.output_kind === 'component' && asset.image_path ? (
-          <iframe
+          <PreviewFrame
             src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}
             title={`Component preview: ${asset.prompt}`}
-            sandbox=""
-            style={{ width: 320, height: 320, border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left' }}
+            width={320}
+            height={320}
+            scale={0.5}
           />
         ) : asset.image_path ? (
           // eslint-disable-next-line @next/next/no-img-element

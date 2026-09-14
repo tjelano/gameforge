@@ -7,6 +7,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { AssetCard } from '@/app/components/AssetCard';
 import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
 import { PageEditor } from '@/app/components/PageEditor';
+import { PreviewFrame } from '@/app/components/PreviewFrame';
 
 const SECTIONS: { kind: OutputKind; label: string }[] = [
   { kind: 'theme', label: 'Themes' },
@@ -427,11 +428,11 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
               }
               return (
                 <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                  <iframe
+                  <PreviewFrame
                     src={`/api/pages/${p.id}/render`}
                     title={`Page preview: ${p.name}`}
-                    sandbox=""
-                    style={{ width: '100%', height: 240, border: 'none', display: 'block' }}
+                    width="100%"
+                    height={240}
                   />
                   <div style={{ padding: '10px 12px' }}>
                     <div style={{ fontWeight: 600, marginBottom: 8 }}>{p.name}</div>
