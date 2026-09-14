@@ -183,6 +183,30 @@ describe('POST /api/assets/[id]/share-to-drive', () => {
     expect(uploaded).toContain('class="hero"');
   });
 
+  it('strips data-gf-id from a component upload', async () => {
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const { getCurrentUser } = await import('@/lib/utils/session');
+    const { assetService } = await import('@/lib/services/AssetService');
+    const { driveService } = await import('@/lib/services/DriveService');
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: 'user1', name: 'Alice', is_admin: 0, created_at: 0 } as any);
+    vi.mocked(assetService.getById).mockResolvedValue({
+      id: 'asset1', image_path: 'component-3.html', output_kind: 'component', prompt: 'x', edited_externally: 0,
+    } as any);
+    vi.mocked(driveService.uploadFile).mockResolvedValue({ id: 'drive-file-4' } as any);
+    await fsPromises.mkdir(path.join(tempRoot, 'storage', 'components'), { recursive: true });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'component-3.html'), document);
+
+    const { POST } = await import('@/app/api/assets/[id]/share-to-drive/route');
+    const res = await POST(postRequest({ parentFolderId: 'root' }), { params: Promise.resolve({ id: 'asset1' }) });
+
+    expect(res.status).toBe(200);
+    const uploadedStream = vi.mocked(driveService.uploadFile).mock.calls[0][0].stream;
+    const uploaded = await streamToString(uploadedStream);
+    expect(uploaded).not.toContain('data-gf-id');
+    expect(uploaded).toContain('gf-1');
+  });
+
   it('uploads the raw file bytes unchanged for a non-component (image) asset', async () => {
     // Confirms this task's new branch is scoped to output_kind ===
     // 'component' only — images still go straight through

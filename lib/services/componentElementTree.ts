@@ -72,6 +72,18 @@ export function maxDataGfId(html: string): number {
   return max;
 }
 
+export function stripElementIds(html: string): string {
+  const dom = parseDocument(html);
+  const matches = DomUtils.findAll(
+    (el) => isElement(el) && typeof el.attribs['data-gf-id'] === 'string',
+    dom.children,
+  ) as DomElement[];
+  for (const el of matches) {
+    delete el.attribs['data-gf-id'];
+  }
+  return render(dom);
+}
+
 export function hashDocument(rawBytes: string): string {
   return crypto.createHash('sha256').update(rawBytes, 'utf-8').digest('hex');
 }

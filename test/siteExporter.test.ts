@@ -563,6 +563,19 @@ describe('siteExporter.exportSite', () => {
     expect(compiled.css).toContain(':local(.root)');
   });
 
+  it('strips data-gf-id from an exported component even though its .gf-<n> classes survive', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const asset = await makeComponentAsset(style.id, 'ided.html', document);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const tsx = await exportedComponentTsx(style.id, 'test-strip-ids');
+    expect(tsx).not.toContain('data-gf-id');
+    expect(tsx).toContain('gf-1');
+  });
+
   it("returns STYLE_NOT_FOUND instead of exporting — this is the behavior change: exportSite() never checked the style itself, only pageService.getActivePagesForStyle()", async () => {
     const style = await styleService.create({ name: 'Deleted Bible', createdBy: 'user-1', parameters: '{}' });
     await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });

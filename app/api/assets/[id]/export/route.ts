@@ -10,6 +10,7 @@ import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExport
 import { tokensToW3cTokens } from '@/lib/services/themeExport/w3cExporter';
 import { parseComponentHtml, combineComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { stripElementIds } from '@/lib/services/componentElementTree';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const tokens = parseComponentHtml(document);
       const trusted = asset.edited_externally === 1;
       safeDocument = combineComponentHtml({
-        html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
+        html: stripElementIds(trusted ? tokens.html : sanitizeComponentHtml(tokens.html)),
         css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),
       });
     } catch (e) {

@@ -241,6 +241,18 @@ describe('GET /api/assets/[id]/export', () => {
     expect(body).toContain('class="hero"');
   });
 
+  it('strips data-gf-id from a component export', async () => {
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const { assetId } = await makeComponentAsset('x', document);
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    const body = await res.text();
+    expect(body).not.toContain('data-gf-id');
+    expect(body).toContain('gf-1');
+  });
+
   it('returns 500 when the component file is missing on disk', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await assetService.create({

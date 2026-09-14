@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { parseDocument } from 'htmlparser2';
+import render from 'dom-serializer';
 import {
   findElementByDataGfId,
   replaceElementByDataGfId,
   maxDataGfId,
   hashDocument,
+  stripElementIds,
 } from '@/lib/services/componentElementTree';
 
 describe('findElementByDataGfId', () => {
@@ -94,6 +97,21 @@ describe('maxDataGfId', () => {
 
   it('returns 0 when no element carries the attribute', () => {
     expect(maxDataGfId('<div><span></span></div>')).toBe(0);
+  });
+});
+
+describe('stripElementIds', () => {
+  it('removes data-gf-id but keeps every other attribute, including classes', () => {
+    const html = '<button data-gf-id="3" class="btn gf-3">Go</button>';
+    const result = stripElementIds(html);
+    expect(result).not.toContain('data-gf-id');
+    expect(result).toContain('class="btn gf-3"');
+    expect(result).toContain('Go');
+  });
+
+  it('is a no-op on html with no data-gf-id attributes', () => {
+    const html = '<div><span>hi</span></div>';
+    expect(stripElementIds(html)).toBe(render(parseDocument(html)));
   });
 });
 

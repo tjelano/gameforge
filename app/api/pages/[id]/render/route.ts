@@ -6,6 +6,7 @@ import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
 import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { stripElementIds } from '@/lib/services/componentElementTree';
 import { composePageHtml, type PageComponentTokens } from '@/lib/services/pageDocument';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         // this content unconditionally either way.
         const trusted = asset.edited_externally === 1;
         items.push({
-          html: trusted ? tokens.html : sanitizeComponentHtml(tokens.html),
+          html: stripElementIds(trusted ? tokens.html : sanitizeComponentHtml(tokens.html)),
           css: trusted ? tokens.css : sanitizeComponentCss(tokens.css),
         });
       } catch (e) {

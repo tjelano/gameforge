@@ -172,6 +172,21 @@ describe('GET /api/pages/[id]/render', () => {
     expect(body).not.toContain('/hero.png');
   });
 
+  it('strips data-gf-id from a rendered page while keeping .gf-<n> classes', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const asset = await makeComponentAsset(style.id, 'ided.html', document);
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('data-gf-id');
+    expect(body).toContain('gf-1');
+  });
+
   it('with ?download=1, sets Content-Disposition to attachment with a slugified filename', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'My Landing Page!', createdBy: 'user-1' });
