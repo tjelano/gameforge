@@ -25,11 +25,12 @@ export const DASHBOARD_ROUTES: DashboardRoute[] = [
   { href: '/dashboard/settings/seed-themes', label: 'Seed Themes' },
   { href: '/dashboard/settings/google-drive', label: 'Google Drive' },
   { href: '/dashboard/settings/ollama', label: 'Ollama' },
+  { href: '/dashboard/settings/design-preview', label: 'Design Preview' },
 ];
 
 // NavRail's own grouping -- Overview and the Settings hub render as their
 // own single links; every other route renders as one flat "tools" group in
-// between, and the 5 individual settings sub-routes are hidden from the
+// between, and the 6 individual settings sub-routes are hidden from the
 // visible rail (still valid DASHBOARD_ROUTES entries, so the AI copilot can
 // still navigate straight to one directly). Exported from here rather than
 // computed inline in NavRail.tsx so this exact grouping can be tested
