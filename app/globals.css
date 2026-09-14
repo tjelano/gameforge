@@ -1,20 +1,23 @@
 :root {
-  --bg: #1c1a17;
-  --surface: #242019;
-  --surface-raised: #2c2620;
-  --border: #3c352a;
-  --ink: #ede7dc;
-  --ink-dim: #a89a86;
-  --ink-faint: #6f6455;
-  --accent: #e8a33d;
-  --accent-ink: #1c1a17;
+  --bg: #0A0A0A;
+  --surface: #121212;
+  --surface-raised: #1A1A1A;
+  --border: #262626;
+  --ink: #EDEDED;
+  --ink-dim: #9A9A9A;
+  --ink-faint: #6A6A6A;
+  --accent: #FF4F00;
+  --accent-bright: #FF6A2B;
+  --accent-dim: #C23A00;
+  --accent-2: #4FA8D8;
+  --accent-ink: #0A0A0A;
   --keeper: #8ea885;
   --keeper-dim: #4a5c46;
   --reject: #c46a4f;
   --reject-dim: #5c3a2c;
-  --radius: 3px;
-  --font-display: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
-  --font-body: var(--font-inter), 'Inter', sans-serif;
+  --radius: 7px;
+  --font-display: var(--font-sentient), Georgia, serif;
+  --font-body: var(--font-satoshi), -apple-system, 'Segoe UI', sans-serif;
   --font-mono: var(--font-plex-mono), 'IBM Plex Mono', monospace;
 }
 
@@ -194,15 +197,16 @@ select {
   padding: 9px 16px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--surface-raised);
+  background: transparent;
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.08s ease, opacity 0.12s ease;
+  transition: transform 0.08s ease, opacity 0.12s ease, background 0.12s ease;
 }
 
 .btn:hover:not(:disabled) {
+  background: var(--surface-raised);
   transform: translateY(-1px);
 }
 
@@ -221,6 +225,11 @@ select {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-bright);
+  border-color: var(--accent-bright);
 }
 
 .btn-keeper {
