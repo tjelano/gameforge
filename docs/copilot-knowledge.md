@@ -6,7 +6,7 @@ question, say so plainly and ask a clarifying question rather than guessing.
 
 ## Overview (`/dashboard`)
 Your studio at a glance: how many active Style Bibles, how many total assets, how many jobs are still
-in flight, quick links to start a generation or open Ollama settings, and a feed of what happened
+in flight, quick links to start a generation, create a new Style Bible, or open Ollama settings, and a feed of what happened
 recently (promotions, discards, failures, new Style Bibles). This is the dashboard's landing page.
 
 ## Generate (`/dashboard/generate`)
