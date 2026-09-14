@@ -6,6 +6,7 @@ const SETTINGS_PAGES = [
   { href: '/dashboard/settings/seed-themes', name: 'Seed Themes', description: 'Import ready-made DaisyUI/Bootswatch themes.' },
   { href: '/dashboard/settings/google-drive', name: 'Google Drive', description: 'Shared Drive connection.' },
   { href: '/dashboard/settings/ollama', name: 'Ollama', description: 'Local model connection and model management.' },
+  { href: '/dashboard/settings/design-preview', name: 'Design Preview', description: 'Live-edit GameForge\'s own color and font tokens and preview the result.' },
 ] as const;
 
 export default function SettingsHubPage() {

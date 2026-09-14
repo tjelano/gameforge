@@ -23,11 +23,11 @@ describe('NavRail route grouping', () => {
     expect(accountedFor.map(r => r.href).sort()).toEqual(DASHBOARD_ROUTES.map(r => r.href).sort());
   });
 
-  it('exactly 12 routes are visible and exactly the 5 settings sub-routes are hidden', () => {
+  it('exactly 12 routes are visible and exactly the 6 settings sub-routes are hidden', () => {
     const visible = [NAV_OVERVIEW_ROUTE, ...NAV_PRIMARY_ROUTES, NAV_SETTINGS_HUB_ROUTE];
     expect(visible).toHaveLength(12);
     const hidden = DASHBOARD_ROUTES.filter(r => !visible.includes(r));
-    expect(hidden).toHaveLength(5);
+    expect(hidden).toHaveLength(6);
     expect(hidden.every(r => r.href.startsWith('/dashboard/settings/'))).toBe(true);
   });
 

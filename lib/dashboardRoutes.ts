@@ -25,6 +25,7 @@ export const DASHBOARD_ROUTES: DashboardRoute[] = [
   { href: '/dashboard/settings/seed-themes', label: 'Seed Themes' },
   { href: '/dashboard/settings/google-drive', label: 'Google Drive' },
   { href: '/dashboard/settings/ollama', label: 'Ollama' },
+  { href: '/dashboard/settings/design-preview', label: 'Design Preview' },
 ];
 
 // NavRail's own grouping -- Overview and the Settings hub render as their
