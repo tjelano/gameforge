@@ -169,6 +169,12 @@ No new table, no write-side event logging (explicitly rejected during brainstorm
 no existing activity-log concept, and instrumenting every mutation site across the app is a much
 larger, ongoing-maintenance change than this refresh calls for). Instead, one new method:
 
+Distinct from `JobService.getActive()`'s existing `ACTIVE_WINDOW_MS` (5-minute) inclusion of
+recently-terminal jobs for the Jobs page's live-polling "just finished" display — that method serves a
+different page and a different purpose (a rolling time window for jobs still worth showing as "active").
+`getRecentlyResolved()` below has no time window at all, just a row-count cap, and is not used by and
+does not modify `getActive()`'s behavior.
+
 ```ts
 // lib/services/JobService.ts — new method
 async getRecentlyResolved(limit: number): Promise<Job[]> {

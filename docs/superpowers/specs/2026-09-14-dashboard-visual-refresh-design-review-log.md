@@ -1,26 +1,40 @@
 # DeepSeek spec review — 2026-09-14-dashboard-visual-refresh-design.md
 
-Unlike every prior DeepSeek review this session, this one produced a high proportion of **fabricated
-findings** — specifics that don't exist anywhere in the pasted spec or supporting files, not just
-plausible-but-wrong guesses about code DeepSeek couldn't see. Recorded here in more detail than usual
-because the pattern itself (confident, specific fabrication that survived being told directly it was
-wrong) is the notable part, not any individual finding.
+**Correction (post-hoc):** this log originally accused DeepSeek of fabricating `resetForRetry()` and
+`ACTIVE_WINDOW_MS`/a 5-minute job window. That accusation was wrong and has been corrected below. The
+Claude-side verification during the review used `grep "async get"` against `JobService.ts`, which
+silently excludes a method named `resetForRetry` (it doesn't start with "get") — both `resetForRetry()`
+and `ACTIVE_WINDOW_MS` are real, existing code in the real file, confirmed by reading it in full
+afterward. The findings below are re-triaged against that corrected understanding. What remains
+genuinely fabricated (the `.empty-state { display: grid }` claim, and round 2's specific "an existing
+method literally named `getRecentlyResolved`" framing) is unaffected by this correction — those were
+checked by full-file reads and Next.js semantics, not the flawed grep.
 
 ## Round 1 — 20 findings
 
-**Confirmed fabricated — referenced code/values that do not exist anywhere in the spec or the pasted
-real source files:**
-- A function called `resetForRetry()` with a "race condition" clearing `result_path` — no such
-  function appears anywhere in the spec or in the real `JobService.ts` pasted alongside it (which only
-  has `getById`/`getActive`/`getByBatchId`).
-- A `5-minute` / `ACTIVE_WINDOW_MS` time-window filter on the activity feed, and a "polling interval"
-  for it — the actual spec's `getRecentlyResolved()` has no time window at all
-  (`ORDER BY updated_at DESC LIMIT ?`), and the Overview page loads once, it doesn't poll.
-- A `.empty-state { display: grid }` CSS rule — the spec never touches `.empty-state`'s layout at all,
-  only colors/radii via the shared token change.
-- An "existing `JobService.getRecentlyResolved` with a 5-minute window" that the new spec's version
-  supposedly collides with (round 2) — there is no pre-existing method by this name; the real
-  `JobService.ts` was pasted in full and doesn't contain it.
+**Confirmed fabricated — checked against the real, fully-read source, not the flawed `async get` grep:**
+- A `.empty-state { display: grid }` CSS rule — the spec never touches `.empty-state`'s layout at all
+  (only colors/radii via the shared token change), and the real current CSS has no `display` set on
+  `.empty-state` either (block by default).
+
+**Real, but out of this spec's scope — not fabricated, just not actionable here:**
+- `resetForRetry()`'s "race condition" (clears `result_path` before the caller frees the old image
+  file). This method and its documented caller contract are real, existing `JobService` code — but
+  this visual-refresh spec neither creates, calls, nor modifies it. A legitimate finding about
+  pre-existing code, out of scope for a visual/nav refresh.
+- `ACTIVE_WINDOW_MS` (a real 5-minute constant) and `getActive()`'s inclusion of recently-terminal jobs
+  — real, existing code, but it serves the Jobs page's live-polling "just finished" display, a
+  different method for a different purpose than this spec's new `getRecentlyResolved()` (which has no
+  time window at all, just `ORDER BY updated_at DESC LIMIT ?`). No actual collision or shared code
+  path — but real enough, and similar-sounding enough, that a one-line clarifying note was added to
+  the spec so a future reader isn't left wondering about the relationship between the two.
+
+**Still fabricated even after the correction — round 2's specific framing:**
+- "An existing `JobService.getRecentlyResolved` with a 5-minute window" that the new spec's method
+  supposedly collides with. No method by this literal name exists in the real file (only `getById`,
+  `getActive`, `getByBatchId`, `create`, `resetForRetry`, `delete`) — this was DeepSeek conflating the
+  real `ACTIVE_WINDOW_MS` pattern from `getActive()` with the new method's name, not citing something
+  that's actually there under that name.
 
 **Confirmed false, checked directly against the pasted files:**
 - "Font path is contradictory / `next/font/local` can't load from `public/`." Wrong:
@@ -52,26 +66,30 @@ real source files:**
 - Form-control font inheritance: `button, input, textarea, select { font-family: inherit; ... }`
   already exists at `app/globals.css:44-51`.
 
-## Round 2 — after rebuttal with evidence
+## Round 2 — after rebuttal (rebuttal itself was partly wrong)
 
-Sent the fabrication list back with the specific line/file evidence above. Response repeated two of
-the same fabrications (the phantom `getRecentlyResolved` "5-minute window" and `resetForRetry`) and
-added a new false claim — that the font `src` path was still "TBD, decided at implementation time"
-— when the spec had already been revised to a concrete, static path
-(`public/fonts/Sentient-Variable.woff2`) during self-review, before round 1 ever ran; this was true in
-every version of the spec DeepSeek was shown. One new, genuinely real point survived: no empty-state
-was defined for the activity feed when there's nothing recent to show. Fixed. One nitpick (the
-`href.startsWith('/dashboard/settings/')` filter "silently" routes future settings sub-pages into the
-hidden group) was rejected — that's the deliberate, maintainable design intent (a new settings page
-joins the hidden group automatically, no allowlist to remember to update), not a bug.
+Sent back a fabrication list that incorrectly included `resetForRetry()` and `ACTIVE_WINDOW_MS` — see
+the correction note at the top. DeepSeek's round 2 response held its ground on both and repeated them;
+at the time this was logged as "doubling down on disproven specifics," but the specifics weren't
+actually disproven — the rebuttal itself was wrong, built on an incomplete `async get` grep rather than
+a full read of `JobService.ts`. What DeepSeek got wrong in round 2 on its own merits: it framed the
+5-minute window as belonging to "an existing `getRecentlyResolved`" method, which doesn't exist under
+that name — the real 5-minute window lives in `getActive()`, a different method. It also claimed the
+font `src` path was still "TBD, decided at implementation time," which was false in every version of
+the spec it was shown — that path had already been made concrete during self-review before round 1
+ever ran. One new, genuinely real point survived: no empty-state was defined for the activity feed
+when there's nothing recent to show. Fixed. One nitpick (the `href.startsWith('/dashboard/settings/')`
+filter "silently" routes future settings sub-pages into the hidden group) was rejected — that's the
+deliberate, maintainable design intent (a new settings page joins the hidden group automatically, no
+allowlist to remember to update), not a bug.
 
 ## Resolution
 
-Did not run a third round. Per this skill's "Claude is final arbiter" rule, two rounds of a
-high-fabrication-rate response — including doubling down on disproven specifics after being shown the
-exact file:line evidence against them — is a real, repeatable signal, not a fluke worth one more
-attempt to fix. The genuinely real findings from both rounds (2 items) are fixed in the spec; the
-rest, including everything from round 2's "REVISE" rationale, don't survive verification against the
-actual pasted source. Treating this spec as reviewed and sound to proceed from — the same bar every
-other DeepSeek-reviewed document this session was held to, just reached by direct verification against
-the real files instead of a clean final "APPROVED" line.
+Did not run a third round — at the time, for the wrong reason ("high fabrication rate," per the
+now-corrected claims above). In hindsight the right reason to stop was narrower: round 2's only actual
+new problems (the `getRecentlyResolved`-naming mix-up, the stale font-path claim) were both cheap to
+resolve directly, and everything else across both rounds had already been checked against real source.
+Fixed in the spec: the site-root redirect, a test for the new activity-feed merge logic, the
+`docs/copilot-knowledge.md` update, the NavRail logout-preservation note, the activity-feed empty
+state, and a clarifying note distinguishing the new `getRecentlyResolved()` from `getActive()`'s
+unrelated `ACTIVE_WINDOW_MS`. Treating this spec as reviewed and sound to proceed from.
