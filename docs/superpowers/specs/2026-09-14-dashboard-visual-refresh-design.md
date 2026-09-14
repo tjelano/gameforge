@@ -135,18 +135,33 @@ then every entry whose `href` doesn't start with `/dashboard/settings/` (i.e. th
 their existing order), then a visual divider, then just the `Settings` hub entry — hiding the 5
 individual settings sub-routes from the visible rail without removing them from `DASHBOARD_ROUTES`.
 This is the one place `NavRail`'s rendering and `DASHBOARD_ROUTES`'s full contents deliberately
-diverge; the copilot's tool schema keeps using the complete, unfiltered array.
+diverge (17 real routes in the array; 11 visible in the rail); the copilot's tool schema keeps using
+the complete, unfiltered array. `NavRail`'s existing logout handler and its `router.refresh()` call
+are untouched by this restructure — only the link-rendering portion of the component changes.
+
+`docs/copilot-knowledge.md` (from the AI-copilot feature) needs a small update alongside this: it
+currently has no entries for `/dashboard` or `/dashboard/settings` since neither existed when it was
+written. Add one short entry for each, so the copilot can both explain and correctly navigate to them
+— otherwise the copilot would still work (the routes are valid `DASHBOARD_ROUTES` entries either way)
+but couldn't explain what they are if asked, and might default to a specific settings sub-page instead
+of the hub when a request is genuinely ambiguous ("open settings").
 
 ### Section 4 — Overview page (`app/dashboard/page.tsx`)
 
-Currently a client-less redirect to `/dashboard/generate`. Replaced with a real page:
+Currently a client-less redirect to `/dashboard/generate`. Replaced with a real page. `app/page.tsx`
+(the site root, `/`) also redirects to `/dashboard/generate` today — updated to redirect to `/dashboard`
+instead, since Overview is now the more sensible landing spot for both routes.
 
 - **Stat cards**: active styles count, total assets, in-flight jobs — from `getProjectContextSummary()`
   (already returns `{styles: [{id,name,assetCount}], totalActiveAssets, inFlightJobs}`), fetched via
   the existing `GET /api/context` route, same pattern as any other dashboard page's data fetch.
 - **Quick actions**: buttons linking to `/dashboard/generate`, `/dashboard/styles` (new Style Bible),
   and `/dashboard/settings/ollama` — three fixed links, not configurable, matching the mockup.
-- **Recent activity**: see Section 5 below for where this data comes from.
+- **Recent activity**: see Section 5 below for where this data comes from. Empty state (no resolved
+  jobs and no created styles yet — a fresh install, or just a quiet day) uses this codebase's existing
+  `.empty-state` pattern, matching the wording style already used elsewhere (e.g. Jobs page's "Nothing
+  in flight. Queue a generation above."): something like "No recent activity yet. Generate something
+  to see it here."
 
 ### Section 5 — Recent activity data source
 
@@ -193,6 +208,9 @@ pure navigation, not a dashboard of settings state.
 - `getRecentlyResolved()`: a unit test against a real temporary SQLite file (this codebase's
   established pattern), covering: only `promoted`/`discarded`/`failed` jobs are returned (not
   `pending`/`processing`), ordering is newest-`updated_at`-first, and the `limit` is respected.
+- `getRecentActivity()` (the merge in `lib/services/recentActivity.ts`): its own test, since the
+  interleave-by-timestamp logic is the one genuinely new piece of business logic in this refresh —
+  covering a mix of jobs and styles merging into one correctly-ordered, correctly-capped list.
 - No React rendering tests for the new Overview/Settings-hub pages or the restructured `NavRail` —
   matches this codebase's established, deliberate convention (confirmed zero `@testing-library` usage
   anywhere) from the AI-copilot work; verified manually in a browser instead.
