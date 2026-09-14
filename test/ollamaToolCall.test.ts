@@ -1,6 +1,6 @@
 // test/ollamaToolCall.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { callOllamaTool, OLLAMA_NO_TOOL_CALL_ERROR_PREFIX } from '@/lib/services/ollamaToolCall';
+import { callOllamaTool, callOllamaMessage, OLLAMA_NO_TOOL_CALL_ERROR_PREFIX } from '@/lib/services/ollamaToolCall';
 
 const baseParams = {
   host: 'http://localhost:11434',
@@ -116,5 +116,87 @@ describe('callOllamaTool', () => {
     await first;
     await second;
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+const baseMessageParams = {
+  host: 'http://localhost:11434',
+  model: 'llama3-groq-tool-use:8b',
+  toolName: 'navigate_to_page',
+  toolDescription: 'Navigate somewhere.',
+  inputSchema: { type: 'object' as const, properties: {}, required: [] as string[] },
+  messages: [{ role: 'system', content: 'You are the GameForge copilot.' }, { role: 'user', content: 'How do themes work?' }],
+  operationLabel: 'copilot message',
+  truncatedMessage: 'the reply could not be completed',
+};
+
+describe('callOllamaMessage', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns plain text when the model makes no tool call -- the normal case here', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      message: { role: 'assistant', content: 'Generate a theme from the Themes page.' },
+    }));
+    const result = await callOllamaMessage(baseMessageParams);
+    expect(result).toEqual({ text: 'Generate a theme from the Themes page.' });
+  });
+
+  it('returns text and toolCall when the model calls the tool', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      message: {
+        role: 'assistant',
+        content: "Here's the Ollama settings page.",
+        tool_calls: [{ function: { name: 'navigate_to_page', arguments: { path: '/dashboard/settings/ollama' } } }],
+      },
+    }));
+    const result = await callOllamaMessage(baseMessageParams);
+    expect(result).toEqual({
+      text: "Here's the Ollama settings page.",
+      toolCall: { name: 'navigate_to_page', input: { path: '/dashboard/settings/ollama' } },
+    });
+  });
+
+  it('JSON.parses a stringified tool call argument', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      message: {
+        content: '',
+        tool_calls: [{ function: { name: 'navigate_to_page', arguments: '{"path":"/dashboard/themes"}' } }],
+      },
+    }));
+    const result = await callOllamaMessage(baseMessageParams);
+    expect(result.toolCall).toEqual({ name: 'navigate_to_page', input: { path: '/dashboard/themes' } });
+  });
+
+  it('falls back to the plain text reply when a stringified tool call argument is malformed', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      message: {
+        content: 'Generate a theme from the Themes page.',
+        tool_calls: [{ function: { name: 'navigate_to_page', arguments: '{"path":' } }],
+      },
+    }));
+    const result = await callOllamaMessage(baseMessageParams);
+    expect(result).toEqual({ text: 'Generate a theme from the Themes page.' });
+  });
+
+  it('still throws on an HTTP failure', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'model not found' }, false, 404));
+    await expect(callOllamaMessage(baseMessageParams)).rejects.toThrow(/copilot message failed \(404\)/);
+  });
+
+  it('still treats prompt_eval_count reaching num_ctx as truncation', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      message: { content: 'cut off' },
+      prompt_eval_count: 8192,
+    }));
+    await expect(callOllamaMessage(baseMessageParams)).rejects.toThrow('truncated');
   });
 });

@@ -7,6 +7,8 @@
 // real, EXPECTED failure mode here, not a rare edge case, and every branch
 // below treats it that way.
 
+import type { ProviderMessageResult } from '@/lib/services/copilotTool';
+
 // Local inference (especially CPU-only) is much slower than a cloud API --
 // claudeToolCall.ts's 60s is too tight here.
 const OLLAMA_REQUEST_TIMEOUT_MS = 120_000;
@@ -136,5 +138,67 @@ export async function callOllamaTool(params: OllamaToolCallParams): Promise<unkn
       }
     }
     return args;
+  });
+}
+
+export interface OllamaMessageParams {
+  host: string;
+  model: string;
+  toolName: string;
+  toolDescription: string;
+  inputSchema: Record<string, unknown>;
+  messages: Array<{ role: string; content: unknown }>;
+  signal?: AbortSignal;
+  operationLabel: string;
+  truncatedMessage: string;
+}
+
+/**
+ * Like callOllamaTool(), but for the copilot's conversational turn: a
+ * missing tool_calls entry is the normal, expected case here (most turns
+ * are plain answers), not the hard-fail callOllamaTool() treats it as.
+ */
+export async function callOllamaMessage(params: OllamaMessageParams): Promise<ProviderMessageResult> {
+  const { host, model, toolName, toolDescription, inputSchema, messages, signal, operationLabel, truncatedMessage } = params;
+
+  return withOllamaLock(async () => {
+    const res = await fetch(`${host}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        messages,
+        tools: [{ type: 'function', function: { name: toolName, description: toolDescription, parameters: inputSchema } }],
+        options: { num_ctx: DEFAULT_NUM_CTX },
+      }),
+      signal: combineWithTimeout(signal),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Ollama ${operationLabel} failed (${res.status}): ${body || res.statusText}`);
+    }
+
+    const data = (await res.json()) as OllamaChatResponse;
+    if (typeof data.prompt_eval_count === 'number' && data.prompt_eval_count >= DEFAULT_NUM_CTX) {
+      throw new Error(`Ollama response for ${operationLabel} was truncated (prompt_eval_count reached num_ctx) -- ${truncatedMessage}.`);
+    }
+
+    const text = data.message?.content ?? '';
+    const toolCallRaw = data.message?.tool_calls?.[0];
+    if (!toolCallRaw) return { text };
+
+    let input = toolCallRaw.function.arguments;
+    if (typeof input === 'string') {
+      try {
+        input = JSON.parse(input);
+      } catch {
+        // Malformed structured output -- unlike callOllamaTool(), a bad tool
+        // call here shouldn't blank out an otherwise-usable text reply.
+        return { text };
+      }
+    }
+    return { text, toolCall: { name: toolCallRaw.function.name, input } };
   });
 }

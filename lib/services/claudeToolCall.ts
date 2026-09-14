@@ -9,6 +9,7 @@
 // strings so error messages stay as specific and diagnosable as before —
 // this deliberately does not flatten them into one generic message.
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
+import type { ProviderMessageResult } from '@/lib/services/copilotTool';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -99,4 +100,69 @@ export async function callClaudeTool(params: ClaudeToolCallParams): Promise<unkn
     throw new Error(`Anthropic response (via ${provider.name}) contained no tool_use block for ${toolName}.`);
   }
   return toolUse.input;
+}
+
+export interface ClaudeMessageParams {
+  provider: ClaudeApiProvider;
+  apiKey: string;
+  toolName: string;
+  toolDescription: string;
+  inputSchema: Record<string, unknown>;
+  messages: Array<{ role: string; content: unknown }>;
+  /** Top-level Anthropic `system` field -- never a message in `messages`, unlike Ollama's /api/chat. */
+  system?: string;
+  maxTokens?: number;
+  signal?: AbortSignal;
+  operationLabel: string;
+  truncatedMessage: string;
+}
+
+/**
+ * Like callClaudeTool(), but for the copilot's conversational turn: tool use
+ * is optional (tool_choice: auto, not forced), and the reply may carry text,
+ * a tool call, or both -- callClaudeTool() only ever looks for a tool_use
+ * block and throws if one's missing, which is the wrong contract here.
+ */
+export async function callClaudeMessage(params: ClaudeMessageParams): Promise<ProviderMessageResult> {
+  const { provider, apiKey, toolName, toolDescription, inputSchema, messages, system, maxTokens = 4096, signal, operationLabel, truncatedMessage } = params;
+
+  const res = await fetchWithRetry(provider.requestUrl, {
+    method: 'POST',
+    headers: {
+      ...provider.buildAuthHeaders(apiKey),
+      'anthropic-version': ANTHROPIC_VERSION,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: provider.model,
+      max_tokens: maxTokens,
+      ...(system ? { system } : {}),
+      tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema }],
+      tool_choice: { type: 'auto' },
+      messages,
+    }),
+    signal: combineWithTimeout(signal),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Anthropic ${operationLabel} failed via ${provider.name} (${res.status}): ${body || res.statusText}`);
+  }
+
+  const data = (await res.json()) as AnthropicMessageResponse;
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error(`Anthropic response (via ${provider.name}) was truncated (stop_reason: max_tokens) before completing — ${truncatedMessage}.`);
+  }
+
+  let text = '';
+  let toolCall: { name: string; input: unknown } | undefined;
+  for (const block of data.content) {
+    if (block.type === 'text') {
+      text += (block as { text?: string }).text ?? '';
+    } else if (block.type === 'tool_use') {
+      const tu = block as unknown as ToolUseBlock;
+      toolCall = { name: tu.name, input: tu.input };
+    }
+  }
+  return { text, toolCall };
 }

@@ -27,3 +27,27 @@ export const CHEAPERINFERENCE_PROVIDER: ClaudeApiProvider = {
   model: 'claude-sonnet-5',
   buildAuthHeaders: (apiKey) => ({ 'X-Api-Key': apiKey }),
 };
+
+const NOT_CONFIGURED_ERROR = "Claude isn't configured — set ANTHROPIC_API_KEY or CHEAPERINFERENCE_API_KEY, or pick an installed Ollama model instead.";
+
+/**
+ * Resolves which Claude-shaped provider + API key to use, from the same
+ * THEME_API_PROVIDER env-var switch ThemeGenerator.ts/ComponentGenerator.ts/
+ * PageLayoutSuggester.ts each already read -- but exported here, since this
+ * is the first caller outside those three generators (the copilot route).
+ * Returns an error value rather than throwing or falling back to a mock --
+ * the copilot has no mock backend, so a misconfiguration must be reported
+ * to the caller, not silently swallowed.
+ */
+export function resolveClaudeProvider(): { provider: ClaudeApiProvider; apiKey: string } | { error: string } {
+  const providerName = process.env.THEME_API_PROVIDER;
+  if (!providerName || providerName === 'anthropic') {
+    if (!process.env.ANTHROPIC_API_KEY) return { error: NOT_CONFIGURED_ERROR };
+    return { provider: ANTHROPIC_PROVIDER, apiKey: process.env.ANTHROPIC_API_KEY };
+  }
+  if (providerName === 'cheaperinference') {
+    if (!process.env.CHEAPERINFERENCE_API_KEY) return { error: NOT_CONFIGURED_ERROR };
+    return { provider: CHEAPERINFERENCE_PROVIDER, apiKey: process.env.CHEAPERINFERENCE_API_KEY };
+  }
+  return { error: `Unknown THEME_API_PROVIDER "${providerName}" — expected "anthropic" or "cheaperinference".` };
+}

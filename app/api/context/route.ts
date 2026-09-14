@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { styleService } from '@/lib/services/StyleService';
-import { assetService } from '@/lib/services/AssetService';
-import { jobService } from '@/lib/services/JobService';
+import { getProjectContextSummary } from '@/lib/services/projectContext';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,29 +12,8 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET() {
   try {
-    const [styles, assets, activeJobs] = await Promise.all([
-      styleService.getActiveStyles(),
-      assetService.getActiveAssets(),
-      jobService.getActive(),
-    ]);
-
-    const assetCountByStyle = new Map<string, number>();
-    for (const asset of assets) {
-      assetCountByStyle.set(asset.style_id, (assetCountByStyle.get(asset.style_id) ?? 0) + 1);
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        styles: styles.map(style => ({
-          id: style.id,
-          name: style.name,
-          assetCount: assetCountByStyle.get(style.id) ?? 0,
-        })),
-        totalActiveAssets: assets.length,
-        inFlightJobs: activeJobs.filter(j => j.status === 'pending' || j.status === 'processing').length,
-      },
-    });
+    const data = await getProjectContextSummary();
+    return NextResponse.json({ success: true, data });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
