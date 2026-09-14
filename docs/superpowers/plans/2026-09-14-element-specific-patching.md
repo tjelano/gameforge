@@ -659,6 +659,7 @@ git commit -m "feat: assign element ids on every non-trusted component write pat
 ### Task 5: Strip `data-gf-id` on every export/share path
 
 **Files:**
+- Modify: `lib/services/componentElementTree.ts` (adds `stripElementIds`, alongside Task 3's exports)
 - Modify: `lib/services/SiteExporter.ts`
 - Modify: `app/api/assets/[id]/export/route.ts`
 - Modify: `app/api/assets/[id]/share-to-drive/route.ts`
