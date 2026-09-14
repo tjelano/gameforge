@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace GameForge's amber/charcoal look with a Persimmon-on-Obsidian palette and a
-Sentient/Satoshi typeface pairing, restructure the sidebar (Overview + 9 tools + a collapsed Settings
+Sentient/Satoshi typeface pairing, restructure the sidebar (Overview + 10 tools + a collapsed Settings
 hub, down from 15 flat links), and add a new Overview landing page with stat cards, quick actions, and
 a data-derived recent-activity feed.
 
@@ -21,6 +21,10 @@ codebase's existing conventions.
 see the paired `-review-log.md` — including a correction: two findings originally logged as
 "fabricated" were real, existing code, caught by an incomplete verification grep on the controller's
 side, not by DeepSeek inventing anything).
+
+**Task ordering note:** the Settings hub page (Task 3) is deliberately placed right after the sidebar
+restructure (Task 2), not later, so the new "Settings" sidebar link never points at a page that
+doesn't exist yet at any point during sequential task execution.
 
 ## Global Constraints
 
@@ -65,7 +69,13 @@ side, not by DeepSeek inventing anything).
 mkdir -p public/fonts
 cp "Satoshi_Complete/Fonts/WEB/fonts/Satoshi-Variable.woff2" "public/fonts/Satoshi-Variable.woff2"
 cp "Sentient_Complete/Fonts/WEB/fonts/Sentient-Variable.woff2" "public/fonts/Sentient-Variable.woff2"
-rm -rf Satoshi_Complete Sentient_Complete
+
+# Verify both copies actually landed and are non-empty before deleting the
+# only other copy of these files -- a silently-failed cp (typo'd source
+# path, etc.) must not be followed by an rm -rf of the source.
+test -s "public/fonts/Satoshi-Variable.woff2" && test -s "public/fonts/Sentient-Variable.woff2" && \
+  rm -rf Satoshi_Complete Sentient_Complete || \
+  echo "COPY VERIFICATION FAILED -- did not delete the source bundles. Check the cp commands above before retrying."
 ```
 
 - [ ] **Step 2: Wire the fonts into the root layout**
@@ -495,11 +505,12 @@ Expected: all clean, including the new grouping test.
 
 - [ ] **Step 6: Manually verify in a running dev server**
 
-Run: `npm run dev`. Confirm: the rail shows Overview, then 9 tool links, then a visible divider, then
-one "Settings" link (not the 5 individual settings pages) — 11 visible links total. Click Overview,
-confirm only it highlights (not every page). The Settings hub page itself doesn't exist until Task 6,
+Run: `npm run dev`. Confirm: the rail shows Overview, then 10 tool links, then a visible divider, then
+one "Settings" link (not the 5 individual settings pages) — 12 visible links total. Click Overview,
+confirm only it highlights (not every page). The Settings hub page itself doesn't exist until Task 3,
 so for this task's check, navigate directly by URL to `/dashboard/settings/ollama` and confirm the
-"Settings" rail link shows active there too (not just on the hub's own exact URL).
+"Settings" rail link shows active there too (not just on the hub's own exact URL). Clicking the
+"Settings" link itself will 404 until Task 3 lands — that's expected at this point, not a bug to chase.
 
 - [ ] **Step 7: Commit**
 
@@ -510,14 +521,111 @@ git commit -m "feat: restructure the sidebar -- Overview, primary tools, collaps
 
 ---
 
-### Task 3: `JobService.getRecentlyResolved()`
+### Task 3: Settings hub page
+
+**Files:**
+- Create: `app/dashboard/settings/page.tsx`
+- Modify: `app/globals.css` (append `.settings-item` styles)
+
+**Interfaces:**
+- Consumes: nothing dynamic — pure static navigation, descriptions copied from each linked page's own
+  real `page-subtitle` text (same "reuse the app's own copy" approach as the AI copilot's knowledge
+  doc).
+
+Placed immediately after Task 2 rather than later, so the sidebar's new "Settings" link points at a
+real page as soon as possible during sequential execution. No automated test — pure static markup,
+verified manually.
+
+- [ ] **Step 1: Append the settings-list styles to `app/globals.css`**
+
+```css
+.settings-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.settings-item:hover {
+  border-color: var(--accent-dim);
+}
+
+.settings-item-desc {
+  color: var(--ink-dim);
+  font-size: 12px;
+  margin-top: 2px;
+}
+```
+
+- [ ] **Step 2: Create the hub page**
+
+Create `app/dashboard/settings/page.tsx`:
+
+```tsx
+import Link from 'next/link';
+
+const SETTINGS_PAGES = [
+  { href: '/dashboard/settings/storage', name: 'Storage', description: 'Clean up orphaned generated files.' },
+  { href: '/dashboard/settings/aseprite', name: 'Aseprite', description: 'Path to your local Aseprite executable.' },
+  { href: '/dashboard/settings/seed-themes', name: 'Seed Themes', description: 'Import ready-made DaisyUI/Bootswatch themes.' },
+  { href: '/dashboard/settings/google-drive', name: 'Google Drive', description: 'Shared Drive connection.' },
+  { href: '/dashboard/settings/ollama', name: 'Ollama', description: 'Local model connection and model management.' },
+] as const;
+
+export default function SettingsHubPage() {
+  return (
+    <>
+      <h1 className="page-title">Settings</h1>
+      <p className="page-subtitle">Machine and connection settings for this GameForge install.</p>
+      <div>
+        {SETTINGS_PAGES.map(page => (
+          <Link key={page.href} href={page.href} className="settings-item">
+            <div>
+              <div>{page.name}</div>
+              <div className="settings-item-desc">{page.description}</div>
+            </div>
+            <span style={{ color: 'var(--ink-faint)' }}>&rarr;</span>
+          </Link>
+        ))}
+      </div>
+    </>
+  );
+}
+```
+
+- [ ] **Step 3: Run the full test suite, tsc, and eslint**
+
+Run: `npx vitest run && npx tsc --noEmit && npx eslint app lib worker.ts`
+Expected: all clean.
+
+- [ ] **Step 4: Manually verify in a running dev server**
+
+Run: `npm run dev`, click "Settings" in the sidebar, confirm all 5 rows are present and each link
+navigates to the correct real page.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/dashboard/settings/page.tsx app/globals.css
+git commit -m "feat: add the Settings hub page"
+```
+
+---
+
+### Task 4: `JobService.getRecentlyResolved()`
 
 **Files:**
 - Modify: `lib/services/JobService.ts`
 - Test: `test/jobServiceRecentlyResolved.test.ts`
 
 **Interfaces:**
-- Produces: `jobService.getRecentlyResolved(limit: number): Promise<Job[]>` — Task 4's activity-feed
+- Produces: `jobService.getRecentlyResolved(limit: number): Promise<Job[]>` — Task 5's activity-feed
   merge calls this.
 
 - [ ] **Step 1: Write the failing test**
@@ -563,11 +671,12 @@ async function makeJobWithStatus(styleId: string, status: string, updatedAt: num
 }
 
 describe('JobService.getRecentlyResolved', () => {
-  it('returns only promoted/discarded/failed jobs, not pending/processing', async () => {
+  it('returns only promoted/discarded/failed jobs, not pending/processing/complete', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const promotedId = await makeJobWithStatus(style.id, 'promoted', 3000);
     await makeJobWithStatus(style.id, 'pending', 4000);
     await makeJobWithStatus(style.id, 'processing', 5000);
+    await makeJobWithStatus(style.id, 'complete', 6000);
 
     const result = await jobService.getRecentlyResolved(10);
     expect(result.map(j => j.id)).toEqual([promotedId]);
@@ -612,7 +721,11 @@ but keep it near the other `get*` read methods for readability):
    * just a row-count cap. Powers the dashboard Overview page's recent-
    * activity feed, a different consumer with a different need (a short
    * "what happened lately" list, not "what's still worth showing as active
-   * in a live-polling queue").
+   * in a live-polling queue"). Deliberately excludes 'complete' -- that
+   * status means "generation finished, awaiting your promote/discard
+   * decision," not a resolved outcome yet, so it isn't something that
+   * "happened" in the activity-feed sense until it becomes one of the
+   * three statuses below.
    */
   async getRecentlyResolved(limit: number): Promise<Job[]> {
     const db = DatabaseConnection.getInstance();
@@ -643,7 +756,7 @@ git commit -m "feat: add JobService.getRecentlyResolved() for the activity feed"
 
 ---
 
-### Task 4: Recent-activity merge + route
+### Task 5: Recent-activity merge + route
 
 **Files:**
 - Create: `lib/services/recentActivity.ts`
@@ -651,9 +764,10 @@ git commit -m "feat: add JobService.getRecentlyResolved() for the activity feed"
 - Test: `test/recentActivity.test.ts`
 
 **Interfaces:**
-- Consumes: `jobService.getRecentlyResolved()` (Task 3), `styleService.getActiveStyles()` (existing).
-- Produces: `getRecentActivity(): Promise<ActivityItem[]>`, and `GET /api/dashboard/activity` →
-  `{success, data: ActivityItem[]}`. Task 6's Overview page calls the route.
+- Consumes: `jobService.getRecentlyResolved()` (Task 4), `styleService.getActiveStyles()` (existing).
+- Produces: `ActivityItem` type + `getRecentActivity(): Promise<ActivityItem[]>`, and
+  `GET /api/dashboard/activity` → `{success, data: ActivityItem[]}`. Task 6's Overview page imports
+  the `ActivityItem` type from here and calls the route.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -822,7 +936,7 @@ git commit -m "feat: add the recent-activity feed (derived, not logged) + its ro
 
 ---
 
-### Task 5: Overview page + root redirect
+### Task 6: Overview page + root redirect
 
 **Files:**
 - Modify: `app/dashboard/page.tsx` (currently a redirect to `/dashboard/generate`)
@@ -830,7 +944,11 @@ git commit -m "feat: add the recent-activity feed (derived, not logged) + its ro
 - Modify: `app/globals.css` (append stat-card and activity-row styles)
 
 **Interfaces:**
-- Consumes: `GET /api/context` (existing), `GET /api/dashboard/activity` (Task 4).
+- Consumes: `GET /api/context` (existing, shape from `lib/services/projectContext.ts`'s
+  `ProjectContextSummary`), `GET /api/dashboard/activity` (Task 5, shape from
+  `lib/services/recentActivity.ts`'s `ActivityItem`) — both types imported directly (type-only, so
+  nothing client-incompatible crosses the boundary) rather than redeclared locally, so the page can't
+  silently drift from either service's real shape.
 
 No automated test for this task's page component — matches this codebase's established, deliberate
 convention (see Global Constraints); verified manually in a running dev server.
@@ -880,22 +998,11 @@ convention (see Global Constraints); verified manually in a running dev server.
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-
-interface ContextData {
-  styles: { id: string; name: string; assetCount: number }[];
-  totalActiveAssets: number;
-  inFlightJobs: number;
-}
-
-interface ActivityItem {
-  id: string;
-  kind: 'job' | 'style';
-  label: string;
-  timestamp: number;
-}
+import type { ProjectContextSummary } from '@/lib/services/projectContext';
+import type { ActivityItem } from '@/lib/services/recentActivity';
 
 export default function OverviewPage() {
-  const [context, setContext] = useState<ContextData | null>(null);
+  const [context, setContext] = useState<ProjectContextSummary | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -998,101 +1105,6 @@ git commit -m "feat: add the Overview landing page, redirect root to it"
 
 ---
 
-### Task 6: Settings hub page
-
-**Files:**
-- Create: `app/dashboard/settings/page.tsx`
-- Modify: `app/globals.css` (append `.settings-item` styles)
-
-**Interfaces:**
-- Consumes: nothing dynamic — pure static navigation, descriptions copied from each linked page's own
-  real `page-subtitle` text (same "reuse the app's own copy" approach as the AI copilot's knowledge
-  doc).
-
-No automated test — pure static markup, verified manually.
-
-- [ ] **Step 1: Append the settings-list styles to `app/globals.css`**
-
-```css
-.settings-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-  margin-bottom: 8px;
-  text-decoration: none;
-  color: var(--ink);
-}
-
-.settings-item:hover {
-  border-color: var(--accent-dim);
-}
-
-.settings-item-desc {
-  color: var(--ink-dim);
-  font-size: 12px;
-  margin-top: 2px;
-}
-```
-
-- [ ] **Step 2: Create the hub page**
-
-Create `app/dashboard/settings/page.tsx`:
-
-```tsx
-import Link from 'next/link';
-
-const SETTINGS_PAGES = [
-  { href: '/dashboard/settings/storage', name: 'Storage', description: 'Clean up orphaned generated files.' },
-  { href: '/dashboard/settings/aseprite', name: 'Aseprite', description: 'Path to your local Aseprite executable.' },
-  { href: '/dashboard/settings/seed-themes', name: 'Seed Themes', description: 'Import ready-made DaisyUI/Bootswatch themes.' },
-  { href: '/dashboard/settings/google-drive', name: 'Google Drive', description: 'Shared Drive connection.' },
-  { href: '/dashboard/settings/ollama', name: 'Ollama', description: 'Local model connection and model management.' },
-] as const;
-
-export default function SettingsHubPage() {
-  return (
-    <>
-      <h1 className="page-title">Settings</h1>
-      <p className="page-subtitle">Machine and connection settings for this GameForge install.</p>
-      <div>
-        {SETTINGS_PAGES.map(page => (
-          <Link key={page.href} href={page.href} className="settings-item">
-            <div>
-              <div>{page.name}</div>
-              <div className="settings-item-desc">{page.description}</div>
-            </div>
-            <span style={{ color: 'var(--ink-faint)' }}>&rarr;</span>
-          </Link>
-        ))}
-      </div>
-    </>
-  );
-}
-```
-
-- [ ] **Step 3: Run the full test suite, tsc, and eslint**
-
-Run: `npx vitest run && npx tsc --noEmit && npx eslint app lib worker.ts`
-Expected: all clean.
-
-- [ ] **Step 4: Manually verify in a running dev server**
-
-Run: `npm run dev`, click "Settings" in the sidebar, confirm all 5 rows are present and each link
-navigates to the correct real page.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add app/dashboard/settings/page.tsx app/globals.css
-git commit -m "feat: add the Settings hub page"
-```
-
----
-
 ### Task 7: Update the AI copilot's knowledge doc
 
 **Files:**
@@ -1155,6 +1167,6 @@ git commit -m "docs: add Overview and Settings hub entries to the copilot knowle
   Style Bibles), the AI copilot panel still looks correct against the new colors, and login/logout
   still work (the `useCurrentUser` pathname-refetch fix from the earlier AI-copilot plan is unrelated
   to this refresh but worth a quick re-confirmation given how much of the shared layout changed).
-- [ ] Per `AGENTS.md` item 4: run a DeepSeek diff review (Mode 2) on the whole branch's diff before
-  opening a PR, in addition to the per-task reviews during execution — and this time, actually run it
-  during task execution too (per this session's own logged process gap), not only retroactively.
+- [ ] Per `AGENTS.md` item 4: run a DeepSeek diff review (Mode 2) on each task's diff during execution,
+  alongside the Claude task-reviewer, not only retroactively on the whole branch at the end — this
+  session's own logged process gap from the AI-copilot plan.
