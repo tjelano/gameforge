@@ -232,4 +232,27 @@ describe('GET /api/components/[filename]', () => {
     expect(body).not.toContain('<img');
     expect(body).not.toContain('/hero.png');
   });
+
+  it('embeds a gf-rev meta tag hashing the raw stored file, not the served output', async () => {
+    const { hashDocument } = await import('@/lib/services/componentElementTree');
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><p>hi</p></body></html>';
+    const filePath = path.join(tempRoot, 'storage', 'components', 'test-rev.html');
+    await fsPromises.writeFile(filePath, document);
+    const rawStored = await fsPromises.readFile(filePath, 'utf-8');
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'test-rev.html' }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const match = body.match(/<meta name="gf-rev" content="([a-f0-9]+)">/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe(hashDocument(rawStored));
+  });
+
+  it('sends the shared CSP constant, not a re-typed literal', async () => {
+    const { COMPONENT_PREVIEW_CSP } = await import('@/lib/services/componentSanitize');
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head><body><p>hi</p></body></html>';
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'test-csp.html'), document);
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ filename: 'test-csp.html' }) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Security-Policy')).toBe(COMPONENT_PREVIEW_CSP);
+  });
 });
