@@ -180,6 +180,26 @@ describe('serializeTokensToCss', () => {
     expect(FONT_OPTIONS).toHaveLength(3);
   });
 });
+
+describe('token list drift guard', () => {
+  it('matches every custom property actually declared in globals.css\'s :root block', async () => {
+    const fsPromises = await import('fs/promises');
+    const path = await import('path');
+    const cssPath = path.resolve(__dirname, '..', 'app', 'globals.css');
+    const css = await fsPromises.readFile(cssPath, 'utf-8');
+    const rootBlock = css.match(/:root\s*\{([^}]*)\}/);
+    if (!rootBlock) throw new Error('Could not find a :root block in app/globals.css');
+    const realVarNames = new Set(
+      [...rootBlock[1].matchAll(/(--[a-z0-9-]+)\s*:/g)].map(m => m[1])
+    );
+    const moduleVarNames = new Set([
+      ...COLOR_TOKENS.map(t => t.cssVar),
+      '--radius',
+      ...FONT_TOKENS.map(t => t.cssVar),
+    ]);
+    expect(moduleVarNames).toEqual(realVarNames);
+  });
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -275,7 +295,7 @@ export function serializeTokensToCss(state: DesignPreviewTokenState): string {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run test/designPreviewTokens.test.ts`
-Expected: PASS, 13/13.
+Expected: PASS, 14/14.
 
 - [ ] **Step 5: Run the full test suite, tsc, and eslint**
 
@@ -296,6 +316,7 @@ git commit -m "feat: add pure token logic for the dashboard design-preview tool"
 **Files:**
 - Modify: `lib/dashboardRoutes.ts`
 - Modify: `app/dashboard/settings/page.tsx`
+- Modify: `test/dashboardRoutesGrouping.test.ts`
 
 **Interfaces:**
 - Consumes: nothing from Task 1.
@@ -304,8 +325,16 @@ git commit -m "feat: add pure token logic for the dashboard design-preview tool"
   page file must exist at the exact path this task wires up, or the hub's link and the copilot's tool
   both 404 until Task 3 lands — harmless mid-plan (nothing else links to it yet), resolved by Task 3.
 
-No automated test — matches this file's and the Settings hub page's own established convention (no
-test file exists for either today); verified manually alongside Task 3's own manual verification.
+**Real pre-existing conflict this step resolves:** `test/dashboardRoutesGrouping.test.ts` (written by
+the previous, already-merged visual-refresh plan) hardcodes `expect(hidden).toHaveLength(5)` — adding
+a 6th hidden settings sub-route makes that assertion false the moment this task's route entry lands.
+This is caught by Step 3's full-suite run either way, but the fix is included here rather than left
+for whoever hits the failure to improvise.
+
+No automated test for the Settings hub card itself — matches that page's own established convention
+(no dedicated test file); verified manually alongside Task 3's own manual verification. The route-
+grouping test above is existing, pre-established coverage that needs one number updated, not new
+coverage this task invents.
 
 - [ ] **Step 1: Add the route to `DASHBOARD_ROUTES`**
 
@@ -315,9 +344,18 @@ In `lib/dashboardRoutes.ts`, add one new entry at the end of the array (after th
   { href: '/dashboard/settings/design-preview', label: 'Design Preview' },
 ```
 
-No other change to this file — `NAV_PRIMARY_ROUTES`'s filter already excludes anything starting with
-`/dashboard/settings/`, so this new entry is automatically hidden from the visible sidebar and valid
-for the copilot's navigation tool, with zero filter changes needed.
+No other change to this file. For reference, here is the exact, real, already-existing filter this
+relies on (already correct, not something this task writes):
+
+```ts
+export const NAV_PRIMARY_ROUTES = DASHBOARD_ROUTES.filter(
+  r => r.href !== '/dashboard' && r.href !== '/dashboard/settings' && !r.href.startsWith('/dashboard/settings/')
+);
+```
+
+`/dashboard/settings/design-preview` starts with `/dashboard/settings/`, so it's automatically
+excluded from `NAV_PRIMARY_ROUTES` — hidden from the visible sidebar, and still a valid
+`DASHBOARD_ROUTES` entry for the copilot's navigation tool. Zero filter changes needed.
 
 - [ ] **Step 2: Add the card to the Settings hub**
 
@@ -328,15 +366,40 @@ In `app/dashboard/settings/page.tsx`, add one new entry to the `SETTINGS_PAGES` 
   { href: '/dashboard/settings/design-preview', name: 'Design Preview', description: 'Live-edit GameForge\'s own color and font tokens and preview the result.' },
 ```
 
-- [ ] **Step 3: Run the full test suite, tsc, and eslint**
+- [ ] **Step 3: Fix the pre-existing route-grouping test's hardcoded count**
+
+In `test/dashboardRoutesGrouping.test.ts`, update the one test that hardcodes the hidden-route count
+(now 6, not 5, since this task added a 6th hidden settings sub-route) and its comment:
+
+```ts
+  it('exactly 12 routes are visible and exactly the 6 settings sub-routes are hidden', () => {
+    const visible = [NAV_OVERVIEW_ROUTE, ...NAV_PRIMARY_ROUTES, NAV_SETTINGS_HUB_ROUTE];
+    expect(visible).toHaveLength(12);
+    const hidden = DASHBOARD_ROUTES.filter(r => !visible.includes(r));
+    expect(hidden).toHaveLength(6);
+    expect(hidden.every(r => r.href.startsWith('/dashboard/settings/'))).toBe(true);
+  });
+```
+
+This replaces that one `it(...)` block only — everything else in the file (the other 3 tests, and the
+comment above the "every DASHBOARD_ROUTES entry is..." test) stays as-is; that other test computes
+`hiddenSettingsSubRoutes` dynamically via `.filter()` rather than hardcoding a count, so it already
+keeps passing without any change.
+
+- [ ] **Step 4: Run the test, confirm it passes**
+
+Run: `npx vitest run test/dashboardRoutesGrouping.test.ts`
+Expected: PASS, 4/4.
+
+- [ ] **Step 5: Run the full test suite, tsc, and eslint**
 
 Run: `npx vitest run && npx tsc --noEmit && npx eslint app lib worker.ts`
-Expected: all clean (this task only adds data, no new logic to break).
+Expected: all clean.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add lib/dashboardRoutes.ts app/dashboard/settings/page.tsx
+git add lib/dashboardRoutes.ts app/dashboard/settings/page.tsx test/dashboardRoutesGrouping.test.ts
 git commit -m "feat: register the design-preview route and its Settings hub card"
 ```
 
@@ -355,6 +418,13 @@ git commit -m "feat: register the design-preview route and its Settings hub card
 No automated test for this page component — matches this codebase's established convention (zero
 `@testing-library` usage anywhere); verified manually in a running dev server per Step 3 below.
 
+**Accepted, documented rough edge:** the hex text field is deliberately uncontrolled (`key={tokens[t.key]}`
++ `defaultValue`, committing only on blur/Enter) so it never fights the color picker mid-drag. One
+consequence: if the operator types an invalid hex and presses Enter (which blurs without committing),
+the field's own displayed text stays whatever they typed until something else changes that token's
+committed value and forces a remount. This is a single-operator internal dev tool with no persistence
+and no serious cost to a stale display — not worth a parallel "draft" state system to eliminate.
+
 - [ ] **Step 1: Create the page**
 
 Create `app/dashboard/settings/design-preview/page.tsx`:
@@ -362,7 +432,7 @@ Create `app/dashboard/settings/design-preview/page.tsx`:
 ```tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   COLOR_TOKENS,
@@ -386,23 +456,39 @@ function buildDefaultState(): DesignPreviewTokenState {
   return state;
 }
 
+// Always reads document.documentElement's REAL, un-edited computed style -- never the preview
+// wrapper div's. The preview's own edits only ever touch React state and that one wrapper div's
+// inline style; they never write back to document.documentElement, so this function is immune to
+// however many edits the operator has made in the form. That's what makes "Reset to current" below
+// restore the real globals.css values, not whatever was last edited in the form.
+function readLiveTokens(prev: DesignPreviewTokenState): DesignPreviewTokenState {
+  const cs = getComputedStyle(document.documentElement);
+  const next = { ...prev };
+  for (const t of COLOR_TOKENS) {
+    const value = cs.getPropertyValue(t.cssVar).trim();
+    if (value) next[t.key] = value;
+  }
+  next.radius = String(parseRadiusPx(cs.getPropertyValue('--radius')));
+  return next;
+}
+
 export default function DesignPreviewPage() {
   const [tokens, setTokens] = useState<DesignPreviewTokenState>(buildDefaultState);
   const [copied, setCopied] = useState(false);
   const [clipboardUnavailable, setClipboardUnavailable] = useState(false);
+  const fallbackTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    const cs = getComputedStyle(document.documentElement);
-    setTokens(prev => {
-      const next = { ...prev };
-      for (const t of COLOR_TOKENS) {
-        const value = cs.getPropertyValue(t.cssVar).trim();
-        if (value) next[t.key] = value;
-      }
-      next.radius = String(parseRadiusPx(cs.getPropertyValue('--radius')));
-      return next;
-    });
+    setTokens(prev => readLiveTokens(prev));
   }, []);
+
+  useEffect(() => {
+    if (clipboardUnavailable) fallbackTextareaRef.current?.focus();
+  }, [clipboardUnavailable]);
+
+  function handleReset() {
+    setTokens(() => readLiveTokens(buildDefaultState()));
+  }
 
   function setColor(key: ColorTokenKey, value: string) {
     setTokens(prev => ({ ...prev, [key]: value }));
@@ -467,12 +553,14 @@ export default function DesignPreviewPage() {
             <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <input
                 type="color"
+                aria-label={t.label}
                 value={isValidHex(tokens[t.key]) ? tokens[t.key] : '#000000'}
                 onChange={e => setColor(t.key, e.target.value)}
               />
               <input
                 key={tokens[t.key]}
                 type="text"
+                aria-label={`${t.label} (hex)`}
                 defaultValue={tokens[t.key]}
                 onBlur={e => { if (isValidHex(e.target.value)) setColor(t.key, e.target.value); }}
                 onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
@@ -486,8 +574,10 @@ export default function DesignPreviewPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <input
               type="number"
+              aria-label="Radius (px)"
               value={tokens.radius}
               onChange={e => setTokens(prev => ({ ...prev, radius: e.target.value }))}
+              onBlur={() => setTokens(prev => ({ ...prev, radius: String(parseRadiusPx(prev.radius)) }))}
               style={{ width: 90 }}
             />
             <span style={{ fontSize: 12, color: 'var(--ink-dim)' }}>Radius (px)</span>
@@ -496,7 +586,7 @@ export default function DesignPreviewPage() {
           <h2 className="frame-label" style={{ marginTop: 24, marginBottom: 12 }}>Typography</h2>
           {FONT_TOKENS.map(t => (
             <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <select value={tokens[t.key]} onChange={e => setFont(t.key, e.target.value)}>
+              <select aria-label={t.label} value={tokens[t.key]} onChange={e => setFont(t.key, e.target.value)}>
                 {FONT_OPTIONS.map(opt => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -505,9 +595,14 @@ export default function DesignPreviewPage() {
             </div>
           ))}
 
-          <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={handleCopy}>
-            {copied ? 'Copied!' : 'Copy CSS'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={handleCopy}>
+              {copied ? 'Copied!' : 'Copy CSS'}
+            </button>
+            <button className="btn" onClick={handleReset}>
+              Reset to current
+            </button>
+          </div>
 
           {clipboardUnavailable && (
             <div style={{ marginTop: 12 }}>
@@ -516,6 +611,7 @@ export default function DesignPreviewPage() {
                 copy it manually:
               </p>
               <textarea
+                ref={fallbackTextareaRef}
                 readOnly
                 value={cssText}
                 onFocus={e => e.target.select()}
@@ -610,6 +706,10 @@ Run: `npm run dev`. Log in, navigate to Settings → Design Preview. Confirm:
   "IBM Plex Mono" makes the mockup's paragraph text monospace).
 - Clicking "Copy CSS" shows "Copied!" briefly; pasting the clipboard contents somewhere shows a
   `:root { ... }` block with all 20 tokens in the documented order.
+- After making several edits, clicking "Reset to current" reverts every color and the radius back to
+  `globals.css`'s real live values (and the 3 font dropdowns back to Sentient/Satoshi/Plex Mono).
+- Clearing the radius field and clicking elsewhere (blur) snaps the field back to `7` rather than
+  staying empty, while still never producing invalid CSS in the meantime.
 - The rest of the real dashboard (the actual sidebar, the actual page chrome outside the mockup panel)
   is completely unaffected by any of the above edits.
 
