@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
 export interface CurrentUser {
   id: string;
@@ -9,6 +10,7 @@ export interface CurrentUser {
 }
 
 export function useCurrentUser() {
+  const pathname = usePathname();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,7 +32,7 @@ export function useCurrentUser() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [pathname]);
 
   return { user, loading };
 }
