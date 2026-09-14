@@ -58,6 +58,19 @@ describe('MockComponentGenerator', () => {
     await expect(generator.generate('a primary button', 'style-1', undefined, undefined, undefined, undefined, providerOverride))
       .rejects.toThrow(/mock generator is active/);
   });
+
+  it('patchElement returns the input html unchanged with null cssDeclarations', async () => {
+    const generator = new MockComponentGenerator();
+    const result = await generator.patchElement('<button>old</button>', 'make it new', 'color: red;', 'style-1');
+    expect(result).toEqual({ html: '<button>old</button>', cssDeclarations: null });
+  });
+
+  it('patchElement throws when given a providerOverride (mock generator cannot honor an ollama request)', async () => {
+    const generator = new MockComponentGenerator();
+    const providerOverride: OllamaProviderOverride = { type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b' };
+    await expect(generator.patchElement('<button>old</button>', 'make it new', null, 'style-1', undefined, providerOverride))
+      .rejects.toThrow(/mock generator is active/);
+  });
 });
 
 describe('ClaudeApiComponentGenerator', () => {
@@ -85,5 +98,16 @@ describe('ClaudeApiComponentGenerator', () => {
     const filePath = path.join(tempRoot, 'storage', 'components', result.path);
     const content = await fsPromises.readFile(filePath, 'utf-8');
     expect(content).toMatch(/data-gf-id="\d+"/);
+  });
+
+  it('patchElement calls callOllamaTool instead of callClaudeTool when a providerOverride is given', async () => {
+    vi.spyOn(styleService, 'getById').mockResolvedValueOnce(null);
+    (callOllamaTool as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ html: '<button>Go</button>', cssDeclarations: 'color: blue;' });
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement('<button>old</button>', 'say Go', null, 'style-1', undefined, {
+      type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
+    });
+    expect(callOllamaTool).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'emit_element_patch' }));
+    expect(result).toEqual({ html: '<button>Go</button>', cssDeclarations: 'color: blue;' });
   });
 });

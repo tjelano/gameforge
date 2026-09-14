@@ -207,6 +207,9 @@ describe('ClaudeApiComponentGenerator.patchElement', () => {
       style.id,
     );
 
+    // 'ok' only appears in the mocked AI response, not the input element ('old') --
+    // proves this is the (sanitized) AI response, not the input passed through unchanged.
+    expect(result.html).toContain('ok');
     expect(result.html).not.toContain('script');
   });
 

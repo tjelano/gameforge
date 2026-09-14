@@ -25,7 +25,10 @@ export interface GeneratedComponent {
 
 export interface PatchedElement {
   html: string; // replacement outerHTML fragment, sanitized
-  cssDeclarations: string | null; // raw declaration list (no selector), sanitized as `.x{...}` internally then unwrapped, or null if no style change requested
+  cssDeclarations: string | null; // raw, UNSANITIZED declaration list (no selector) — the caller is
+    // responsible for wrapping these in a real selector and running sanitizeComponentCss on the
+    // result before using them; sanitizeComponentCss needs real CSS syntax to parse, which a bare
+    // declaration list isn't, so that step can't happen here
 }
 
 export interface ComponentGenerator {
