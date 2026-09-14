@@ -227,4 +227,40 @@ describe('ClaudeApiComponentGenerator.patchElement', () => {
 
     expect(result.cssDeclarations).toBeNull();
   });
+
+  it('parses successfully and returns null when the tool response has an explicit cssDeclarations: null', async () => {
+    // LLM tool-calling responses commonly emit an explicit JSON null for an omitted-in-spirit
+    // field rather than leaving the key out entirely -- z.string().optional() rejects that
+    // (only undefined passes), so this must not throw.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({ html: '<button>ok</button>', cssDeclarations: null }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button>old</button>',
+      'just change the text',
+      null,
+      style.id,
+    );
+
+    expect(result.cssDeclarations).toBeNull();
+  });
+
+  it('normalizes a whitespace-only cssDeclarations to null', async () => {
+    // An empty/whitespace-only string must not survive as a non-null value: the caller
+    // (componentPatchService) treats non-null as "wrap and apply", which would silently
+    // replace any existing per-element CSS rule with an empty one.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({ html: '<button>ok</button>', cssDeclarations: '   ' }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button>old</button>',
+      'just change the text',
+      null,
+      style.id,
+    );
+
+    expect(result.cssDeclarations).toBeNull();
+  });
 });

@@ -176,10 +176,10 @@ Respond by calling the emit_element_patch tool with the element's complete repla
           truncatedMessage: 'the element patch could not be generated',
         });
 
-    const raw = z.object({ html: z.string(), cssDeclarations: z.string().optional() }).parse(toolInput);
+    const raw = z.object({ html: z.string(), cssDeclarations: z.string().nullish() }).parse(toolInput);
     return {
       html: sanitizeComponentHtml(raw.html),
-      cssDeclarations: raw.cssDeclarations ?? null,
+      cssDeclarations: raw.cssDeclarations?.trim() ? raw.cssDeclarations : null,
     };
   }
 }
@@ -216,7 +216,7 @@ export class MockComponentGenerator implements ComponentGenerator {
     if (_providerOverride) {
       throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
     }
-    return { html: elementOuterHtml, cssDeclarations: null };
+    return { html: sanitizeComponentHtml(elementOuterHtml), cssDeclarations: null };
   }
 }
 
