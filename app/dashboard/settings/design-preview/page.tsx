@@ -220,13 +220,18 @@ export default function DesignPreviewPage() {
             </div>
 
             <h1 className="page-title" style={{ fontSize: 22 }}>Preview heading</h1>
-            <p className="page-subtitle">A sample paragraph, styled by the tokens on the left.</p>
+            <p className="page-subtitle" style={{ fontFamily: tokens.fontBody }}>
+              A sample paragraph, styled by the tokens on the left.
+            </p>
 
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="stat-card-label">Active styles</div>
               <div className="stat-card-value">12</div>
             </div>
 
+            <h2 className="frame-label" style={{ marginBottom: 12, fontFamily: tokens.fontMono }}>
+              Quick actions
+            </h2>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               <button className="btn btn-primary">Primary</button>
               <button className="btn btn-keeper">Keeper</button>
@@ -236,14 +241,14 @@ export default function DesignPreviewPage() {
 
             <a className="settings-item" href="#" onClick={e => e.preventDefault()} style={{ marginBottom: 16 }}>
               <div>
-                <div>Example setting</div>
+                <div style={{ fontFamily: tokens.fontBody }}>Example setting</div>
                 <div className="settings-item-desc">A description line, for contrast.</div>
               </div>
               <span style={{ color: 'var(--ink-faint)' }}>&rarr;</span>
             </a>
 
             <div className="activity-row">
-              <div>Promoted &quot;a sample asset&quot;</div>
+              <div style={{ fontFamily: tokens.fontBody }}>Promoted &quot;a sample asset&quot;</div>
               <div className="activity-row-meta">just now</div>
             </div>
           </div>
