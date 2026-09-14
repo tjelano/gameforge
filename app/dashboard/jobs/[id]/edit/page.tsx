@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Job } from '@/lib/database/schema';
 import { parseThemeCss, type ThemeTokens } from '@/lib/services/themeTokens';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
+import { PreviewFrame } from '@/app/components/PreviewFrame';
 
 const FIELDS: { key: keyof ThemeTokens; label: string }[] = [
   { key: 'colorBackground', label: 'Background color' },
@@ -119,11 +120,12 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
       </p>
 
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-        <iframe
+        <PreviewFrame
           srcDoc={buildThemePreviewHtml(`/api/themes/${job.result_path}?v=${previewVersion}`)}
           title={`Theme preview: ${job.prompt}`}
-          sandbox=""
-          style={{ width: 480, height: 340, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}
+          width={480}
+          height={340}
+          border
         />
 
         <div className="card" style={{ flex: 1, minWidth: 280 }}>

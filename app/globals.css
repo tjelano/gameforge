@@ -475,3 +475,49 @@ select {
   font-size: 11px;
   margin-top: 2px;
 }
+
+/* --- Preview frame (fullscreen-able iframe previews) --- */
+
+.preview-frame-wrapper {
+  position: relative;
+}
+
+.preview-frame-fullscreen-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(10, 10, 10, 0.6);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.preview-frame-fullscreen-btn:hover {
+  background: rgba(10, 10, 10, 0.85);
+}
+
+.preview-frame-wrapper:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+/* !important: PreviewFrame sets scale/width/height as inline styles (React `style` prop),
+   which always beat a plain selector regardless of specificity — this is the only way a
+   stylesheet rule can still reset them when a scaled card thumbnail goes fullscreen. */
+.preview-frame-wrapper:fullscreen iframe {
+  transform: none !important;
+  width: 100% !important;
+  height: 100% !important;
+}

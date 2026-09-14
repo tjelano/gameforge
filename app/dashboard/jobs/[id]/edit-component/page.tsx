@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, use as usePromise } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Job } from '@/lib/database/schema';
 import { parseComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
+import { PreviewFrame } from '@/app/components/PreviewFrame';
 
 const DEBOUNCE_MS = 400;
 
@@ -102,11 +103,12 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
       </p>
 
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-        <iframe
+        <PreviewFrame
           src={`/api/components/${job.result_path}?styleId=${job.style_id}&v=${previewVersion}`}
           title={`Component preview: ${job.prompt}`}
-          sandbox=""
-          style={{ width: 480, height: 340, border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}
+          width={480}
+          height={340}
+          border
         />
 
         <div className="card" style={{ flex: 1, minWidth: 280 }}>

@@ -6,6 +6,7 @@ import type { Job } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { OLLAMA_NO_TOOL_CALL_ERROR_PREFIX } from '@/lib/services/ollamaToolCall';
+import { PreviewFrame } from '@/app/components/PreviewFrame';
 
 interface JobCardProps {
   job: Job;
@@ -81,18 +82,20 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, onRetryWithCorrect
         }}
       >
         {job.output_kind === 'theme' && job.result_path ? (
-          <iframe
+          <PreviewFrame
             srcDoc={buildThemePreviewHtml(`/api/themes/${job.result_path}`)}
             title={`Theme preview: ${job.prompt}`}
-            sandbox=""
-            style={{ width: 260, height: 180, border: 'none', transform: 'scale(0.28)', transformOrigin: 'top left' }}
+            width={260}
+            height={180}
+            scale={0.28}
           />
         ) : job.output_kind === 'component' && job.result_path ? (
-          <iframe
+          <PreviewFrame
             src={`/api/components/${job.result_path}?styleId=${job.style_id}`}
             title={`Component preview: ${job.prompt}`}
-            sandbox=""
-            style={{ width: 260, height: 180, border: 'none', transform: 'scale(0.28)', transformOrigin: 'top left' }}
+            width={260}
+            height={180}
+            scale={0.28}
           />
         ) : job.result_path ? (
           // eslint-disable-next-line @next/next/no-img-element
