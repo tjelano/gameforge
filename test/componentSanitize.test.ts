@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeComponentHtml, sanitizeComponentCss, COMPONENT_PREVIEW_CSP } from '@/lib/services/componentSanitize';
+import { sanitizeComponentHtml, sanitizeComponentCss, COMPONENT_PREVIEW_CSP, assignElementIds } from '@/lib/services/componentSanitize';
 
 describe('sanitizeComponentHtml', () => {
   it('strips a <script> tag entirely', () => {
@@ -181,5 +181,53 @@ describe('COMPONENT_PREVIEW_CSP', () => {
 
   it('restricts img-src to data: only', () => {
     expect(COMPONENT_PREVIEW_CSP).toMatch(/img-src data:;?$/);
+  });
+});
+
+describe('assignElementIds', () => {
+  it('assigns sequential ids in document order, full-write mode', () => {
+    const html = '<div><span>a</span><button>b</button></div>';
+    const result = assignElementIds(html);
+    expect(result).toContain('data-gf-id="1"');
+    expect(result).toContain('data-gf-id="2"');
+    expect(result).toContain('data-gf-id="3"');
+    // div gets 1, span gets 2, button gets 3 — outer-to-inner, then next sibling
+    const divMatch = result.match(/<div data-gf-id="(\d+)"/);
+    const spanMatch = result.match(/<span data-gf-id="(\d+)"/);
+    const buttonMatch = result.match(/<button data-gf-id="(\d+)"/);
+    expect(divMatch![1]).toBe('1');
+    expect(spanMatch![1]).toBe('2');
+    expect(buttonMatch![1]).toBe('3');
+  });
+
+  it('strips and reassigns any incoming data-gf-id in full-write mode — never trusts it', () => {
+    const html = '<div data-gf-id="999"><span data-gf-id="999">a</span></div>';
+    const result = assignElementIds(html);
+    expect(result).not.toContain('data-gf-id="999"');
+    // Two elements, two DIFFERENT fresh ids — not both left at 999
+    const ids = [...result.matchAll(/data-gf-id="(\d+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(['1', '2']);
+  });
+
+  it('preserveRootId mode: keeps the root id, reassigns every descendant from startAt', () => {
+    const fragment = '<button data-gf-id="stale"><span>ok</span></button>';
+    const result = assignElementIds(fragment, { preserveRootId: '7', startAt: 20 });
+    expect(result).toContain('data-gf-id="7"');
+    expect(result).toContain('data-gf-id="20"');
+    expect(result).not.toContain('data-gf-id="stale"');
+  });
+
+  it('preserveRootId mode: strips an id a descendant already carries, never trusts it', () => {
+    // Simulates the AI's returned fragment hallucinating/copying an id onto a child —
+    // must be stripped and reassigned, not passed through, per the spec's round-3 fix (N5).
+    const fragment = '<div data-gf-id="7"><span data-gf-id="3">already tagged</span></div>';
+    const result = assignElementIds(fragment, { preserveRootId: '7', startAt: 50 });
+    expect(result).toContain('data-gf-id="7"');
+    expect(result).not.toContain('data-gf-id="3"');
+    expect(result).toContain('data-gf-id="50"');
+  });
+
+  it('preserveRootId mode throws if startAt is omitted', () => {
+    expect(() => assignElementIds('<div></div>', { preserveRootId: '1' })).toThrow();
   });
 });

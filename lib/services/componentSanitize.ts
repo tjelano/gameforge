@@ -1,6 +1,9 @@
 import sanitizeHtml from 'sanitize-html';
 import postcss from 'postcss';
 import valueParser from 'postcss-value-parser';
+import { parseDocument, DomUtils } from 'htmlparser2';
+import render from 'dom-serializer';
+import type { Element as DomElement } from 'domhandler';
 
 /**
  * Required security invariant of the component-preview sandbox relaxation
@@ -31,7 +34,7 @@ const ALLOWED_TAGS = [
 ];
 
 const ALLOWED_ATTRIBUTES: sanitizeHtml.IOptions['allowedAttributes'] = {
-  '*': ['class', 'id'],
+  '*': ['class', 'id', 'data-gf-id'],
   a: ['href', 'target', 'rel'],
   button: ['type', 'disabled'],
   input: ['type', 'name', 'placeholder', 'value', 'required'],
@@ -115,4 +118,69 @@ export function sanitizeComponentCss(css: string): string {
   });
 
   return css;
+}
+
+function isElement(node: unknown): node is DomElement {
+  return !!node && typeof node === 'object' && (node as { type?: string }).type === 'tag';
+}
+
+function walkElementsInDocumentOrder(root: DomElement): DomElement[] {
+  const out: DomElement[] = [];
+  function visit(node: DomElement) {
+    out.push(node);
+    for (const child of node.children) {
+      if (isElement(child)) visit(child);
+    }
+  }
+  visit(root);
+  return out;
+}
+
+/**
+ * Assigns permanent `data-gf-id` attributes to every element in an HTML fragment.
+ *
+ * Full-write mode (no `opts.preserveRootId`): strips any incoming `data-gf-id` from every
+ * element and renumbers the whole fragment from 1, in document order. Used by the component
+ * write paths (generate, manual edit, reset) — never trusts an id an AI response or hand-edit
+ * happened to already carry.
+ *
+ * Patch mode (`opts.preserveRootId` set): the fragment's single root element keeps that exact
+ * id; every other element in the fragment has any incoming `data-gf-id` stripped and gets a
+ * fresh one starting at `opts.startAt` (required — the caller must pass
+ * `max(existing data-gf-id in the full stored document) + 1`, so ids stay unique across the
+ * whole document, not just within this fragment).
+ */
+export function assignElementIds(html: string, opts?: { preserveRootId?: string; startAt?: number }): string {
+  if (opts?.preserveRootId !== undefined && opts.startAt === undefined) {
+    throw new Error('assignElementIds: startAt is required when preserveRootId is set.');
+  }
+
+  const dom = parseDocument(html);
+  const roots = dom.children.filter(isElement);
+
+  if (opts?.preserveRootId !== undefined) {
+    const [root, ...rest] = roots;
+    if (!root || rest.length > 0) {
+      throw new Error('assignElementIds: preserveRootId mode requires exactly one root element.');
+    }
+    root.attribs['data-gf-id'] = opts.preserveRootId;
+    let counter = opts.startAt!;
+    for (const el of walkElementsInDocumentOrder(root)) {
+      if (el === root) continue;
+      delete el.attribs['data-gf-id'];
+      el.attribs['data-gf-id'] = String(counter);
+      counter += 1;
+    }
+  } else {
+    let counter = 1;
+    for (const root of roots) {
+      for (const el of walkElementsInDocumentOrder(root)) {
+        delete el.attribs['data-gf-id'];
+        el.attribs['data-gf-id'] = String(counter);
+        counter += 1;
+      }
+    }
+  }
+
+  return render(dom);
 }
