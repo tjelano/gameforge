@@ -128,7 +128,7 @@ describe('worker.ts routes theme jobs to ThemeGenerator', () => {
 
   it('passes a providerOverride to the component generator when the job options request ollama', async () => {
     const generateSpy = vi.fn().mockResolvedValue({ path: 'component-x.html', prompt: 'a button' });
-    vi.spyOn(await import('@/lib/services/ComponentGenerator'), 'getComponentGenerator').mockReturnValue({ generate: generateSpy });
+    vi.spyOn(await import('@/lib/services/ComponentGenerator'), 'getComponentGenerator').mockReturnValue({ generate: generateSpy, patchElement: vi.fn() });
 
     const job = {
       id: 'job-2', style_id: 'style-1', prompt: 'a button', output_kind: 'component',
