@@ -97,22 +97,29 @@ select {
 .rail-link {
   display: block;
   padding: 9px 12px;
-  border-radius: var(--radius);
+  border-left: 2px solid transparent;
   color: var(--ink-dim);
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .rail-link:hover {
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
 }
 
 .rail-link[data-active='true'] {
-  background: var(--surface-raised);
-  color: var(--accent);
+  background: rgba(255, 79, 0, 0.08);
+  color: var(--accent-bright);
+  border-left-color: var(--accent);
+}
+
+.rail-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 4px;
 }
 
 .main {
