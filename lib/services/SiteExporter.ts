@@ -86,7 +86,24 @@ async function tryRecoverStaleLock(lockDir: string): Promise<boolean> {
     // this branch was added), not just inferred from docs. Both codes mean
     // the same thing here - someone else's rename already won - so back off
     // normally instead of surfacing an unhandled error from a benign race.
-    if (e?.code === 'ENOENT' || e?.code === 'EPERM') return false;
+    //
+    // ENOTEMPTY is a third shape of the same underlying race, hit for a
+    // different reason: garbageDir is unique per OS process
+    // (`${lockDir}.stale.${process.pid}`) but NOT per recovery attempt, and
+    // this function's cleanup of garbageDir is fire-and-forget (never
+    // awaited). Two contenders running in the SAME process (same pid) can
+    // each win a *separate* recovery of the same lockDir path in
+    // succession - the second contender's rename then targets the exact
+    // garbageDir the first contender already claimed and is still in the
+    // middle of (unawaited) cleaning up, and the OS refuses to rename into
+    // a non-empty directory. Confirmed via a real, twice-reproduced CI
+    // failure on GitHub Actions' Linux runner on an unrelated PR (#30) -
+    // byte-identical ENOTEMPTY error both times, not just reasoned about -
+    // rather than locally, since a single test process only hits this
+    // same-pid path on CI's scheduling. Same-as-EPERM/ENOENT conclusion
+    // applies: the loser's own source directory is untouched by a rejected
+    // rename, so backing off normally cannot corrupt or steal anything.
+    if (e?.code === 'ENOENT' || e?.code === 'EPERM' || e?.code === 'ENOTEMPTY') return false;
     console.error(`Failed to claim stale export lock ${lockDir}:`, e);
     throw e;
   }
