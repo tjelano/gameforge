@@ -36,6 +36,16 @@ describe('findElementByDataGfId', () => {
     expect(result.found).toBe(true);
     if (result.found) expect(result.classes).toEqual(['btn', 'primary']);
   });
+
+  it('finds an element nested multiple levels deep', () => {
+    const html = '<div><section><article><span data-gf-id="7">deep content</span></article></section></div>';
+    const result = findElementByDataGfId(html, '7');
+    expect(result.found).toBe(true);
+    if (result.found) {
+      expect(result.outerHtml).toContain('deep content');
+      expect(result.outerHtml).toContain('data-gf-id="7"');
+    }
+  });
 });
 
 describe('replaceElementByDataGfId', () => {
@@ -54,6 +64,25 @@ describe('replaceElementByDataGfId', () => {
   it('throws if the id is ambiguous', () => {
     const html = '<div data-gf-id="1"></div><span data-gf-id="1"></span>';
     expect(() => replaceElementByDataGfId(html, '1', '<div></div>')).toThrow();
+  });
+
+  it('throws if replacement HTML contains multiple root elements', () => {
+    const html = '<div><span data-gf-id="1">target</span></div>';
+    expect(() => replaceElementByDataGfId(html, '1', '<span>root1</span><span>root2</span>')).toThrow();
+  });
+
+  it('throws if replacement HTML contains zero root elements (empty or text-only)', () => {
+    const html = '<div><span data-gf-id="1">target</span></div>';
+    expect(() => replaceElementByDataGfId(html, '1', '')).toThrow();
+  });
+
+  it('replaces an element nested multiple levels deep, preserving structure', () => {
+    const html = '<div><section><article><span data-gf-id="5">old deep</span></article></section></div>';
+    const result = replaceElementByDataGfId(html, '5', '<span data-gf-id="5">new deep</span>');
+    expect(result).toContain('new deep');
+    expect(result).not.toContain('old deep');
+    expect(result).toContain('<article>');
+    expect(result).toContain('<section>');
   });
 });
 
