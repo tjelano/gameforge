@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { sanitizeComponentHtml, sanitizeComponentCss, COMPONENT_PREVIEW_CSP } from '@/lib/services/componentSanitize';
 
 describe('sanitizeComponentHtml', () => {
   it('strips a <script> tag entirely', () => {
@@ -164,5 +164,22 @@ describe('sanitizeComponentCss', () => {
 
   it('rejects CSS containing a </body breakout sequence', () => {
     expect(() => sanitizeComponentCss('.a { content: "</body>hijack"; }')).toThrow();
+  });
+});
+
+describe('COMPONENT_PREVIEW_CSP', () => {
+  it('is the exact pinned literal — not just internally self-consistent', () => {
+    // Pinned literal, not "matches itself" — a regression that weakens this string
+    // (e.g. adding a script-src, loosening img-src) must fail this test even though
+    // every other reference to the constant would still trivially match it.
+    expect(COMPONENT_PREVIEW_CSP).toBe("default-src 'none'; style-src 'unsafe-inline'; img-src data:;");
+  });
+
+  it('has no script-src override (relies on default-src none)', () => {
+    expect(COMPONENT_PREVIEW_CSP).not.toContain('script-src');
+  });
+
+  it('restricts img-src to data: only', () => {
+    expect(COMPONENT_PREVIEW_CSP).toMatch(/img-src data:;?$/);
   });
 });

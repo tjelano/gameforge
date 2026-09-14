@@ -2,6 +2,15 @@ import sanitizeHtml from 'sanitize-html';
 import postcss from 'postcss';
 import valueParser from 'postcss-value-parser';
 
+/**
+ * Required security invariant of the component-preview sandbox relaxation
+ * (sandbox="allow-same-origin") — see docs/superpowers/specs/2026-09-14-element-specific-patching-design.md.
+ * `script-src` is deliberately absent and falls back to `default-src 'none'`, blocking script
+ * execution even if a future change mistakenly adds `allow-scripts` to the sandbox attribute.
+ * Never weaken this without updating that spec's security reasoning first.
+ */
+export const COMPONENT_PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:;";
+
 // A deliberately narrow allowlist for real website UI pieces (buttons,
 // cards, nav bars, forms) — see docs/superpowers/specs/2026-09-07-
 // component-generation-design.md's security note for why sanitization,
