@@ -4,7 +4,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { assetService } from '@/lib/services/AssetService';
 import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
 import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
-import { parseComponentHtml, combineComponentHtml } from '@/lib/services/componentDocument';
+import { parseComponentHtml, combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
 import {
   findElementByDataGfId,
@@ -64,30 +64,45 @@ export async function applyElementPatch(params: {
 }): Promise<PatchResult | { ok: false; error: PatchError }> {
   const filePath = path.join(getProjectRoot(), 'storage', 'components', params.filename);
 
-  async function readStored(): Promise<string | null> {
+  // Reads the stored file, verifies it against the client-sent revision hash, and parses it into
+  // {html, css} tokens — the exact three steps both the unlocked pre-check and the locked re-check
+  // need, in the same order, so there's one place to get the error-mapping right rather than two.
+  // Neither a non-ENOENT fs error (EACCES, EBUSY — plausible on Windows) nor a parse failure is
+  // allowed to throw out of this function: a component file on disk isn't guaranteed to still be
+  // combineComponentHtml's shape (GameForge's reverse-sync feature, PR #22, can overwrite it with
+  // hand-edited content that's missing a <style> or <body> section), and every error path here
+  // must return a PatchError, never an unhandled rejection reaching the route handler.
+  async function readVerifiedTokens(): Promise<
+    { ok: true; tokens: ComponentTokens } | { ok: false; error: PatchError }
+  > {
+    let doc: string | null;
     try {
-      return await fsPromises.readFile(filePath, 'utf-8');
+      doc = await fsPromises.readFile(filePath, 'utf-8');
     } catch (e: any) {
-      if (e.code === 'ENOENT') return null;
-      throw e;
+      if (e.code === 'ENOENT') return { ok: false, error: { code: 'COMPONENT_NOT_FOUND' } };
+      return { ok: false, error: { code: 'WRITE_FAILED', message: e?.message ?? 'Failed to read the stored component file.' } };
+    }
+    if (hashDocument(doc) !== params.documentHash) {
+      return { ok: false, error: { code: 'ELEMENT_CHANGED' } };
+    }
+    try {
+      return { ok: true, tokens: parseComponentHtml(doc) };
+    } catch (e: any) {
+      return { ok: false, error: { code: 'WRITE_FAILED', message: e?.message ?? 'Stored component file is not a valid component document.' } };
     }
   }
 
   // Phase 1: cheap, unlocked pre-check — fail fast on a stale selection or a missing element
   // before spending an AI call. Not a replacement for the locked re-check below (the document can
   // still change during the AI call itself), just an optimization to avoid wasting inference.
-  const preCheckDoc = await readStored();
-  if (preCheckDoc === null) return { ok: false, error: { code: 'COMPONENT_NOT_FOUND' } };
-  if (hashDocument(preCheckDoc) !== params.documentHash) {
-    return { ok: false, error: { code: 'ELEMENT_CHANGED' } };
-  }
+  const preCheck = await readVerifiedTokens();
+  if (!preCheck.ok) return preCheck;
 
-  const preCheckTokens = parseComponentHtml(preCheckDoc);
-  const located = findElementByDataGfId(preCheckTokens.html, params.dataGfId);
+  const located = findElementByDataGfId(preCheck.tokens.html, params.dataGfId);
   if (!located.found) return { ok: false, error: { code: 'ELEMENT_NOT_FOUND' } };
 
   const gfClass = `gf-${params.dataGfId}`;
-  const currentDeclarations = extractDeclarationsForClass(preCheckTokens.css, gfClass);
+  const currentDeclarations = extractDeclarationsForClass(preCheck.tokens.css, gfClass);
 
   // AI call — deliberately outside the mutex; nothing here touches the file.
   let patched;
@@ -106,13 +121,10 @@ export async function applyElementPatch(params: {
 
   return withFileLock(params.filename, async () => {
     // Phase 2: locked re-check — the document may have changed during the AI call.
-    const currentDoc = await readStored();
-    if (currentDoc === null) return { ok: false, error: { code: 'COMPONENT_NOT_FOUND' } };
-    if (hashDocument(currentDoc) !== params.documentHash) {
-      return { ok: false, error: { code: 'ELEMENT_CHANGED' } };
-    }
+    const reCheck = await readVerifiedTokens();
+    if (!reCheck.ok) return reCheck;
+    const tokens = reCheck.tokens;
 
-    const tokens = parseComponentHtml(currentDoc);
     const reLocated = findElementByDataGfId(tokens.html, params.dataGfId);
     if (!reLocated.found) return { ok: false, error: { code: 'ELEMENT_NOT_FOUND' } };
 

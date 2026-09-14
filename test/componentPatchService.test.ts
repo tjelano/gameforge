@@ -45,8 +45,15 @@ async function mockPatchElement(result: PatchedElement | ((...args: any[]) => Pr
   return patchElement;
 }
 
-/** Seeds storage/components/<filename> with a single-button fixture (data-gf-id="1", the only id in the doc) and a matching asset row. Returns the fixture's initial document string, hash, and ids needed to call applyElementPatch. */
-async function seedFixture(filename = 'fixture.html'): Promise<{
+/**
+ * Seeds storage/components/<filename> with a button fixture (data-gf-id="1") and a matching asset
+ * row. Returns the fixture's initial document string, hash, and ids needed to call
+ * applyElementPatch. `extraBodyHtml` lets a test add a second, untouched sibling element carrying
+ * a HIGHER data-gf-id than the one being patched -- needed to distinguish "seeded from the max id
+ * across the whole document" from "seeded from the max id in the patched fragment alone", which
+ * are indistinguishable when the fixture only ever contains the one id being patched.
+ */
+async function seedFixture(filename = 'fixture.html', extraBodyHtml = ''): Promise<{
   filePath: string;
   document: string;
   documentHash: string;
@@ -55,7 +62,7 @@ async function seedFixture(filename = 'fixture.html'): Promise<{
 }> {
   const style = await styleService.create({ name: `style-${randomUUID()}`, createdBy: 'user-1', parameters: '{}' });
   const document = combineComponentHtml({
-    html: '<button data-gf-id="1" class="btn">Buy now</button>',
+    html: `<button data-gf-id="1" class="btn">Buy now</button>${extraBodyHtml}`,
     css: '.btn { color: blue; }',
   });
   const filePath = path.join(tempRoot, 'storage', 'components', filename);
@@ -152,6 +159,31 @@ describe('applyElementPatch', () => {
     }
   });
 
+  it('seeds new descendant ids from the max data-gf-id across the WHOLE document, not just the patched fragment', async () => {
+    // Regression guard for the headline risk this task exists to prevent: with only one id in the
+    // fixture, "max over the whole doc" and "max over the patched fragment alone" both equal 1, so
+    // a regression to fragment-scoped numbering would be invisible to every other test here. A
+    // second, untouched sibling carrying a HIGHER id than the one being patched makes the two
+    // computations diverge (2 vs. 6) so a regression is actually observable.
+    const fixture = await seedFixture('fixture.html', '<p data-gf-id="5">other</p>');
+    await mockPatchElement({
+      html: '<button data-gf-id="1">Buy now <span>New!</span></button>',
+      cssDeclarations: null,
+    });
+
+    const result = await applyElementPatch(baseParams(fixture));
+
+    expect(result.ok).toBe(true);
+    const stored = await fsPromises.readFile(fixture.filePath, 'utf-8');
+    expect(stored).toContain('data-gf-id="1"'); // target unchanged
+    expect(stored).toContain('data-gf-id="5"'); // untouched sibling unchanged
+    expect(stored).toContain('data-gf-id="6"'); // seeded from doc-wide max (5) + 1, not fragment-only max (1) + 1
+    expect(stored).not.toContain('data-gf-id="2"'); // what fragment-scoped (and therefore colliding) numbering would wrongly produce
+    if (result.ok) {
+      expect(result.idMap.newDescendantIds).toEqual(['6']);
+    }
+  });
+
   it('replaces (not accumulates) a second patch to the same element', async () => {
     const fixture = await seedFixture();
     await mockPatchElement({ html: '<button data-gf-id="1">Buy now</button>', cssDeclarations: 'color: blue;' });
@@ -237,5 +269,24 @@ describe('applyElementPatch', () => {
     // The file is well-formed (parses cleanly), proving no interleaved/torn write occurred.
     expect(stored).toContain('data-gf-id="1"');
     expect(stored.match(/data-gf-id="1"/g)?.length).toBe(1);
+  });
+
+  it('returns a PatchError instead of throwing when the stored file is not a valid component document', async () => {
+    // GameForge's reverse-sync feature (PR #22) can overwrite a stored component file with
+    // hand-edited content that no longer has the <style>/<body> markers parseComponentHtml relies
+    // on -- this must surface as a PatchError (an unhandled rejection reaching the route handler
+    // is exactly what this function's contract prohibits), at both the unlocked pre-check and the
+    // locked re-check. documentHash is irrelevant here on purpose: it's computed over whatever
+    // bytes are actually on disk, so a malformed file still "matches" its own hash, and the
+    // ELEMENT_CHANGED check can't be what catches this -- only the parseComponentHtml guard can.
+    const fixture = await seedFixture();
+    const malformed = '<html><body>no style tag, not a valid component document</body></html>';
+    await fsPromises.writeFile(fixture.filePath, malformed);
+    await mockPatchElement({ html: '<button data-gf-id="1">Buy now</button>', cssDeclarations: null });
+
+    const result = await applyElementPatch(baseParams(fixture, { documentHash: hashDocument(malformed) }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('WRITE_FAILED');
   });
 });
