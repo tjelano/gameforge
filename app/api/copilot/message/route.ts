@@ -33,7 +33,14 @@ export async function POST(req: NextRequest) {
 
     const input = MessageSchema.parse(await req.json());
 
+    // Nothing is persisted until the provider call below succeeds -- a
+    // conversation row and/or a dangling, unanswered user message would
+    // otherwise survive a provider failure with no way to clean it up (no
+    // delete feature), and for Ollama a dangling message gets replayed on
+    // every retry, which can brick the conversation once replayed history
+    // exceeds num_ctx.
     let conversationId = input.conversationId;
+    let priorMessages: Awaited<ReturnType<typeof copilotMessageService.listByConversation>> = [];
     if (conversationId) {
       const existing = await copilotConversationService.getById(conversationId);
       if (!existing) {
@@ -42,19 +49,17 @@ export async function POST(req: NextRequest) {
       if (existing.created_by !== user.id) {
         return NextResponse.json({ success: false, error: 'You do not have access to this conversation' }, { status: 403 });
       }
-    } else {
-      const title = input.text.length > TITLE_MAX_LENGTH ? `${input.text.slice(0, TITLE_MAX_LENGTH)}…` : input.text;
-      const created = await copilotConversationService.create({ title, createdBy: user.id });
-      conversationId = created.id;
+      priorMessages = await copilotMessageService.listByConversation(conversationId);
     }
-
-    const priorMessages = await copilotMessageService.listByConversation(conversationId);
-    await copilotMessageService.append({ conversationId, role: 'user', content: input.text });
 
     const tool = buildNavigateTool();
     const systemPrompt = await buildCopilotSystemPrompt();
     const turnMessages = [
-      ...priorMessages.map(m => ({ role: m.role, content: m.content })),
+      // A stored assistant message can be an empty string when a prior turn
+      // was tool-call-only (see test/ollamaToolCall.test.ts) -- replaying an
+      // empty content block back to a provider (Anthropic in particular)
+      // can get rejected, so drop blanks before they go back out.
+      ...priorMessages.filter(m => m.content.trim() !== '').map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: input.text },
     ];
 
@@ -116,6 +121,14 @@ export async function POST(req: NextRequest) {
       // An out-of-enum or malformed path is silently dropped -- the text reply still stands.
     }
 
+    // Only now, after a successful provider call, do we touch the database.
+    if (!conversationId) {
+      const title = input.text.length > TITLE_MAX_LENGTH ? `${input.text.slice(0, TITLE_MAX_LENGTH)}…` : input.text;
+      const created = await copilotConversationService.create({ title, createdBy: user.id });
+      conversationId = created.id;
+    }
+
+    await copilotMessageService.append({ conversationId, role: 'user', content: input.text });
     await copilotMessageService.append({
       conversationId,
       role: 'assistant',

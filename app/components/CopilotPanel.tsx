@@ -21,7 +21,7 @@ interface ConversationSummary {
 export function CopilotPanel() {
   const { user } = useCurrentUser();
   const router = useRouter();
-  const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
+  const { models: ollamaModels, host: ollamaHost } = useOllamaModels(!!user);
 
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'chat' | 'history'>('chat');

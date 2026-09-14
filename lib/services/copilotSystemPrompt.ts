@@ -3,7 +3,7 @@ import path from 'path';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getProjectContextSummary } from '@/lib/services/projectContext';
 
-const ESCALATION_INSTRUCTION = 'If the knowledge doc above and the live project state below don\'t clearly answer the question, say so plainly and ask a clarifying question instead of guessing -- never invent a GameForge feature, setting, or path that isn\'t described above.';
+const ESCALATION_INSTRUCTION = 'If the knowledge doc above and the live project state above don\'t clearly answer the question, say so plainly and ask a clarifying question instead of guessing -- never invent a GameForge feature, setting, or path that isn\'t described above.';
 
 /**
  * Assembles the copilot's full system prompt fresh on every call (the live
