@@ -75,6 +75,48 @@ describe('inspectFrame', () => {
     expect(Object.keys(info!).sort()).toEqual(['classes', 'dataGfId', 'id', 'rect', 'tagName']);
   });
 
+  it('getElementAt resolves to the nearest data-gf-id ancestor, not the element literally hit', () => {
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write(`
+      <html><body>
+        <button class="btn primary" data-gf-id="1"><span class="label">Go</span></button>
+      </body></html>
+    `);
+    iframe.contentDocument!.close();
+    installElementFromPointPolyfill(iframe.contentDocument!);
+    const btn = iframe.contentDocument!.querySelector('button')!;
+    const span = iframe.contentDocument!.querySelector('span')!;
+    // The span fills its button on screen — jsdom has no layout (see file
+    // header), so both rects are supplied explicitly, overlapping.
+    btn.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    span.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    // The polyfill's reverse document-order scan hits the span first (it's
+    // later in the tree than its button), exercising the ancestor walk.
+    const info = getElementAt(iframe, 110, 60);
+    expect(info).not.toBeNull();
+    expect(info!.tagName).toBe('button');
+    expect(info!.classes).toEqual(['btn', 'primary']);
+    expect(info!.dataGfId).toBe('1');
+  });
+
+  it('getElementAt falls back to the hovered element when no ancestor has data-gf-id (hand-edited/trusted content)', () => {
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write(`
+      <html><body>
+        <div class="trusted-content"><p class="greeting">Hello</p></div>
+      </body></html>
+    `);
+    iframe.contentDocument!.close();
+    installElementFromPointPolyfill(iframe.contentDocument!);
+    const p = iframe.contentDocument!.querySelector('p')!;
+    p.getBoundingClientRect = () => new DOMRect(0, 0, 50, 20);
+    const info = getElementAt(iframe, 5, 5);
+    expect(info).not.toBeNull();
+    expect(info!.tagName).toBe('p');
+    expect(info!.classes).toEqual(['greeting']);
+    expect(info!.dataGfId).toBeNull();
+  });
+
   it('getRevisionHash reads the gf-rev meta tag', () => {
     expect(getRevisionHash(iframe)).toBe('abc123def');
   });

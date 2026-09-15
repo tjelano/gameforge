@@ -18,12 +18,22 @@ export function getElementAt(frame: HTMLIFrameElement, clientX: number, clientY:
   if (!doc) return null;
   const el = doc.elementFromPoint(clientX, clientY);
   if (!el || !(el instanceof doc.defaultView!.HTMLElement)) return null;
-  const rect = el.getBoundingClientRect();
+  // A click/hover can land on an inline text/pseudo-content element nested inside the element
+  // that actually carries data-gf-id (e.g. a <span> inside <button data-gf-id="1">Go</button>).
+  // The "selection" IS the data-gf-id'd ancestor as a whole — not whichever inner element the
+  // point happened to hit — so the highlight outlines that whole element and the patch panel
+  // describes that element, not an inner span. closest() is inclusive of el itself. If no
+  // ancestor (including el) carries data-gf-id at all — hand-edited/trusted content, which never
+  // gets ids assigned on any write path — fall back to the hovered element itself so select mode
+  // still has something to show (dataGfId: null signals "unselectable" to the caller, rather than
+  // returning null and showing nothing at all).
+  const target = el.closest<HTMLElement>('[data-gf-id]') ?? el;
+  const rect = target.getBoundingClientRect();
   return {
-    tagName: el.tagName.toLowerCase(),
-    classes: Array.from(el.classList),
-    id: el.id || null,
-    dataGfId: el.getAttribute('data-gf-id'),
+    tagName: target.tagName.toLowerCase(),
+    classes: Array.from(target.classList),
+    id: target.id || null,
+    dataGfId: target.getAttribute('data-gf-id'),
     rect,
   };
 }
