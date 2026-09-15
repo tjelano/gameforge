@@ -570,3 +570,66 @@ select {
   border-color: var(--accent);
   color: var(--accent-ink);
 }
+
+.element-patch-panel {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  right: 4px;
+  z-index: 2;
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.element-patch-panel-target {
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.element-patch-panel textarea {
+  width: 100%;
+  min-height: 48px;
+  font-size: 12px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.element-patch-panel-disabled {
+  font-size: 12px;
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+.element-patch-panel-error {
+  font-size: 11px;
+  color: #ff6b6b;
+}
+
+.element-patch-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.element-patch-panel-actions button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.element-patch-panel-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
