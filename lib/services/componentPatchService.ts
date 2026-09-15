@@ -28,6 +28,92 @@ export interface PatchResult {
   newDocumentHash: string;
 }
 
+export type PatchInput = { dataGfId: string; html: string; cssDeclarations: string | null };
+
+export type ApplyPatchBufferResult =
+  | { ok: true; tokens: ComponentTokens; appliedIds: string[]; newDescendantIds: string[] }
+  | { ok: false; reason: 'vanished'; dataGfId: string }
+  | { ok: false; reason: 'sanitize-rejected'; message: string };
+
+/**
+ * Applies a batch of id-anchored patches to `tokens` in memory, mirroring applyElementPatch's own
+ * per-patch sequence (sanitize, assign fresh descendant ids, ensure the gf-<id> class, merge CSS,
+ * splice) generalized to N patches applied in order. Every `dataGfId` in `patches` must already be
+ * confirmed present in `tokens` by the caller BEFORE calling this (see resolveComponentRegeneration's
+ * own upfront resolution step) -- a `dataGfId` that can't be found here always means an EARLIER
+ * patch in this same call already removed it (a "mid-batch vanish"), not that it never existed,
+ * since the caller has already ruled that out. Pure: no disk, no AI, no clock/randomness -- calling
+ * it twice with the same inputs always produces the same result.
+ */
+export function applyPatchBuffer(tokens: ComponentTokens, patches: PatchInput[]): ApplyPatchBufferResult {
+  let html = tokens.html;
+  let css = tokens.css;
+  const appliedIds: string[] = [];
+  const newDescendantIds: string[] = [];
+
+  for (const patch of patches) {
+    const located = findElementByDataGfId(html, patch.dataGfId);
+    if (!located.found) {
+      return { ok: false, reason: 'vanished', dataGfId: patch.dataGfId };
+    }
+
+    if (RAW_MARKER_PATTERN.test(patch.html)) {
+      return { ok: false, reason: 'sanitize-rejected', message: 'Patch contains a disallowed marker sequence.' };
+    }
+
+    let sanitizedHtml: string;
+    try {
+      sanitizedHtml = sanitizeComponentHtml(patch.html);
+    } catch (e: any) {
+      return { ok: false, reason: 'sanitize-rejected', message: e.message };
+    }
+    if (!sanitizedHtml.trim()) {
+      return { ok: false, reason: 'sanitize-rejected', message: 'Patch sanitized to nothing.' };
+    }
+
+    // Seeded from max(existing data-gf-id) across the CURRENT buffer, recomputed before each patch
+    // -- reusing a pre-batch max across multiple patches that each introduce new descendants would
+    // silently produce colliding ids between patches.
+    const startAt = maxDataGfId(html) + 1;
+    let idAssignedFragment: string;
+    try {
+      idAssignedFragment = assignElementIds(sanitizedHtml, { preserveRootId: patch.dataGfId, startAt });
+    } catch (e: any) {
+      return { ok: false, reason: 'sanitize-rejected', message: e?.message ?? 'Patch fragment must be exactly one root element.' };
+    }
+
+    const gfClass = `gf-${patch.dataGfId}`;
+    const withClass = ensureClassOnRoot(idAssignedFragment, gfClass);
+
+    if (patch.cssDeclarations !== null) {
+      let sanitizedRule: string;
+      try {
+        sanitizedRule = sanitizeComponentCss(`.${gfClass} { ${patch.cssDeclarations} }`);
+      } catch (e: any) {
+        return { ok: false, reason: 'sanitize-rejected', message: e.message };
+      }
+      css = replaceOrAppendRuleForClass(css, gfClass, sanitizedRule);
+    }
+
+    try {
+      html = replaceElementByDataGfId(html, patch.dataGfId, withClass);
+    } catch (e: any) {
+      // findElementByDataGfId already confirmed this id exists and is unambiguous immediately
+      // above, with nothing in between that could change `html` -- unreachable in practice, but
+      // every path through this loop must return a typed result, never let an exception escape.
+      return { ok: false, reason: 'sanitize-rejected', message: e?.message ?? 'Failed to apply patch.' };
+    }
+
+    appliedIds.push(patch.dataGfId);
+    const thisPatchDescendantIds = [...idAssignedFragment.matchAll(/data-gf-id="(\d+)"/g)]
+      .map((m) => m[1])
+      .filter((id) => id !== patch.dataGfId);
+    newDescendantIds.push(...thisPatchDescendantIds);
+  }
+
+  return { ok: true, tokens: { html, css }, appliedIds, newDescendantIds };
+}
+
 // One mutex per filename, in-process only. Sufficient for a single Node process (next dev /
 // single-instance next start); if GameForge ever runs multiple instances behind a load balancer,
 // this stops being sufficient and CONFLICT silently degrades to last-writer-wins.
@@ -137,53 +223,17 @@ export async function applyElementPatch(params: {
     const reLocated = findElementByDataGfId(tokens.html, params.dataGfId);
     if (!reLocated.found) return { ok: false, error: { code: 'ELEMENT_NOT_FOUND' } };
 
-    if (RAW_MARKER_PATTERN.test(patched.html)) {
-      return { ok: false, error: { code: 'SANITIZE_REJECTED', message: 'Patch contains a disallowed marker sequence.' } };
-    }
-
-    let sanitizedHtml: string;
-    try {
-      sanitizedHtml = sanitizeComponentHtml(patched.html);
-    } catch (e: any) {
-      return { ok: false, error: { code: 'SANITIZE_REJECTED', message: e.message } };
-    }
-    if (!sanitizedHtml.trim()) {
-      return { ok: false, error: { code: 'SANITIZE_REJECTED', message: 'Patch sanitized to nothing.' } };
-    }
-
-    // Seeded from max(existing data-gf-id) across the WHOLE freshly-read document, not just the
-    // patch fragment — ids must stay unique document-wide, not just within this one patch.
-    const startAt = maxDataGfId(tokens.html) + 1;
-    let idAssignedFragment: string;
-    try {
-      idAssignedFragment = assignElementIds(sanitizedHtml, { preserveRootId: params.dataGfId, startAt });
-    } catch (e: any) {
-      // Thrown when the sanitized fragment isn't exactly one root element (assignElementIds'
-      // preserveRootId mode requires it) — the brief's reference code didn't guard this call, but
-      // an uncaught throw here would violate "every error path returns a PatchError."
-      return { ok: false, error: { code: 'SANITIZE_REJECTED', message: e?.message ?? 'Patch fragment must be exactly one root element.' } };
-    }
-
-    // Ensure the fragment's root carries the gf-<id> class (added on first patch, reused after).
-    const withClass = ensureClassOnRoot(idAssignedFragment, gfClass);
-
-    let newCss = tokens.css;
-    if (patched.cssDeclarations !== null) {
-      let sanitizedRule: string;
-      try {
-        sanitizedRule = sanitizeComponentCss(`.${gfClass} { ${patched.cssDeclarations} }`);
-      } catch (e: any) {
-        return { ok: false, error: { code: 'SANITIZE_REJECTED', message: e.message } };
+    const bufferResult = applyPatchBuffer(tokens, [{ dataGfId: params.dataGfId, html: patched.html, cssDeclarations: patched.cssDeclarations }]);
+    if (!bufferResult.ok) {
+      if (bufferResult.reason === 'vanished') {
+        // reLocated.found (checked immediately above) already confirmed this exact id exists,
+        // with nothing in between that could remove it -- unreachable in practice, but every
+        // outcome applyPatchBuffer can report must still be handled with a real PatchError.
+        return { ok: false, error: { code: 'ELEMENT_NOT_FOUND' } };
       }
-      newCss = replaceOrAppendRuleForClass(tokens.css, gfClass, sanitizedRule);
+      return { ok: false, error: { code: 'SANITIZE_REJECTED', message: bufferResult.message } };
     }
-
-    let newHtml: string;
-    try {
-      newHtml = replaceElementByDataGfId(tokens.html, params.dataGfId, withClass);
-    } catch (e: any) {
-      return { ok: false, error: { code: 'ELEMENT_NOT_FOUND' } };
-    }
+    const { html: newHtml, css: newCss } = bufferResult.tokens;
 
     const combined = combineComponentHtml({ html: newHtml, css: newCss });
 
@@ -223,13 +273,9 @@ export async function applyElementPatch(params: {
       console.error(`applyElementPatch: failed to record patch history on asset ${params.assetId}:`, e);
     }
 
-    const newDescendantIds = [...idAssignedFragment.matchAll(/data-gf-id="(\d+)"/g)]
-      .map((m) => m[1])
-      .filter((id) => id !== params.dataGfId);
-
     return {
       ok: true,
-      idMap: { rootId: params.dataGfId, newDescendantIds },
+      idMap: { rootId: params.dataGfId, newDescendantIds: bufferResult.newDescendantIds },
       newDocumentHash: hashDocument(combined),
     };
   });
