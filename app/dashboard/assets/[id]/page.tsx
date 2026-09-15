@@ -343,6 +343,8 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
               width={480}
               height={320}
               border
+              kind="component"
+              patchEndpoint={`/api/assets/${asset.id}/component/patch-element`}
             />
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>

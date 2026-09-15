@@ -96,6 +96,8 @@ export function JobCard({ job, onPromote, onDiscard, onRetry, onRetryWithCorrect
             width={260}
             height={180}
             scale={0.28}
+            kind="component"
+            patchEndpoint={`/api/jobs/${job.id}/component/patch-element`}
           />
         ) : job.result_path ? (
           // eslint-disable-next-line @next/next/no-img-element

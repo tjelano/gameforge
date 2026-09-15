@@ -109,6 +109,8 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
           width={480}
           height={340}
           border
+          kind="component"
+          patchEndpoint={`/api/jobs/${job.id}/component/patch-element`}
         />
 
         <div className="card" style={{ flex: 1, minWidth: 280 }}>

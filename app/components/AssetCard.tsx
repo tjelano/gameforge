@@ -92,6 +92,8 @@ export function AssetCard({ asset }: { asset: Asset }) {
             width={320}
             height={320}
             scale={0.5}
+            kind="component"
+            patchEndpoint={`/api/assets/${asset.id}/component/patch-element`}
           />
         ) : asset.image_path ? (
           // eslint-disable-next-line @next/next/no-img-element
