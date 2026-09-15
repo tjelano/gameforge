@@ -136,13 +136,32 @@ function walkElementsInDocumentOrder(root: DomElement): DomElement[] {
   return out;
 }
 
+const GF_PATCH_CLASS_PATTERN = /^gf-\d+$/;
+
+// A `gf-<n>` class only means something paired with the data-gf-id it was assigned for — full-write
+// mode is reassigning fresh ids to every element here, so any gf-<n> class already on the incoming
+// html (e.g. echoed back by the AI when "Regenerate with changes" shows it the current markup as a
+// starting point, per buildComponentPrompt) is now an orphan: it doesn't match any id in the
+// document being produced and has no CSS rule of its own reason to exist post-regenerate. Stripped
+// here, not just left as harmless-looking dead weight, so class lists don't silently accumulate
+// class names from prior patches across repeated regenerations.
+function stripStalePatchClasses(el: DomElement): void {
+  const classAttr = el.attribs['class'];
+  if (!classAttr) return;
+  const kept = classAttr.split(/\s+/).filter((c) => c && !GF_PATCH_CLASS_PATTERN.test(c));
+  if (kept.length > 0) el.attribs['class'] = kept.join(' ');
+  else delete el.attribs['class'];
+}
+
 /**
  * Assigns permanent `data-gf-id` attributes to every element in an HTML fragment.
  *
  * Full-write mode (no `opts.preserveRootId`): strips any incoming `data-gf-id` from every
- * element and renumbers the whole fragment from 1, in document order. Used by the component
- * write paths (generate, manual edit, reset) — never trusts an id an AI response or hand-edit
- * happened to already carry.
+ * element and renumbers the whole fragment from 1, in document order. Also strips any stale
+ * `gf-<n>` patch-marker class (see stripStalePatchClasses) — that class only means something
+ * paired with the specific id it was assigned for, which full-write mode is discarding anyway.
+ * Used by the component write paths (generate, manual edit, reset) — never trusts an id an AI
+ * response or hand-edit happened to already carry.
  *
  * Patch mode (`opts.preserveRootId` set): the fragment's single root element keeps that exact
  * id; every other element in the fragment has any incoming `data-gf-id` stripped and gets a
@@ -177,6 +196,7 @@ export function assignElementIds(html: string, opts?: { preserveRootId?: string;
       for (const el of walkElementsInDocumentOrder(root)) {
         delete el.attribs['data-gf-id'];
         el.attribs['data-gf-id'] = String(counter);
+        stripStalePatchClasses(el);
         counter += 1;
       }
     }

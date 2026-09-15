@@ -209,6 +209,22 @@ describe('assignElementIds', () => {
     expect(ids).toEqual(['1', '2']);
   });
 
+  it('strips a stale gf-<n> patch-marker class in full-write mode — it belonged to a discarded id', () => {
+    const html = '<div class="card"><button class="btn-primary gf-3" data-gf-id="3">Buy</button></div>';
+    const result = assignElementIds(html);
+    expect(result).not.toContain('gf-3');
+    expect(result).toContain('class="btn-primary"');
+    // Unrelated classes on other elements survive untouched
+    expect(result).toContain('class="card"');
+  });
+
+  it('drops the class attribute entirely in full-write mode if a gf-<n> class was the only one', () => {
+    const html = '<button class="gf-5">Buy</button>';
+    const result = assignElementIds(html);
+    expect(result).not.toContain('gf-5');
+    expect(result).not.toContain('class=');
+  });
+
   it('preserveRootId mode: keeps the root id, reassigns every descendant from startAt', () => {
     const fragment = '<button data-gf-id="stale"><span>ok</span></button>';
     const result = assignElementIds(fragment, { preserveRootId: '7', startAt: 20 });
