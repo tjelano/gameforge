@@ -32,7 +32,7 @@ export interface PatchedElement {
 }
 
 export interface ComponentGenerator {
-  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent>;
+  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride, correction?: string, forceFull?: boolean): Promise<GeneratedComponent | ComponentDeltaResult>;
   patchElement(elementOuterHtml: string, instruction: string, currentDeclarations: string | null, styleId: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<PatchedElement>;
 }
 
@@ -57,6 +57,48 @@ const PATCH_TOOL_INPUT_SCHEMA = {
   required: ['html'],
 };
 
+export type ComponentDeltaResult =
+  | { mode: 'patches'; patches: Array<{ dataGfId: string; html: string; cssDeclarations: string | null }> }
+  | { mode: 'full'; html: string; css: string };
+
+const DELTA_TOOL_INPUT_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    mode: {
+      type: 'string',
+      enum: ['patches', 'full'],
+      description: 'Use "patches" when the instruction only changes existing elements\' style or content. Use "full" when it requires adding, removing, or reordering elements.',
+    },
+    patches: {
+      type: 'array',
+      description: 'Required when mode is "patches". A list of targeted edits, each replacing one existing element (identified by its data-gf-id) with new content.',
+      items: {
+        type: 'object',
+        properties: {
+          dataGfId: { type: 'string', description: 'The data-gf-id of the existing element this patch replaces.' },
+          html: { type: 'string', description: 'The complete replacement outerHTML for this one element.' },
+          cssDeclarations: { type: 'string', description: 'CSS declarations only (e.g. "color: blue;"), no selector or braces. Omit if this patch does not change styling.' },
+        },
+        required: ['dataGfId', 'html'],
+      },
+    },
+    html: { type: 'string', description: 'Required when mode is "full". The component\'s complete replacement HTML markup.' },
+    css: { type: 'string', description: 'Required when mode is "full". The component\'s complete replacement CSS.' },
+  },
+  required: ['mode'],
+};
+
+const DeltaPatchSchema = z.object({
+  dataGfId: z.string(),
+  html: z.string(),
+  cssDeclarations: z.string().nullable().default(null),
+}).strict();
+
+const ComponentDeltaResultSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('patches'), patches: z.array(DeltaPatchSchema) }).strict(),
+  z.object({ mode: z.literal('full'), html: z.string(), css: z.string() }).strict(),
+]);
+
 function buildComponentPrompt(styleParameters: string, jobPrompt: string, componentType?: string, basedOnContent?: string): string {
   const typeHint = componentType ? `Component type: ${componentType}.\n\n` : '';
   const basedOnSection = basedOnContent
@@ -73,9 +115,79 @@ Respond by calling the emit_component tool with the component's html and css.`;
 export class ClaudeApiComponentGenerator implements ComponentGenerator {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent> {
+  async generate(
+    prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload,
+    basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride,
+    correction?: string, forceFull?: boolean,
+  ): Promise<GeneratedComponent | ComponentDeltaResult> {
     const style = await styleService.getById(styleId);
-    const fullPrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType, basedOnContent);
+    const basePrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType, basedOnContent);
+
+    if (basedOnContent === undefined) {
+      // First-generate: completely unchanged from before this task, just using `basePrompt` in
+      // place of the old local `fullPrompt` name (no behavior change).
+      const fullPrompt = basePrompt;
+      const content: string | Array<Record<string, unknown>> = referenceImage
+        ? [
+            { type: 'image', source: { type: 'base64', media_type: referenceImage.mediaType, data: referenceImage.base64 } },
+            { type: 'text', text: fullPrompt },
+          ]
+        : fullPrompt;
+
+      const toolInput = providerOverride
+        ? await callOllamaTool({
+            host: providerOverride.host,
+            model: providerOverride.model,
+            toolName: 'emit_component',
+            toolDescription: 'Emit a single website UI component as HTML and CSS.',
+            inputSchema: TOOL_INPUT_SCHEMA,
+            messages: [{ role: 'user', content: providerOverride.correctionRequested
+              ? `${fullPrompt}\n\nYou did not call the emit_component tool last time -- you must call it now with valid arguments matching its schema.`
+              : content }],
+            signal,
+            operationLabel: 'component generation',
+            truncatedMessage: 'the component could not be generated',
+          })
+        : await callClaudeTool({
+            provider: this.provider,
+            apiKey: this.apiKey,
+            toolName: 'emit_component',
+            toolDescription: 'Emit a single website UI component as HTML and CSS.',
+            inputSchema: TOOL_INPUT_SCHEMA,
+            messages: [{ role: 'user', content }],
+            signal,
+            operationLabel: 'component generation',
+            truncatedMessage: 'the component could not be generated',
+          });
+
+      const raw = z.object({ html: z.string(), css: z.string() }).parse(toolInput);
+      const tokens: ComponentTokens = {
+        html: assignElementIds(sanitizeComponentHtml(raw.html)),
+        css: sanitizeComponentCss(raw.css),
+      };
+
+      const filename = `component-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.html`;
+      const componentsDir = path.join(getProjectRoot(), 'storage', 'components');
+      try {
+        await fsPromises.mkdir(componentsDir, { recursive: true });
+        await fsPromises.writeFile(path.join(componentsDir, filename), combineComponentHtml(tokens));
+      } catch (e) {
+        console.error(`Failed to write component file ${filename}:`, e);
+        throw e;
+      }
+
+      return { path: filename, prompt };
+    }
+
+    // Regenerate-with-changes (basedOnContent present): never writes to disk on this path,
+    // regardless of the resulting mode -- resolveComponentRegeneration() (Task 3) owns every write.
+    const fullPrompt = correction ? `${basePrompt}\n\n${correction}` : basePrompt;
+    const useFullTool = forceFull === true;
+    const toolName = useFullTool ? 'emit_component' : 'emit_component_delta';
+    const toolDescription = useFullTool
+      ? 'Emit a single website UI component as HTML and CSS.'
+      : 'Emit either a list of targeted element patches, or a full replacement component, as HTML and CSS.';
+    const inputSchema = useFullTool ? TOOL_INPUT_SCHEMA : DELTA_TOOL_INPUT_SCHEMA;
 
     const content: string | Array<Record<string, unknown>> = referenceImage
       ? [
@@ -88,11 +200,11 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
       ? await callOllamaTool({
           host: providerOverride.host,
           model: providerOverride.model,
-          toolName: 'emit_component',
-          toolDescription: 'Emit a single website UI component as HTML and CSS.',
-          inputSchema: TOOL_INPUT_SCHEMA,
+          toolName,
+          toolDescription,
+          inputSchema,
           messages: [{ role: 'user', content: providerOverride.correctionRequested
-            ? `${fullPrompt}\n\nYou did not call the emit_component tool last time -- you must call it now with valid arguments matching its schema.`
+            ? `${fullPrompt}\n\nYou did not call the ${toolName} tool last time -- you must call it now with valid arguments matching its schema.`
             : content }],
           signal,
           operationLabel: 'component generation',
@@ -101,32 +213,20 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
       : await callClaudeTool({
           provider: this.provider,
           apiKey: this.apiKey,
-          toolName: 'emit_component',
-          toolDescription: 'Emit a single website UI component as HTML and CSS.',
-          inputSchema: TOOL_INPUT_SCHEMA,
+          toolName,
+          toolDescription,
+          inputSchema,
           messages: [{ role: 'user', content }],
           signal,
           operationLabel: 'component generation',
           truncatedMessage: 'the component could not be generated',
         });
 
-    const raw = z.object({ html: z.string(), css: z.string() }).parse(toolInput);
-    const tokens: ComponentTokens = {
-      html: assignElementIds(sanitizeComponentHtml(raw.html)),
-      css: sanitizeComponentCss(raw.css),
-    };
-
-    const filename = `component-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.html`;
-    const componentsDir = path.join(getProjectRoot(), 'storage', 'components');
-    try {
-      await fsPromises.mkdir(componentsDir, { recursive: true });
-      await fsPromises.writeFile(path.join(componentsDir, filename), combineComponentHtml(tokens));
-    } catch (e) {
-      console.error(`Failed to write component file ${filename}:`, e);
-      throw e;
+    if (useFullTool) {
+      const raw = z.object({ html: z.string(), css: z.string() }).strict().parse(toolInput);
+      return { mode: 'full', html: raw.html, css: raw.css };
     }
-
-    return { path: filename, prompt };
+    return ComponentDeltaResultSchema.parse(toolInput);
   }
 
   async patchElement(
@@ -185,7 +285,11 @@ Respond by calling the emit_element_patch tool with the element's complete repla
 }
 
 export class MockComponentGenerator implements ComponentGenerator {
-  async generate(prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload, _basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<GeneratedComponent> {
+  async generate(
+    prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload,
+    basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride,
+    _correction?: string, _forceFull?: boolean,
+  ): Promise<GeneratedComponent | ComponentDeltaResult> {
     if (_providerOverride) {
       throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
     }
@@ -193,6 +297,9 @@ export class MockComponentGenerator implements ComponentGenerator {
       html: '<button class="btn-primary">Buy now</button>',
       css: '.btn-primary { background: var(--color-accent); color: var(--color-bg); padding: calc(var(--space-unit) * 1.5) calc(var(--space-unit) * 3); border: none; border-radius: var(--radius-base); font-family: var(--font-body); }',
     };
+    if (basedOnContent !== undefined) {
+      return { mode: 'full', html: tokens.html, css: tokens.css };
+    }
     const filename = `mock-component-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.html`;
     const componentsDir = path.join(getProjectRoot(), 'storage', 'components');
     try {
