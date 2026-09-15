@@ -276,6 +276,34 @@ describe('ElementPatchPanel', () => {
     await waitFor(() => expect(screen.getByText(freeText)).toBeTruthy());
   });
 
+  it('shows a distinct message when the response body is not valid JSON', async () => {
+    // The server responded (fetch resolved) but res.json() itself rejects — e.g. a
+    // proxy/auth-redirect/infra 500 returning an HTML error page. This is a separate branch from
+    // both the success path and the fetch-rejects network-failure path, so it must not fire
+    // onPatched and must not show the generic "Could not reach the server." message.
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.reject(new Error('Unexpected token <')),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onPatched = vi.fn();
+
+    render(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'button', dataGfId: '1' })}
+        onPatched={onPatched}
+      />,
+    );
+    typeInstruction('Make it blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('The server returned an unexpected response. Please try again.')).toBeTruthy(),
+    );
+    expect(onPatched).not.toHaveBeenCalled();
+    expect(screen.queryByText(/could not reach the server/i)).toBeNull();
+  });
+
   it('shows an unrecognized error string verbatim instead of a garbled message on an Object.prototype key collision', async () => {
     // If ERROR_MESSAGES were a plain lookup without an own-property guard, `error: 'toString'`
     // would resolve to the inherited Object.prototype.toString function rather than undefined —
