@@ -241,6 +241,39 @@ describe('GET /api/assets/[id]/export', () => {
     expect(body).toContain('class="hero"');
   });
 
+  it('strips data-gf-id from a component export', async () => {
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const { assetId } = await makeComponentAsset('x', document);
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    const body = await res.text();
+    expect(body).not.toContain('data-gf-id');
+    expect(body).toContain('gf-1');
+  });
+
+  it("downloads a trusted component's hand-edited HTML byte-identical to what was stored — proves stripElementIds's early return fires (no data-gf-id to strip) instead of an unconditional parse/re-serialize round trip", async () => {
+    // Single-quoted attribute + an unquoted boolean attribute: a parse/
+    // re-serialize round trip normalizes both (confirmed empirically with
+    // htmlparser2/dom-serializer: `class='hero'` -> `class="hero"`,
+    // `checkbox` unquoted -> quoted). Trusted content never carries
+    // data-gf-id (Task 4's design), so stripElementIds always hits its
+    // zero-match path for an edited_externally asset — this fixture makes
+    // a silent reformat on that path observable instead of passing by
+    // coincidence the way an already-canonical fragment would.
+    const bodyFragment = "<div class='hero'><input type=checkbox checked></div>";
+    const document = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+      + `<body>${bodyFragment}</body></html>`;
+    const { assetId } = await makeComponentAsset('Trusted Quirky', document);
+    await assetService.update(assetId, 'user-1', { editedExternally: true });
+    const req = new NextRequest(`http://localhost/api/assets/${assetId}/export?format=html`);
+    const res = await GET(req, { params: Promise.resolve({ id: assetId }) });
+
+    const body = await res.text();
+    expect(body).toContain(bodyFragment);
+  });
+
   it('returns 500 when the component file is missing on disk', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const asset = await assetService.create({

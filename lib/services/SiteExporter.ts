@@ -6,6 +6,7 @@ import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
 import { parseComponentHtml } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { stripElementIds } from '@/lib/services/componentElementTree';
 import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { tokensToTailwindTheme } from '@/lib/services/themeExport/tailwindExporter';
 import { htmlToJsx, escapeJsxText } from '@/lib/services/siteExportDocument';
@@ -530,7 +531,7 @@ class SiteExporterImpl {
       // below still run unconditionally on whatever html/css result: they're
       // required format conversions for the export target, not sanitization.
       const trusted = asset.edited_externally === 1;
-      const html = trusted ? tokens.html : sanitizeComponentHtml(tokens.html);
+      const html = stripElementIds(trusted ? tokens.html : sanitizeComponentHtml(tokens.html));
       // scopeComponentCss runs AFTER sanitization (it needs real, trusted
       // CSS to parse) and BEFORE this CSS is ever written to a
       // .module.css file. Next's CSS Modules compiler runs in "pure"

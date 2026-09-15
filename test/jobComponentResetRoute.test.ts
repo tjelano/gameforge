@@ -9,6 +9,7 @@ import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
+import { assignElementIds } from '@/lib/services/componentSanitize';
 import { PATCH } from '@/app/api/jobs/[id]/component/route';
 import { POST } from '@/app/api/jobs/[id]/component/reset/route';
 import { seedSession } from '@/test/helpers/testSession';
@@ -70,17 +71,27 @@ function resetRequest(): NextRequest {
 }
 
 describe('POST /api/jobs/[id]/component/reset', () => {
-  it('restores the file to the original tokens after an edit', async () => {
+  it('restores the file to the original tokens (with element ids reassigned) after an edit', async () => {
     const { jobId, filename } = await makeCompleteComponentJob();
     await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
 
     const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
     const body = await res.json();
+    const expectedTokens = { ...ORIGINAL, html: assignElementIds(ORIGINAL.html) };
     expect(res.status).toBe(200);
-    expect(body.data).toEqual(ORIGINAL);
+    expect(body.data).toEqual(expectedTokens);
 
     const document = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
-    expect(parseComponentHtml(document)).toEqual(ORIGINAL);
+    expect(parseComponentHtml(document)).toEqual(expectedTokens);
+  });
+
+  it('assigns data-gf-id to every element on write', async () => {
+    const { jobId, filename } = await makeCompleteComponentJob();
+    await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
+    const res = await POST(resetRequest(), { params: Promise.resolve({ id: jobId }) });
+    expect(res.status).toBe(200);
+    const stored = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
+    expect(stored).toMatch(/data-gf-id="\d+"/);
   });
 
   it('returns 404 when the job has never been edited', async () => {

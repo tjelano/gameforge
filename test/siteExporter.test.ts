@@ -22,6 +22,7 @@ import { pageService } from '@/lib/services/PageService';
 import { assetService } from '@/lib/services/AssetService';
 import { siteExporter } from '@/lib/services/SiteExporter';
 import { tokensToCss } from '@/lib/services/themeTokens';
+import * as componentElementTree from '@/lib/services/componentElementTree';
 
 let tempRoot: string;
 
@@ -561,6 +562,53 @@ describe('siteExporter.exportSite', () => {
     const generatedCss = await fsPromises.readFile(path.join(result.targetDir, 'components', cssFile!), 'utf-8');
     const compiled = await postcss([localByDefault({ mode: 'pure' })]).process(generatedCss, { from: undefined });
     expect(compiled.css).toContain(':local(.root)');
+  });
+
+  it('strips data-gf-id from an exported component even though its .gf-<n> classes survive', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const asset = await makeComponentAsset(style.id, 'ided.html', document);
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const tsx = await exportedComponentTsx(style.id, 'test-strip-ids');
+    expect(tsx).not.toContain('data-gf-id');
+    expect(tsx).toContain('gf-1');
+  });
+
+  it('passes a trusted component\'s HTML through stripElementIds unchanged (zero data-gf-id matches, so the early return fires, not a redundant parse/re-serialize)', async () => {
+    // By design (Task 4), trusted/hand-edited content never gets data-gf-id
+    // assigned, so this asset's html always hits stripElementIds's
+    // zero-match path. htmlToJsx() does its own parse/serialize right
+    // after, which makes a final-JSX comparison useless here for proving
+    // stripElementIds itself didn't reformat anything (a second
+    // parse+render of already-canonical markup is a no-op, masking the
+    // bug this early return fixes) — confirmed empirically: render(parse(x))
+    // is a fixed point under a further parse+render for every case tried.
+    // Spying on the real stripElementIds export is the only way to observe,
+    // for THIS path, that it returned its input untouched. The fragment
+    // below is deliberately non-canonical (single-quoted attribute, no
+    // quotes around a boolean attribute) — a parse/re-serialize round trip
+    // normalizes both, so this fixture fails loudly without the early
+    // return, unlike a clean/canonical fragment which round-trips to
+    // itself by coincidence and would mask the bug.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const quirkyTrustedDoc = "<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>"
+      + "<body><div class='hero'><input type=checkbox checked></div></body></html>";
+    const asset = await makeComponentAsset(style.id, 'trusted-no-ids.html', quirkyTrustedDoc);
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'Home', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const spy = vi.spyOn(componentElementTree, 'stripElementIds');
+    await exportedComponentTsx(style.id, 'test-trusted-no-ids');
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    // The real regression guard: stripElementIds's return value is the
+    // exact same string as what it was called with — proof the early
+    // return fired instead of a parse/re-serialize round trip.
+    expect(spy.mock.results[0].value).toBe(spy.mock.calls[0][0]);
   });
 
   it("returns STYLE_NOT_FOUND instead of exporting — this is the behavior change: exportSite() never checked the style itself, only pageService.getActivePagesForStyle()", async () => {

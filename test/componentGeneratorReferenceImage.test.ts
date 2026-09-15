@@ -22,6 +22,18 @@ function mockToolUseResponse() {
   );
 }
 
+function mockPatchToolUseResponse(input: Record<string, unknown>) {
+  return vi.fn().mockResolvedValueOnce(
+    new Response(JSON.stringify({
+      content: [{
+        type: 'tool_use', id: 't1', name: 'emit_element_patch',
+        input,
+      }],
+      stop_reason: 'tool_use',
+    }), { status: 200 })
+  );
+}
+
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-componentrefimg-'));
   await fsPromises.mkdir(path.join(tempRoot, 'storage', 'components'), { recursive: true });
@@ -157,6 +169,98 @@ describe("ClaudeApiComponentGenerator sanitizes the raw model output before writ
     const content = await fsPromises.readFile(filePath, 'utf-8');
     expect(content).not.toContain('onclick');
     expect(content).not.toContain('<script>');
-    expect(content).toContain('<button>Go</button>');
+    expect(content).toContain('<button data-gf-id="1">Go</button>');
+  });
+});
+
+describe('ClaudeApiComponentGenerator.patchElement', () => {
+  it('returns sanitized html and css declarations from the tool call', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({
+      html: '<button class="btn">New</button>',
+      cssDeclarations: 'color: blue;',
+    }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button class="btn">Old</button>',
+      'make it say New',
+      'color: red;',
+      style.id,
+    );
+
+    expect(result.html).toContain('New');
+    expect(result.cssDeclarations).toBe('color: blue;');
+  });
+
+  it('sanitizes the returned html fragment', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({
+      html: '<script>alert(1)</script><button>ok</button>',
+    }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button>old</button>',
+      'remove the script',
+      null,
+      style.id,
+    );
+
+    // 'ok' only appears in the mocked AI response, not the input element ('old') --
+    // proves this is the (sanitized) AI response, not the input passed through unchanged.
+    expect(result.html).toContain('ok');
+    expect(result.html).not.toContain('script');
+  });
+
+  it('passes null cssDeclarations through when the AI makes no style change', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({ html: '<button>ok</button>' }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button>old</button>',
+      'just change the text',
+      null,
+      style.id,
+    );
+
+    expect(result.cssDeclarations).toBeNull();
+  });
+
+  it('parses successfully and returns null when the tool response has an explicit cssDeclarations: null', async () => {
+    // LLM tool-calling responses commonly emit an explicit JSON null for an omitted-in-spirit
+    // field rather than leaving the key out entirely -- z.string().optional() rejects that
+    // (only undefined passes), so this must not throw.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({ html: '<button>ok</button>', cssDeclarations: null }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button>old</button>',
+      'just change the text',
+      null,
+      style.id,
+    );
+
+    expect(result.cssDeclarations).toBeNull();
+  });
+
+  it('normalizes a whitespace-only cssDeclarations to null', async () => {
+    // An empty/whitespace-only string must not survive as a non-null value: the caller
+    // (componentPatchService) treats non-null as "wrap and apply", which would silently
+    // replace any existing per-element CSS rule with an empty one.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    vi.stubGlobal('fetch', mockPatchToolUseResponse({ html: '<button>ok</button>', cssDeclarations: '   ' }));
+
+    const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
+    const result = await generator.patchElement(
+      '<button>old</button>',
+      'just change the text',
+      null,
+      style.id,
+    );
+
+    expect(result.cssDeclarations).toBeNull();
   });
 });

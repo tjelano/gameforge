@@ -6,7 +6,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { jobService } from '@/lib/services/JobService';
 import { DatabaseConnection } from '@/lib/database';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
-import { sanitizeComponentHtml, sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
 import { getCurrentUser } from '@/lib/utils/session';
 
 export const dynamic = 'force-dynamic';
@@ -43,7 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let tokens: ComponentTokens;
     try {
       tokens = {
-        html: sanitizeComponentHtml(rawInput.html),
+        html: assignElementIds(sanitizeComponentHtml(rawInput.html)),
         css: sanitizeComponentCss(rawInput.css),
       };
     } catch (e: any) {

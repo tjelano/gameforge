@@ -97,6 +97,19 @@ describe('PATCH /api/assets/[id]/component', () => {
     expect(updated!.edited_externally).toBe(1);
   });
 
+  it('strips any data-gf-id already present in trusted paste-back html', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, userId);
+    const res = await PATCH(
+      req({ html: '<button data-gf-id="7">Go</button>', css: '.btn{}', trustAsEdited: true }, cookieHeader),
+      { params: Promise.resolve({ id: asset.id }) }
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.html).not.toContain('data-gf-id');
+  });
+
   it('clears edited_externally on a subsequent ordinary (non-trusted) save', async () => {
     const { cookieHeader, userId } = await seedSession();
     const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
@@ -141,5 +154,28 @@ describe('PATCH /api/assets/[id]/component', () => {
     const fileContent = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', 'comp.html'), 'utf-8');
     expect(fileContent).toContain('Updated');
     expect(fileContent).toContain('color:green');
+  });
+
+  it('assigns data-gf-id to every element on write', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, userId);
+    await PATCH(req({ html: '<button>Go</button>', css: '.btn{}' }, cookieHeader), { params: Promise.resolve({ id: asset.id }) });
+
+    const stored = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', 'comp.html'), 'utf-8');
+    expect(stored).toMatch(/data-gf-id="\d+"/);
+  });
+
+  it('does NOT assign data-gf-id when trustAsEdited is true', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, userId);
+    await PATCH(
+      req({ html: '<button>Go</button>', css: '.btn{}', trustAsEdited: true }, cookieHeader),
+      { params: Promise.resolve({ id: asset.id }) }
+    );
+
+    const stored = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', 'comp.html'), 'utf-8');
+    expect(stored).not.toMatch(/data-gf-id="\d+"/);
   });
 });

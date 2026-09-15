@@ -9,6 +9,7 @@ import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
 import { jobService } from '@/lib/services/JobService';
 import { combineComponentHtml, parseComponentHtml, type ComponentTokens } from '@/lib/services/ComponentGenerator';
+import { assignElementIds } from '@/lib/services/componentSanitize';
 import { PATCH } from '@/app/api/jobs/[id]/component/route';
 import { seedSession } from '@/test/helpers/testSession';
 
@@ -68,14 +69,23 @@ function patchRequest(tokens: ComponentTokens): NextRequest {
 }
 
 describe('PATCH /api/jobs/[id]/component', () => {
-  it('persists a valid edit and returns the sanitized tokens', async () => {
+  it('persists a valid edit and returns the sanitized tokens with element ids assigned', async () => {
     const { jobId, filename } = await makeCompleteComponentJob();
     const res = await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
     const body = await res.json();
+    const expectedTokens = { ...EDITED, html: assignElementIds(EDITED.html) };
     expect(res.status).toBe(200);
-    expect(body.data).toEqual(EDITED);
+    expect(body.data).toEqual(expectedTokens);
     const document = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
-    expect(parseComponentHtml(document)).toEqual(EDITED);
+    expect(parseComponentHtml(document)).toEqual(expectedTokens);
+  });
+
+  it('assigns data-gf-id to every element on write', async () => {
+    const { jobId, filename } = await makeCompleteComponentJob();
+    const res = await PATCH(patchRequest(EDITED), { params: Promise.resolve({ id: jobId }) });
+    expect(res.status).toBe(200);
+    const stored = await fsPromises.readFile(path.join(tempRoot, 'storage', 'components', filename), 'utf-8');
+    expect(stored).toMatch(/data-gf-id="\d+"/);
   });
 
   it('captures the original tokens into jobs.options.originalComponent on the first edit only', async () => {

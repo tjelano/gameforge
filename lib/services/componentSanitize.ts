@@ -1,6 +1,18 @@
 import sanitizeHtml from 'sanitize-html';
 import postcss from 'postcss';
 import valueParser from 'postcss-value-parser';
+import { parseDocument, DomUtils } from 'htmlparser2';
+import render from 'dom-serializer';
+import type { Element as DomElement } from 'domhandler';
+
+/**
+ * Required security invariant of the component-preview sandbox relaxation
+ * (sandbox="allow-same-origin") — see docs/superpowers/specs/2026-09-14-element-specific-patching-design.md.
+ * `script-src` is deliberately absent and falls back to `default-src 'none'`, blocking script
+ * execution even if a future change mistakenly adds `allow-scripts` to the sandbox attribute.
+ * Never weaken this without updating that spec's security reasoning first.
+ */
+export const COMPONENT_PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:;";
 
 // A deliberately narrow allowlist for real website UI pieces (buttons,
 // cards, nav bars, forms) — see docs/superpowers/specs/2026-09-07-
@@ -22,7 +34,7 @@ const ALLOWED_TAGS = [
 ];
 
 const ALLOWED_ATTRIBUTES: sanitizeHtml.IOptions['allowedAttributes'] = {
-  '*': ['class', 'id'],
+  '*': ['class', 'id', 'data-gf-id'],
   a: ['href', 'target', 'rel'],
   button: ['type', 'disabled'],
   input: ['type', 'name', 'placeholder', 'value', 'required'],
@@ -106,4 +118,89 @@ export function sanitizeComponentCss(css: string): string {
   });
 
   return css;
+}
+
+function isElement(node: unknown): node is DomElement {
+  return !!node && typeof node === 'object' && (node as { type?: string }).type === 'tag';
+}
+
+function walkElementsInDocumentOrder(root: DomElement): DomElement[] {
+  const out: DomElement[] = [];
+  function visit(node: DomElement) {
+    out.push(node);
+    for (const child of node.children) {
+      if (isElement(child)) visit(child);
+    }
+  }
+  visit(root);
+  return out;
+}
+
+const GF_PATCH_CLASS_PATTERN = /^gf-\d+$/;
+
+// A `gf-<n>` class only means something paired with the data-gf-id it was assigned for — full-write
+// mode is reassigning fresh ids to every element here, so any gf-<n> class already on the incoming
+// html (e.g. echoed back by the AI when "Regenerate with changes" shows it the current markup as a
+// starting point, per buildComponentPrompt) is now an orphan: it doesn't match any id in the
+// document being produced and has no CSS rule of its own reason to exist post-regenerate. Stripped
+// here, not just left as harmless-looking dead weight, so class lists don't silently accumulate
+// class names from prior patches across repeated regenerations.
+function stripStalePatchClasses(el: DomElement): void {
+  const classAttr = el.attribs['class'];
+  if (!classAttr) return;
+  const kept = classAttr.split(/\s+/).filter((c) => c && !GF_PATCH_CLASS_PATTERN.test(c));
+  if (kept.length > 0) el.attribs['class'] = kept.join(' ');
+  else delete el.attribs['class'];
+}
+
+/**
+ * Assigns permanent `data-gf-id` attributes to every element in an HTML fragment.
+ *
+ * Full-write mode (no `opts.preserveRootId`): strips any incoming `data-gf-id` from every
+ * element and renumbers the whole fragment from 1, in document order. Also strips any stale
+ * `gf-<n>` patch-marker class (see stripStalePatchClasses) — that class only means something
+ * paired with the specific id it was assigned for, which full-write mode is discarding anyway.
+ * Used by the component write paths (generate, manual edit, reset) — never trusts an id an AI
+ * response or hand-edit happened to already carry.
+ *
+ * Patch mode (`opts.preserveRootId` set): the fragment's single root element keeps that exact
+ * id; every other element in the fragment has any incoming `data-gf-id` stripped and gets a
+ * fresh one starting at `opts.startAt` (required — the caller must pass
+ * `max(existing data-gf-id in the full stored document) + 1`, so ids stay unique across the
+ * whole document, not just within this fragment).
+ */
+export function assignElementIds(html: string, opts?: { preserveRootId?: string; startAt?: number }): string {
+  if (opts?.preserveRootId !== undefined && opts.startAt === undefined) {
+    throw new Error('assignElementIds: startAt is required when preserveRootId is set.');
+  }
+
+  const dom = parseDocument(html);
+  const roots = dom.children.filter(isElement);
+
+  if (opts?.preserveRootId !== undefined) {
+    const [root, ...rest] = roots;
+    if (!root || rest.length > 0) {
+      throw new Error('assignElementIds: preserveRootId mode requires exactly one root element.');
+    }
+    root.attribs['data-gf-id'] = opts.preserveRootId;
+    let counter = opts.startAt!;
+    for (const el of walkElementsInDocumentOrder(root)) {
+      if (el === root) continue;
+      delete el.attribs['data-gf-id'];
+      el.attribs['data-gf-id'] = String(counter);
+      counter += 1;
+    }
+  } else {
+    let counter = 1;
+    for (const root of roots) {
+      for (const el of walkElementsInDocumentOrder(root)) {
+        delete el.attribs['data-gf-id'];
+        el.attribs['data-gf-id'] = String(counter);
+        stripStalePatchClasses(el);
+        counter += 1;
+      }
+    }
+  }
+
+  return render(dom);
 }
