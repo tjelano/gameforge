@@ -16,8 +16,8 @@
 // property of every non-browser DOM library, not a version gap). So
 // getElementAt()'s coordinate-based hit-testing is real-browser-only
 // behavior no Node DOM library can execute natively. To still exercise
-// getElementAt()'s REAL logic (the null-doc guard, the HTMLElement
-// instanceof check, and the narrow-shape copying) rather than mocking
+// getElementAt()'s REAL logic (the null-doc guard, the Element instanceof
+// check, and the narrow-shape copying) rather than mocking
 // getElementAt itself or its return value, this file supplies a generic,
 // non-test-specific elementFromPoint that does real point-in-rect
 // containment over the iframe's actual elements — the standard workaround
@@ -117,6 +117,56 @@ describe('inspectFrame', () => {
     expect(info!.dataGfId).toBeNull();
   });
 
+  it('getElementAt returns null instead of throwing when defaultView is transiently unavailable', () => {
+    // defaultView can genuinely be null around a frame navigation/reload (e.g. right after a
+    // patch-triggered reload) — force that real, spec-legal state onto the real document (not a
+    // mock of getElementAt's own logic) and confirm the null-doc-guard style check actually
+    // prevents a throw, rather than asserting via `!`.
+    Object.defineProperty(iframe.contentDocument, 'defaultView', { value: null, configurable: true });
+    expect(() => getElementAt(iframe, 1, 1)).not.toThrow();
+    expect(getElementAt(iframe, 1, 1)).toBeNull();
+  });
+
+  it('getElementAt walks up through an SVGElement to find its data-gf-id ancestor (icon button)', () => {
+    // Hand-edited/trusted content is the only content that can contain <svg> at all — the
+    // AI-output sanitizer's allowlist excludes it — but that content never gets sanitized, so an
+    // icon button like this is a real case. SVG descendants are SVGElement, not HTMLElement; this
+    // pins that the instanceof check no longer excludes them before closest() can run.
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write(`
+      <html><body>
+        <button class="icon-btn" data-gf-id="1"><svg><circle cx="5" cy="5" r="5"></circle></svg></button>
+      </body></html>
+    `);
+    iframe.contentDocument!.close();
+    installElementFromPointPolyfill(iframe.contentDocument!);
+    const btn = iframe.contentDocument!.querySelector('button')!;
+    const svg = iframe.contentDocument!.querySelector('svg')!;
+    btn.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    svg.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    const info = getElementAt(iframe, 110, 60);
+    expect(info).not.toBeNull();
+    expect(info!.tagName).toBe('button');
+    expect(info!.classes).toEqual(['icon-btn']);
+    expect(info!.dataGfId).toBe('1');
+  });
+
+  it('getElementAt normalizes a literal empty data-gf-id attribute to null, not ""', () => {
+    // The attribute-presence selector [data-gf-id] matches regardless of value, so closest()
+    // still finds this element — the narrow return shape is what must turn "" into "absent".
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write(`
+      <html><body><div class="stray" data-gf-id=""></div></body></html>
+    `);
+    iframe.contentDocument!.close();
+    installElementFromPointPolyfill(iframe.contentDocument!);
+    const div = iframe.contentDocument!.querySelector('div')!;
+    div.getBoundingClientRect = () => new DOMRect(0, 0, 40, 40);
+    const info = getElementAt(iframe, 5, 5);
+    expect(info).not.toBeNull();
+    expect(info!.dataGfId).toBeNull();
+  });
+
   it('getRevisionHash reads the gf-rev meta tag', () => {
     expect(getRevisionHash(iframe)).toBe('abc123def');
   });
@@ -124,6 +174,13 @@ describe('inspectFrame', () => {
   it('getRevisionHash returns null if the meta tag is absent', () => {
     iframe.contentDocument!.open();
     iframe.contentDocument!.write('<html><head></head><body></body></html>');
+    iframe.contentDocument!.close();
+    expect(getRevisionHash(iframe)).toBeNull();
+  });
+
+  it('getRevisionHash normalizes a literal empty content attribute to null, not ""', () => {
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write('<html><head><meta name="gf-rev" content=""></head><body></body></html>');
     iframe.contentDocument!.close();
     expect(getRevisionHash(iframe)).toBeNull();
   });
@@ -149,13 +206,49 @@ describe('inspectFrame', () => {
     cleanup();
   });
 
+  it('preventFrameAnchorNavigation does not throw when the click target is not an Element', () => {
+    // A click dispatched directly on the Document (rather than on an element inside it) sets
+    // e.target to the Document itself — a real EventTarget that is not an Element and has no
+    // .closest() method. This pins that the instanceof check actually guards the .closest() call,
+    // rather than an unchecked cast that would throw and kill the whole capturing listener.
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write('<html><body></body></html>');
+    iframe.contentDocument!.close();
+    const cleanup = preventFrameAnchorNavigation(iframe);
+    const ContentEvent = (iframe.contentWindow as unknown as { Event: typeof Event }).Event;
+    const event = new ContentEvent('click', { bubbles: true, cancelable: true });
+    expect(() => iframe.contentDocument!.dispatchEvent(event)).not.toThrow();
+    cleanup();
+  });
+
   it('injectHighlight adds a non-interactive, reset-styled element into the frame', () => {
     injectHighlight(iframe, new DOMRect(10, 20, 30, 40));
     const highlight = iframe.contentDocument!.querySelector('[data-gf-highlight]');
     expect(highlight).not.toBeNull();
     const style = (highlight as HTMLElement).style;
     expect(style.pointerEvents).toBe('none');
-    expect(style.position).toBe('fixed');
+    // absolute, not fixed: a fixed highlight would stay frozen on screen while the user scrolls
+    // *within* the frame's own content instead of following the element it's outlining.
+    expect(style.position).toBe('absolute');
+  });
+
+  it('injectHighlight accounts for the frame document\'s own scroll offset', () => {
+    iframe.contentDocument!.documentElement.scrollTop = 50;
+    iframe.contentDocument!.documentElement.scrollLeft = 20;
+    injectHighlight(iframe, new DOMRect(10, 20, 30, 40));
+    const highlight = iframe.contentDocument!.querySelector('[data-gf-highlight]') as HTMLElement;
+    // rect.top/left (viewport-relative) + the frame's own scroll offset = document-relative,
+    // which is what an absolutely positioned element needs to scroll with the content.
+    expect(highlight.style.top).toBe('70px');
+    expect(highlight.style.left).toBe('30px');
+  });
+
+  it('injectHighlight does not throw when body is transiently unavailable', () => {
+    // body can genuinely be null in the same reload window noted above, if the new document
+    // hasn't finished parsing yet — force that real state onto the real document and confirm the
+    // guard actually prevents a throw from appendChild on null.
+    Object.defineProperty(iframe.contentDocument, 'body', { value: null, configurable: true });
+    expect(() => injectHighlight(iframe, new DOMRect(0, 0, 10, 10))).not.toThrow();
   });
 
   it('removeHighlight removes it', () => {
