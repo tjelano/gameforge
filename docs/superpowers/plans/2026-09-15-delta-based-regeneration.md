@@ -852,7 +852,6 @@ export async function resolveComponentRegeneration(params: {
   // `alreadyRetried` is true only on the recursive call made from `retryOnce` -- it caps the retry
   // at exactly one attempt (a second unresolved-id/vanish here goes straight to fallback).
   async function finalize(result: ComponentDeltaResult, alreadyRetried: boolean): Promise<RegenerationResult> {
-    if (!log.originalMode) log.originalMode = result.mode;
     let finalTokens: ComponentTokens;
 
     if (result.mode === 'full') {
@@ -946,6 +945,11 @@ export async function resolveComponentRegeneration(params: {
     log.failureStage = 'ai-call';
     return finish({ ok: false, message: e instanceof Error ? e.message : 'Component regeneration failed.' });
   }
+  // Set only here, not generically inside finalize() -- a malformed initial response never
+  // reaches this line at all (it throws above, before aiResult is ever assigned), so a
+  // subsequent successful fallback correctly leaves originalMode absent rather than reporting
+  // the fallback's own mode as if it had been the original response's.
+  log.originalMode = aiResult.mode;
 
   return finalize(aiResult, false);
 }
