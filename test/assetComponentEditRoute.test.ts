@@ -97,6 +97,19 @@ describe('PATCH /api/assets/[id]/component', () => {
     expect(updated!.edited_externally).toBe(1);
   });
 
+  it('strips any data-gf-id already present in trusted paste-back html', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, userId);
+    const res = await PATCH(
+      req({ html: '<button data-gf-id="7">Go</button>', css: '.btn{}', trustAsEdited: true }, cookieHeader),
+      { params: Promise.resolve({ id: asset.id }) }
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.html).not.toContain('data-gf-id');
+  });
+
   it('clears edited_externally on a subsequent ordinary (non-trusted) save', async () => {
     const { cookieHeader, userId } = await seedSession();
     const style = await styleService.create({ name: 'S', createdBy: userId, parameters: '{}' });

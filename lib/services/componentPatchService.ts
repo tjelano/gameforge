@@ -19,7 +19,8 @@ export type PatchError =
   | { code: 'ELEMENT_CHANGED' }
   | { code: 'SANITIZE_REJECTED'; message: string }
   | { code: 'CONFLICT' }
-  | { code: 'WRITE_FAILED'; message: string };
+  | { code: 'WRITE_FAILED'; message: string }
+  | { code: 'TRUSTED_CONTENT'; message: string };
 
 export interface PatchResult {
   ok: true;
@@ -63,6 +64,14 @@ export async function applyElementPatch(params: {
   providerOverride?: OllamaProviderOverride;
 }): Promise<PatchResult | { ok: false; error: PatchError }> {
   const filePath = path.join(getProjectRoot(), 'storage', 'components', params.filename);
+
+  // Enforced here, not just in each route, so every current and future caller of
+  // applyElementPatch inherits the guard rather than relying on each one remembering to duplicate
+  // it (the job-scoped patch route originally didn't — see the final-review-fix-brief).
+  const asset = await assetService.getById(params.assetId);
+  if (asset?.edited_externally === 1) {
+    return { ok: false, error: { code: 'TRUSTED_CONTENT', message: 'Hand-edited components cannot be patched — use full regeneration instead.' } };
+  }
 
   // Reads the stored file, verifies it against the client-sent revision hash, and parses it into
   // {html, css} tokens — the exact three steps both the unlocked pre-check and the locked re-check

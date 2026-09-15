@@ -20,6 +20,7 @@ function statusForError(error: PatchError): number {
     case 'CONFLICT': return 409;
     case 'SANITIZE_REJECTED': return 400;
     case 'WRITE_FAILED': return 500;
+    case 'TRUSTED_CONTENT': return 400;
     default: return 500; // defense-in-depth if PatchError ever grows a case without this switch being updated
   }
 }

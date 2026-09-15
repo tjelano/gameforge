@@ -109,6 +109,18 @@ describe('POST /api/jobs/[id]/component/patch-element', () => {
     expect(res.status).toBe(400);
   });
 
+  it('returns 400 with a clear message for a job whose promoted asset is edited_externally', async () => {
+    // Mirrors test/assetComponentPatchRoute.test.ts's equivalent test — pins parity between the
+    // two patch-element routes now that the edited_externally guard lives in applyElementPatch
+    // itself rather than being duplicated per-route.
+    const { jobId, assetId } = await makeCompleteComponentJob();
+    await assetService.update(assetId!, userId, { editedExternally: true }, true);
+    const res = await POST(postRequest(VALID_BODY), { params: Promise.resolve({ id: jobId }) });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toMatch(/hand-edited/i);
+  });
+
   it('returns 400 for a malformed JSON body instead of a 500', async () => {
     const { jobId } = await makeCompleteComponentJob();
     const req = new NextRequest('http://localhost/x', {
