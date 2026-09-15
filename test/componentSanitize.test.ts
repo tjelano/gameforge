@@ -225,6 +225,15 @@ describe('assignElementIds', () => {
     expect(result).not.toContain('class=');
   });
 
+  it('preserveRootId mode: does NOT strip a gf-<n> class — that stripping is full-write-mode-only', () => {
+    // stripStalePatchClasses is only wired into the full-write branch (a descendant's own
+    // gf-<n> class, e.g. from a prior separate patch before it was nested under this new
+    // patch, has nothing to do with THIS patch's root id and stays intact).
+    const fragment = '<div data-gf-id="root"><button class="gf-3">ok</button></div>';
+    const result = assignElementIds(fragment, { preserveRootId: 'root', startAt: 20 });
+    expect(result).toContain('class="gf-3"');
+  });
+
   it('preserveRootId mode: keeps the root id, reassigns every descendant from startAt', () => {
     const fragment = '<button data-gf-id="stale"><span>ok</span></button>';
     const result = assignElementIds(fragment, { preserveRootId: '7', startAt: 20 });
