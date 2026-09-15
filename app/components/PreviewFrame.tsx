@@ -78,24 +78,15 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // Re-attached on every frame `load` (not just once) — a component preview's iframe navigates
-  // (or reloads, e.g. after a successful patch) while select mode may still be active, and a fresh
-  // document needs its own listener.
-  const attachFrameGuards = useCallback(() => {
+  // Re-attached on every frame `load` (not just once) — a component preview's iframe navigates (or
+  // reloads, e.g. after a successful patch) while select mode may still be active, and the browser
+  // tears down the old contentWindow — and every listener on it, including mousemove/click — on
+  // every navigation. The anchor-nav guard and the mousemove/click listeners are attached together
+  // here so a reload can never re-arm one without the other.
+  const attachAll = useCallback(() => {
     const frame = iframeRef.current;
-    if (!frame || kind !== 'component') return;
-    return preventFrameAnchorNavigation(frame);
-  }, [kind]);
-
-  useEffect(() => {
-    const frame = iframeRef.current;
-    if (!frame || !selectMode) return;
-    let cleanupAnchor = attachFrameGuards();
-    function handleLoad() {
-      cleanupAnchor?.();
-      cleanupAnchor = attachFrameGuards();
-    }
-    frame.addEventListener('load', handleLoad);
+    if (!frame) return;
+    const cleanupAnchor = kind === 'component' ? preventFrameAnchorNavigation(frame) : undefined;
     // Listeners attach to the frame's own contentWindow, not the parent window — clientX/clientY
     // on an event from a listener on the frame's own window are already relative to the frame's
     // own viewport, which is exactly what getElementAt (lib/preview/inspectFrame.ts) requires.
@@ -113,12 +104,26 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
     frame.contentWindow?.addEventListener('click', handleClick);
     return () => {
       cleanupAnchor?.();
-      frame.removeEventListener('load', handleLoad);
       frame.contentWindow?.removeEventListener('mousemove', handleMouseMove);
       frame.contentWindow?.removeEventListener('click', handleClick);
+    };
+  }, [kind]);
+
+  useEffect(() => {
+    const frame = iframeRef.current;
+    if (!frame || !selectMode) return;
+    let cleanupAll = attachAll();
+    function handleLoad() {
+      cleanupAll?.();
+      cleanupAll = attachAll();
+    }
+    frame.addEventListener('load', handleLoad);
+    return () => {
+      cleanupAll?.();
+      frame.removeEventListener('load', handleLoad);
       removeHighlight(frame);
     };
-  }, [selectMode, attachFrameGuards]);
+  }, [selectMode, attachAll]);
 
   function handleFullscreenClick(e: React.MouseEvent) {
     // Defensive on every call site, not just the ones currently wrapped in a <Link> — stops the

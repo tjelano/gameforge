@@ -142,6 +142,34 @@ describe('PreviewFrame', () => {
     expect(screen.queryByRole('button', { name: /apply/i })).toBeNull();
   });
 
+  it('re-attaches mousemove/click listeners after an iframe reload while select mode is on', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf());
+    vi.mocked(getRevisionHash).mockReturnValue('rev-1');
+
+    const { container } = render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" />,
+    );
+    enterFullscreen(container);
+    clickSelectToggle();
+
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+
+    // A real post-patch reload (handlePatched bumping reloadKey, which changes the iframe `src`)
+    // makes the browser tear down the old contentWindow — and every listener on it — and swap in a
+    // brand new one before firing `load`. jsdom doesn't do that on its own for a synthetic `load`
+    // event on an unchanged src, so the swap is forced here to actually reproduce that failure mode
+    // instead of trivially passing against the pre-fix code because the old listeners are still
+    // sitting on an unchanged contentWindow.
+    const newContentWindow = new EventTarget();
+    Object.defineProperty(iframe, 'contentWindow', { value: newContentWindow, configurable: true });
+    fireEvent(iframe, new Event('load'));
+
+    vi.mocked(getElementAt).mockClear();
+    fireEvent(newContentWindow as unknown as Window, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(getElementAt).toHaveBeenCalled();
+  });
+
   it('is the only component in the app rendering an iframe sandbox attribute', () => {
     // A real filesystem grep, not a hardcoded file list — a future new iframe usage in the app
     // directory can't silently bypass PreviewFrame's closed-union sandbox handling without this
