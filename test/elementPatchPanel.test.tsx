@@ -14,7 +14,7 @@
 // without it, a selection from one test's render() would still be mounted (and its effects/timers
 // live) when the next test's render() runs.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { ElementPatchPanel } from '@/app/components/ElementPatchPanel';
 import type { FrameElementInfo } from '@/lib/preview/inspectFrame';
 
@@ -33,6 +33,10 @@ function selectionOf(overrides: Partial<FrameElementInfo & { documentHash: strin
     documentHash: 'h',
     ...overrides,
   };
+}
+
+function typeInstruction(value: string) {
+  fireEvent.change(screen.getByPlaceholderText(/describe the change/i), { target: { value } });
 }
 
 describe('ElementPatchPanel', () => {
@@ -67,7 +71,7 @@ describe('ElementPatchPanel', () => {
     expect(screen.getByText(/hand-edited/i)).toBeTruthy();
   });
 
-  it('calls the patch endpoint with an AbortSignal and calls onPatched on success', async () => {
+  it('calls the patch endpoint with an AbortSignal, trims the instruction, and calls onPatched on success', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: () => Promise.resolve({ success: true, data: {} }),
     });
@@ -82,10 +86,11 @@ describe('ElementPatchPanel', () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/describe the change/i), {
-      target: { value: 'Make it blue' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    // Leading/trailing whitespace: the Apply-enabled check uses instruction.trim(), and the sent
+    // value must match — a raw, untrimmed send would let stray whitespace reach the backend even
+    // though the UI treated the trimmed value as what the user "typed".
+    typeInstruction('  Make it blue  ');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => expect(onPatched).toHaveBeenCalledTimes(1));
 
@@ -101,7 +106,7 @@ describe('ElementPatchPanel', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('aborts the in-flight request when Cancel is clicked', async () => {
+  it('aborts the in-flight request when Cancel is clicked, and Apply reverts to enabled (not stuck on "Applying…")', async () => {
     let capturedSignal: AbortSignal | undefined;
     const fetchMock = vi.fn((_url: string, init: RequestInit) => {
       capturedSignal = init.signal as AbortSignal;
@@ -123,18 +128,21 @@ describe('ElementPatchPanel', () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/describe the change/i), {
-      target: { value: 'Make it blue' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    typeInstruction('Make it blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: /cancel/i })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
 
     await waitFor(() => expect(capturedSignal?.aborted).toBe(true));
-    // An aborted request must not surface the generic network-error message, and Apply must come
-    // back enabled rather than staying stuck in "Applying…".
-    await waitFor(() => expect(screen.getByRole('button', { name: /apply/i })).toBeTruthy());
+
+    // The bug this guards: the button's accessible name while submitting is literally
+    // "Applying…", which /apply/i also matches as a substring — a regex-based query here would
+    // pass identically whether or not Cancel actually reverted the button. `{ name: 'Apply' }`
+    // (an exact string match) only matches the reverted, enabled state, and the explicit
+    // `.disabled` check below is the real assertion.
+    const applyButton = await waitFor(() => screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement);
+    expect(applyButton.disabled).toBe(false);
     expect(screen.queryByText(/could not reach the server/i)).toBeNull();
   });
 
@@ -154,16 +162,144 @@ describe('ElementPatchPanel', () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/describe the change/i), {
-      target: { value: 'Make it blue' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    typeInstruction('Make it blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(capturedSignal).toBeDefined());
     expect(capturedSignal?.aborted).toBe(false);
 
     unmount();
 
     expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it('resets instruction and error when the selection changes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ success: false, error: 'ELEMENT_CHANGED' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'button', dataGfId: '1' })}
+        onPatched={() => {}}
+      />,
+    );
+
+    typeInstruction('Make A blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(screen.getByText(/component changed since you selected/i)).toBeTruthy());
+    expect((screen.getByPlaceholderText(/describe the change/i) as HTMLTextAreaElement).value).toBe('Make A blue');
+
+    // Select a different element (a new dataGfId) without ever clicking Apply for it.
+    rerender(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'span', dataGfId: '2' })}
+        onPatched={() => {}}
+      />,
+    );
+
+    // Both A's leftover instruction text and A's leftover error must be gone under B — otherwise
+    // the error looks like it's about B, and a stray click on Apply would send A's text against
+    // B's dataGfId.
+    expect((screen.getByPlaceholderText(/describe the change/i) as HTMLTextAreaElement).value).toBe('');
+    expect(screen.queryByText(/component changed since you selected/i)).toBeNull();
+  });
+
+  it('ignores a response that arrives after the selection has already changed mid-request', async () => {
+    let resolveFetch: ((value: unknown) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; }));
+    vi.stubGlobal('fetch', fetchMock);
+    const onPatched = vi.fn();
+
+    const { rerender } = render(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'button', dataGfId: '1' })}
+        onPatched={onPatched}
+      />,
+    );
+
+    typeInstruction('Make A blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // Move on to a different element before A's request ever resolves — ElementPatchPanelInner
+    // remounts under the new dataGfId key, which both resets instruction/error/submitting for B
+    // and (via the OLD instance's own unmount cleanup) aborts A's controller.
+    rerender(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'span', dataGfId: '2' })}
+        onPatched={onPatched}
+      />,
+    );
+    typeInstruction('Make B green');
+
+    // A's request finally settles successfully — too late; the response is for a selection
+    // nobody's looking at anymore. This must not fire onPatched, wipe B's just-typed instruction,
+    // or leave B's own Apply button disabled.
+    await act(async () => {
+      resolveFetch?.({ json: () => Promise.resolve({ success: true, data: {} }) });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onPatched).not.toHaveBeenCalled();
+    expect((screen.getByPlaceholderText(/describe the change/i) as HTMLTextAreaElement).value).toBe('Make B green');
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows the server\'s free-text error message verbatim when it is not a recognized PatchError code', async () => {
+    // This is exactly what SANITIZE_REJECTED/WRITE_FAILED actually send per Tasks 9-10's routes
+    // (componentPatchService.ts / the patch-element routes' messageForError) — free text, not one
+    // of the codes in ERROR_MESSAGES.
+    const freeText = 'The AI produced invalid markup near <div>';
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ success: false, error: freeText }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'button', dataGfId: '1' })}
+        onPatched={() => {}}
+      />,
+    );
+    typeInstruction('Make it blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(screen.getByText(freeText)).toBeTruthy());
+  });
+
+  it('shows an unrecognized error string verbatim instead of a garbled message on an Object.prototype key collision', async () => {
+    // If ERROR_MESSAGES were a plain lookup without an own-property guard, `error: 'toString'`
+    // would resolve to the inherited Object.prototype.toString function rather than undefined —
+    // and passing a function straight to setError doesn't even reach render: React treats it as a
+    // functional state updater and calls it with the previous state, so the "error message" that
+    // ends up on screen is literally `Object.prototype.toString(prevError)`'s own return value,
+    // "[object Undefined]" (confirmed against the pre-fix code — this is what actually happens,
+    // not a crash).
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ success: false, error: 'toString' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'button', dataGfId: '1' })}
+        onPatched={() => {}}
+      />,
+    );
+    typeInstruction('Make it blue');
+    expect(() => fireEvent.click(screen.getByRole('button', { name: 'Apply' }))).not.toThrow();
+
+    await waitFor(() => expect(screen.getByText('toString')).toBeTruthy());
   });
 
   it('shows a distinct message per structured error code', async () => {
@@ -179,10 +315,8 @@ describe('ElementPatchPanel', () => {
         onPatched={() => {}}
       />,
     );
-    fireEvent.change(screen.getByPlaceholderText(/describe the change/i), {
-      target: { value: 'Make it blue' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    typeInstruction('Make it blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     const elementChangedMessage = await waitFor(() => {
       const node = screen.getByText((_content, el) => el?.className === 'element-patch-panel-error');
@@ -205,10 +339,8 @@ describe('ElementPatchPanel', () => {
         onPatched={() => {}}
       />,
     );
-    fireEvent.change(screen.getByPlaceholderText(/describe the change/i), {
-      target: { value: 'Make it blue' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+    typeInstruction('Make it blue');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     const sanitizeRejectedMessage = await waitFor(() => {
       const node = screen.getByText((_content, el) => el?.className === 'element-patch-panel-error');
