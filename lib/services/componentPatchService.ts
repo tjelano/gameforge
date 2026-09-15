@@ -1,9 +1,15 @@
+import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import path from 'path';
+import { ZodError } from 'zod';
+import { parseDocument, DomUtils } from 'htmlparser2';
+import type { Element as DomElement } from 'domhandler';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { assetService } from '@/lib/services/AssetService';
 import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
+import type { ComponentDeltaResult } from '@/lib/services/ComponentGenerator';
 import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
+import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 import { parseComponentHtml, combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
 import {
@@ -310,4 +316,242 @@ function ensureClassOnRoot(html: string, className: string): string {
     return html.replace(full, `<${tag}${newAttrs}>`);
   }
   return html.replace(full, `<${tag}${attrs} class="${className}">`);
+}
+
+function isElementNode(node: unknown): node is DomElement {
+  return !!node && typeof node === 'object' && (node as { type?: string }).type === 'tag';
+}
+
+/**
+ * Builds a map of every data-gf-id in `html` to its tag name and classes, for the one-shot
+ * corrective retry's prompt (an id integer alone gives the model nothing to anchor a correction
+ * to -- it needs both halves).
+ */
+function buildIdTagClassMap(html: string): Record<string, { tag: string; classes: string[] }> {
+  const dom = parseDocument(html);
+  const elements = DomUtils.findAll(
+    (el) => isElementNode(el) && typeof el.attribs['data-gf-id'] === 'string',
+    dom.children,
+  ) as DomElement[];
+  const map: Record<string, { tag: string; classes: string[] }> = {};
+  for (const el of elements) {
+    const id = el.attribs['data-gf-id'];
+    map[id] = { tag: el.name, classes: (el.attribs['class'] ?? '').split(/\s+/).filter(Boolean) };
+  }
+  return map;
+}
+
+function buildCorrectionMessage(reason: 'unresolved-id' | 'mid-batch-vanish', offendingId: string, validIdMap: Record<string, { tag: string; classes: string[] }>): string {
+  const explanation = reason === 'unresolved-id'
+    ? `The element with data-gf-id="${offendingId}" does not exist in the current document.`
+    : `Your patch for data-gf-id="${offendingId}" is invalid because an earlier patch in your own response removed that element before this one could be applied.`;
+  return `${explanation} Here is every valid data-gf-id in the current document, with its tag and classes, to help you target correctly: ${JSON.stringify(validIdMap)}. Please resend a corrected response.`;
+}
+
+export type RegenerationResult =
+  | { ok: true; filename: string }
+  | { ok: false; message: string };
+
+const PATCHES_COUNT_CAP = 20;
+const PATCHES_BYTE_CAP_FRACTION = 0.5;
+
+interface RegenerationLogEntry {
+  basedOnAssetId: string;
+  outcome: 'applied' | 'failed';
+  failureStage?: 'final-read' | 'staleness' | 'sanitize-full' | 'ai-call';
+  sourceUntrusted: boolean;
+  originalMode?: 'patches' | 'full';
+  appliedMode?: 'patches' | 'full';
+  retryFired: boolean;
+  initialRejectReason?: 'unresolved-id' | 'mid-batch-vanish';
+  retryOutcome?: 'resolved' | 'still-failed';
+  fallbackUsed: boolean;
+  fallbackReason?: 'retry-failed' | 'sanitize-rejected' | 'cap-exceeded' | 'duplicate-id'
+                 | 'empty-batch' | 'payload-too-large' | 'malformed-response' | 'unparseable-source';
+  filename?: string;
+  durationMs: number;
+}
+
+export async function resolveComponentRegeneration(params: {
+  basedOnAssetId: string;
+  basedOnContent: string;
+  instruction: string;
+  styleId: string;
+  componentType?: string;
+  referenceImage?: ReferenceImagePayload;
+  signal?: AbortSignal;
+  providerOverride?: OllamaProviderOverride;
+}): Promise<RegenerationResult> {
+  const startedAt = Date.now();
+  const log: RegenerationLogEntry = {
+    basedOnAssetId: params.basedOnAssetId,
+    outcome: 'failed',
+    sourceUntrusted: false,
+    retryFired: false,
+    fallbackUsed: false,
+    durationMs: 0,
+  };
+  function finish(result: RegenerationResult): RegenerationResult {
+    log.durationMs = Date.now() - startedAt;
+    if (result.ok) { log.outcome = 'applied'; log.filename = result.filename; }
+    console.log('resolveComponentRegeneration:', JSON.stringify(log));
+    return result;
+  }
+
+  // Step 1: the snapshot to re-verify against at the end.
+  const basedOnContentHash = hashDocument(params.basedOnContent);
+
+  // Step 2: trust flag + the path source for the final recheck (step 10).
+  const sourceAsset = await assetService.getById(params.basedOnAssetId);
+  if (!sourceAsset || !sourceAsset.image_path
+      || sourceAsset.image_path.includes('/') || sourceAsset.image_path.includes('\\') || sourceAsset.image_path.includes('..')
+      || sourceAsset.output_kind !== 'component') {
+    log.failureStage = 'final-read';
+    return finish({ ok: false, message: 'The component this was based on could not be re-read.' });
+  }
+  const sourceFilePath = path.join(getProjectRoot(), 'storage', 'components', sourceAsset.image_path);
+  const sourceUntrusted = sourceAsset.edited_externally === 1;
+  log.sourceUntrusted = sourceUntrusted;
+
+  async function callGenerateDelta(opts: { forceFull: boolean; correction?: string }): Promise<ComponentDeltaResult> {
+    const result = await getComponentGenerator().generate(
+      params.instruction, params.styleId, params.componentType, params.referenceImage,
+      params.basedOnContent, params.signal, params.providerOverride, opts.correction, opts.forceFull,
+    );
+    return result as ComponentDeltaResult;
+  }
+
+  async function runFallback(reason: NonNullable<RegenerationLogEntry['fallbackReason']>): Promise<RegenerationResult> {
+    log.fallbackUsed = true;
+    log.fallbackReason = reason;
+    let fallbackResult: ComponentDeltaResult;
+    try {
+      fallbackResult = await callGenerateDelta({ forceFull: true });
+    } catch (e) {
+      log.failureStage = 'ai-call';
+      return finish({ ok: false, message: e instanceof Error ? e.message : 'Component regeneration failed.' });
+    }
+    return finalize(fallbackResult, true);
+  }
+
+  async function retryOnce(reason: 'unresolved-id' | 'mid-batch-vanish', offendingId: string, sourceTokens: ComponentTokens): Promise<RegenerationResult> {
+    log.retryFired = true;
+    log.initialRejectReason = reason;
+    const validIdMap = buildIdTagClassMap(sourceTokens.html);
+    const correction = buildCorrectionMessage(reason, offendingId, validIdMap);
+
+    let retryResult: ComponentDeltaResult;
+    try {
+      retryResult = await callGenerateDelta({ forceFull: false, correction });
+    } catch (e) {
+      if (e instanceof ZodError) return runFallback('malformed-response');
+      log.failureStage = 'ai-call';
+      return finish({ ok: false, message: e instanceof Error ? e.message : 'Component regeneration failed.' });
+    }
+    return finalize(retryResult, true);
+  }
+
+  // Steps 4-9: resolve `result` into a final {html, css}, or route to a retry/fallback/failure.
+  // `alreadyRetried` is true only on the recursive call made from `retryOnce` -- it caps the retry
+  // at exactly one attempt (a second unresolved-id/vanish here goes straight to fallback).
+  async function finalize(result: ComponentDeltaResult, alreadyRetried: boolean): Promise<RegenerationResult> {
+    let finalTokens: ComponentTokens;
+
+    if (result.mode === 'full') {
+      if (alreadyRetried) log.retryOutcome = 'resolved';
+      let html: string, css: string;
+      try {
+        html = assignElementIds(sanitizeComponentHtml(result.html));
+        css = sanitizeComponentCss(result.css);
+      } catch (e: any) {
+        log.failureStage = 'sanitize-full';
+        return finish({ ok: false, message: e?.message ?? 'Generated component failed validation.' });
+      }
+      finalTokens = { html, css };
+    } else {
+      let sourceTokens: ComponentTokens;
+      try {
+        sourceTokens = parseComponentHtml(params.basedOnContent);
+      } catch {
+        return runFallback('unparseable-source');
+      }
+
+      const patches = result.patches;
+      if (patches.length === 0) return runFallback('empty-batch');
+      if (patches.length > PATCHES_COUNT_CAP) return runFallback('cap-exceeded');
+      const seenIds = new Set<string>();
+      for (const p of patches) {
+        if (seenIds.has(p.dataGfId)) return runFallback('duplicate-id');
+        seenIds.add(p.dataGfId);
+      }
+      const totalBytes = patches.reduce((sum, p) => sum + p.html.length + (p.cssDeclarations?.length ?? 0), 0);
+      if (totalBytes > (sourceTokens.html.length + sourceTokens.css.length) * PATCHES_BYTE_CAP_FRACTION) {
+        return runFallback('payload-too-large');
+      }
+      const unresolved = patches.find((p) => !findElementByDataGfId(sourceTokens.html, p.dataGfId).found);
+      if (unresolved) {
+        if (alreadyRetried) { log.retryOutcome = 'still-failed'; return runFallback('retry-failed'); }
+        return retryOnce('unresolved-id', unresolved.dataGfId, sourceTokens);
+      }
+
+      const patchInputs: PatchInput[] = patches.map((p) => ({ dataGfId: p.dataGfId, html: p.html, cssDeclarations: p.cssDeclarations ?? null }));
+      const bufferResult = applyPatchBuffer(sourceTokens, patchInputs);
+      if (!bufferResult.ok) {
+        if (bufferResult.reason === 'sanitize-rejected') return runFallback('sanitize-rejected');
+        if (alreadyRetried) { log.retryOutcome = 'still-failed'; return runFallback('retry-failed'); }
+        return retryOnce('mid-batch-vanish', bufferResult.dataGfId, sourceTokens);
+      }
+      if (alreadyRetried) log.retryOutcome = 'resolved';
+      finalTokens = bufferResult.tokens;
+    }
+
+    log.appliedMode = result.mode;
+
+    // Step 10: the one point-in-time recheck this design performs.
+    let latest: string;
+    try {
+      latest = await fsPromises.readFile(sourceFilePath, 'utf-8');
+    } catch {
+      log.failureStage = 'final-read';
+      return finish({ ok: false, message: 'The component this was based on could not be re-read.' });
+    }
+    if (hashDocument(latest) !== basedOnContentHash) {
+      log.failureStage = 'staleness';
+      return finish({ ok: false, message: 'Component changed while regenerating — please try again.' });
+    }
+    const recheckAsset = await assetService.getById(params.basedOnAssetId);
+    if ((recheckAsset?.edited_externally === 1) !== sourceUntrusted) {
+      log.failureStage = 'staleness';
+      return finish({ ok: false, message: 'Component changed while regenerating — please try again.' });
+    }
+
+    // Step 11: write once, no lock -- this filename cannot collide with anything else on disk.
+    const filename = `component-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.html`;
+    const componentsDir = path.join(getProjectRoot(), 'storage', 'components');
+    try {
+      await fsPromises.mkdir(componentsDir, { recursive: true });
+      await fsPromises.writeFile(path.join(componentsDir, filename), combineComponentHtml(finalTokens));
+    } catch (e: any) {
+      return finish({ ok: false, message: e?.message ?? 'Failed to write the regenerated component.' });
+    }
+
+    return finish({ ok: true, filename });
+  }
+
+  // Step 3: choose whether patches mode is even attempted.
+  let aiResult: ComponentDeltaResult;
+  try {
+    aiResult = await callGenerateDelta({ forceFull: sourceUntrusted });
+  } catch (e) {
+    if (e instanceof ZodError) return runFallback('malformed-response');
+    log.failureStage = 'ai-call';
+    return finish({ ok: false, message: e instanceof Error ? e.message : 'Component regeneration failed.' });
+  }
+  // Set only here, not generically inside finalize() -- a malformed initial response never
+  // reaches this line at all (it throws above, before aiResult is ever assigned), so a
+  // subsequent successful fallback correctly leaves originalMode absent rather than reporting
+  // the fallback's own mode as if it had been the original response's.
+  log.originalMode = aiResult.mode;
+
+  return finalize(aiResult, false);
 }
