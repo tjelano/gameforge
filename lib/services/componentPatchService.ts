@@ -431,6 +431,17 @@ export async function resolveComponentRegeneration(params: {
       log.failureStage = 'ai-call';
       return finish({ ok: false, message: e instanceof Error ? e.message : 'Component regeneration failed.' });
     }
+    // forceFull: true is specifically supposed to make mode:'patches' structurally impossible
+    // (see ComponentGenerator.ts's generate() -- the useFullTool branch only ever returns
+    // {mode:'full', ...}). That invariant lives in a different file and isn't enforced by the
+    // type system, so guard it explicitly here rather than trusting it blindly: if it's ever
+    // violated by a future change there, fail this job closed immediately instead of recursing
+    // back through finalize() -> runFallback() with no bound, in a worker process that has no
+    // per-job timeout to interrupt a runaway loop.
+    if (fallbackResult.mode !== 'full') {
+      log.failureStage = 'ai-call';
+      return finish({ ok: false, message: 'Fallback regeneration returned an unexpected response shape.' });
+    }
     return finalize(fallbackResult, true);
   }
 
@@ -502,6 +513,11 @@ export async function resolveComponentRegeneration(params: {
         return retryOnce('mid-batch-vanish', bufferResult.dataGfId, sourceTokens);
       }
       if (alreadyRetried) log.retryOutcome = 'resolved';
+      const combined = combineComponentHtml(bufferResult.tokens);
+      const roundTripped = parseComponentHtml(combined);
+      if (roundTripped.html !== bufferResult.tokens.html || roundTripped.css !== bufferResult.tokens.css) {
+        return runFallback('sanitize-rejected');
+      }
       finalTokens = bufferResult.tokens;
     }
 

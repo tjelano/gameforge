@@ -382,4 +382,21 @@ describe('resolveComponentRegeneration', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toContain('changed while regenerating');
   });
+
+  it('fails closed instead of recursing if a forceFull fallback call ever returns mode:patches (defensive guard against a future generate() regression)', async () => {
+    const source = await seedSourceAsset();
+    const generate = await mockGenerate(async () => {
+      // Always returns patches mode, even under forceFull -- simulates a hypothetical future
+      // regression in generate() that violates its own "forceFull:true only returns mode:'full'"
+      // contract, which runFallback() must not trust blindly.
+      return { mode: 'patches', patches: [{ dataGfId: '999', html: '<button data-gf-id="999">x</button>', cssDeclarations: null }] };
+    });
+
+    const result = await resolveComponentRegeneration(baseParams(source));
+
+    expect(result.ok).toBe(false);
+    // initial attempt (unresolved id "999") -> one retry (still unresolved) -> one fallback
+    // attempt (still mode:'patches', caught by the new guard) -- exactly 3 calls, then it stops.
+    expect(generate).toHaveBeenCalledTimes(3);
+  });
 });
