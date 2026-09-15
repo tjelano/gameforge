@@ -207,6 +207,38 @@ describe('POST /api/assets/[id]/share-to-drive', () => {
     expect(uploaded).toContain('gf-1');
   });
 
+  it("uploads a trusted component's hand-edited HTML byte-identical to what was stored — proves stripElementIds's early return fires (no data-gf-id to strip) instead of an unconditional parse/re-serialize round trip", async () => {
+    // Single-quoted attribute + an unquoted boolean attribute: a parse/
+    // re-serialize round trip normalizes both (confirmed empirically with
+    // htmlparser2/dom-serializer: `class='hero'` -> `class="hero"`,
+    // `checkbox` unquoted -> quoted). Trusted content never carries
+    // data-gf-id (Task 4's design), so stripElementIds always hits its
+    // zero-match path for an edited_externally asset — this fixture makes
+    // a silent reformat on that path observable instead of passing by
+    // coincidence the way an already-canonical fragment would.
+    const bodyFragment = "<div class='hero'><input type=checkbox checked></div>";
+    const document = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+      + `<body>${bodyFragment}</body></html>`;
+    const { getCurrentUser } = await import('@/lib/utils/session');
+    const { assetService } = await import('@/lib/services/AssetService');
+    const { driveService } = await import('@/lib/services/DriveService');
+    vi.mocked(getCurrentUser).mockResolvedValue({ id: 'user1', name: 'Alice', is_admin: 0, created_at: 0 } as any);
+    vi.mocked(assetService.getById).mockResolvedValue({
+      id: 'asset1', image_path: 'component-4.html', output_kind: 'component', prompt: 'x', edited_externally: 1,
+    } as any);
+    vi.mocked(driveService.uploadFile).mockResolvedValue({ id: 'drive-file-5' } as any);
+    await fsPromises.mkdir(path.join(tempRoot, 'storage', 'components'), { recursive: true });
+    await fsPromises.writeFile(path.join(tempRoot, 'storage', 'components', 'component-4.html'), document);
+
+    const { POST } = await import('@/app/api/assets/[id]/share-to-drive/route');
+    const res = await POST(postRequest({ parentFolderId: 'root' }), { params: Promise.resolve({ id: 'asset1' }) });
+
+    expect(res.status).toBe(200);
+    const uploadedStream = vi.mocked(driveService.uploadFile).mock.calls[0][0].stream;
+    const uploaded = await streamToString(uploadedStream);
+    expect(uploaded).toContain(bodyFragment);
+  });
+
   it('uploads the raw file bytes unchanged for a non-component (image) asset', async () => {
     // Confirms this task's new branch is scoped to output_kind ===
     // 'component' only — images still go straight through

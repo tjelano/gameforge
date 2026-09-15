@@ -187,6 +187,30 @@ describe('GET /api/pages/[id]/render', () => {
     expect(body).toContain('gf-1');
   });
 
+  it("renders a trusted component's hand-edited HTML byte-identical to what was stored — proves stripElementIds's early return fires (no data-gf-id to strip) instead of an unconditional parse/re-serialize round trip", async () => {
+    // Single-quoted attribute + an unquoted boolean attribute: a parse/
+    // re-serialize round trip normalizes both (confirmed empirically with
+    // htmlparser2/dom-serializer: `class='hero'` -> `class="hero"`,
+    // `checkbox` unquoted -> quoted). Trusted content never carries
+    // data-gf-id (Task 4's design), so stripElementIds always hits its
+    // zero-match path for an edited_externally asset — this fixture makes
+    // a silent reformat on that path observable instead of passing by
+    // coincidence the way an already-canonical fragment would.
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const bodyFragment = "<div class='hero'><input type=checkbox checked></div>";
+    const document = '<!DOCTYPE html><html><head><style>.hero { color: red; }</style></head>'
+      + `<body>${bodyFragment}</body></html>`;
+    const asset = await makeComponentAsset(style.id, 'trusted-quirky.html', document);
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain(bodyFragment);
+  });
+
   it('with ?download=1, sets Content-Disposition to attachment with a slugified filename', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
     const page = await pageService.create({ styleId: style.id, name: 'My Landing Page!', createdBy: 'user-1' });

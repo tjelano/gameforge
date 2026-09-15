@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { parseDocument } from 'htmlparser2';
-import render from 'dom-serializer';
 import {
   findElementByDataGfId,
   replaceElementByDataGfId,
@@ -111,7 +109,12 @@ describe('stripElementIds', () => {
 
   it('is a no-op on html with no data-gf-id attributes', () => {
     const html = '<div><span>hi</span></div>';
-    expect(stripElementIds(html)).toBe(render(parseDocument(html)));
+    expect(stripElementIds(html)).toBe(html);
+  });
+
+  it('returns the exact same string instance-equivalent value when nothing matches, even with quirky formatting that a parse/serialize round-trip would normally reshape', () => {
+    const html = '<div   class=\'a b\'><span>hi &amp; bye</span></div>';
+    expect(stripElementIds(html)).toBe(html);
   });
 });
 

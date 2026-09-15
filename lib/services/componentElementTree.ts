@@ -78,6 +78,7 @@ export function stripElementIds(html: string): string {
     (el) => isElement(el) && typeof el.attribs['data-gf-id'] === 'string',
     dom.children,
   ) as DomElement[];
+  if (matches.length === 0) return html;
   for (const el of matches) {
     delete el.attribs['data-gf-id'];
   }
