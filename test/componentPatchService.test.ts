@@ -9,7 +9,7 @@ import { styleService } from '@/lib/services/StyleService';
 import { assetService } from '@/lib/services/AssetService';
 import { combineComponentHtml } from '@/lib/services/componentDocument';
 import { hashDocument } from '@/lib/services/componentElementTree';
-import { applyElementPatch } from '@/lib/services/componentPatchService';
+import { applyElementPatch, applyPatchBuffer } from '@/lib/services/componentPatchService';
 import type { PatchedElement } from '@/lib/services/ComponentGenerator';
 
 let tempRoot: string;
@@ -288,5 +288,82 @@ describe('applyElementPatch', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('WRITE_FAILED');
+  });
+});
+
+describe('applyPatchBuffer', () => {
+  it('applies two patches to two different elements in one pass', () => {
+    const tokens = {
+      html: '<div><button data-gf-id="1">Buy</button><span data-gf-id="2">Free shipping</span></div>',
+      css: '',
+    };
+    const result = applyPatchBuffer(tokens, [
+      { dataGfId: '1', html: '<button data-gf-id="1">Buy now</button>', cssDeclarations: null },
+      { dataGfId: '2', html: '<span data-gf-id="2">Ships free</span>', cssDeclarations: null },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.tokens.html).toContain('Buy now');
+      expect(result.tokens.html).toContain('Ships free');
+      expect(result.appliedIds).toEqual(['1', '2']);
+    }
+  });
+
+  it('assigns distinct new descendant ids across two patches that each introduce new elements', () => {
+    const tokens = { html: '<div><button data-gf-id="1">Buy</button><span data-gf-id="2">Free shipping</span></div>', css: '' };
+    const result = applyPatchBuffer(tokens, [
+      { dataGfId: '1', html: '<button data-gf-id="1">Buy<i>!</i></button>', cssDeclarations: null },
+      { dataGfId: '2', html: '<span data-gf-id="2">Ships<i>!</i></span>', cssDeclarations: null },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.newDescendantIds.length).toBe(2);
+      expect(new Set(result.newDescendantIds).size).toBe(2);
+    }
+  });
+
+  it('reports a mid-batch vanish when an earlier patch removes a later patch\'s target', () => {
+    const tokens = { html: '<div><div data-gf-id="1"><span data-gf-id="2">inner</span></div></div>', css: '' };
+    const result = applyPatchBuffer(tokens, [
+      { dataGfId: '1', html: '<div data-gf-id="1">replaced, no more inner span</div>', cssDeclarations: null },
+      { dataGfId: '2', html: '<span data-gf-id="2">this target is now gone</span>', cssDeclarations: null },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.reason === 'vanished') {
+      expect(result.dataGfId).toBe('2');
+    } else {
+      expect.fail('expected a vanished result');
+    }
+  });
+
+  it('rejects a sanitize failure on any one patch as a whole-batch failure', () => {
+    const tokens = { html: '<div><button data-gf-id="1">Buy</button></div>', css: '' };
+    const result = applyPatchBuffer(tokens, [
+      { dataGfId: '1', html: '<button data-gf-id="1">Buy</button></style><script>bad</script>', cssDeclarations: null },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('sanitize-rejected');
+  });
+
+  it('rejects a patch whose html has more than one top-level element', () => {
+    const tokens = { html: '<div><button data-gf-id="1">Buy</button></div>', css: '' };
+    const result = applyPatchBuffer(tokens, [
+      { dataGfId: '1', html: '<button data-gf-id="1">Buy</button><span>extra root</span>', cssDeclarations: null },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('sanitize-rejected');
+  });
+
+  it('documents last-writer-wins: a later patch to an ancestor silently discards an earlier patch to its descendant', () => {
+    const tokens = { html: '<div><div data-gf-id="5"><span data-gf-id="7">inner</span></div></div>', css: '' };
+    const result = applyPatchBuffer(tokens, [
+      { dataGfId: '7', html: '<span data-gf-id="7">patched inner</span>', cssDeclarations: null },
+      { dataGfId: '5', html: '<div data-gf-id="5">replaced whole subtree, no span at all</div>', cssDeclarations: null },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.tokens.html).not.toContain('patched inner');
+      expect(result.tokens.html).toContain('replaced whole subtree');
+    }
   });
 });

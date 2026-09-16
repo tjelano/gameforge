@@ -7,6 +7,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { getImageGenerator } from '@/lib/services/ImageGenerator';
 import { getThemeGenerator } from '@/lib/services/ThemeGenerator';
 import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
+import { resolveComponentRegeneration } from '@/lib/services/componentPatchService';
 import { assetService } from '@/lib/services/AssetService';
 import { loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referenceImage';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
@@ -163,7 +164,20 @@ export async function processJob(job: any): Promise<void> {
       case 'component': {
         const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
         const providerOverride = buildOllamaOverride(options);
-        result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent, undefined, providerOverride);
+        if (basedOnContent !== undefined && typeof options.basedOnAssetId === 'string') {
+          const resolved = await resolveComponentRegeneration({
+            basedOnAssetId: options.basedOnAssetId,
+            basedOnContent,
+            instruction: job.prompt,
+            styleId: job.style_id,
+            referenceImage: referenceImage ?? undefined,
+            providerOverride,
+          });
+          if (!resolved.ok) throw new Error(resolved.message);
+          result = { path: resolved.filename };
+        } else {
+          result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent, undefined, providerOverride) as { path: string };
+        }
         break;
       }
       case 'image': {

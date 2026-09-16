@@ -5,7 +5,7 @@ import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
 import { DatabaseConnection } from '@/lib/database';
 import { styleService } from '@/lib/services/StyleService';
-import { ClaudeApiComponentGenerator } from '@/lib/services/ComponentGenerator';
+import { ClaudeApiComponentGenerator, type GeneratedComponent } from '@/lib/services/ComponentGenerator';
 import { ANTHROPIC_PROVIDER } from '@/lib/services/claudeApiProviders';
 
 let tempRoot: string;
@@ -71,7 +71,15 @@ describe('ClaudeApiComponentGenerator with a reference image', () => {
 
   it('includes basedOnContent in the prompt text when regenerating from an existing asset', async () => {
     const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
-    const fetchMock = mockToolUseResponse();
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        content: [{
+          type: 'tool_use', id: 't1', name: 'emit_component_delta',
+          input: { mode: 'full', html: '<button>Go</button>', css: '.x { color: red; }' },
+        }],
+        stop_reason: 'tool_use',
+      }), { status: 200 })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
@@ -163,7 +171,7 @@ describe("ClaudeApiComponentGenerator sanitizes the raw model output before writ
     ));
 
     const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
-    const result = await generator.generate('a button', style.id);
+    const result = await generator.generate('a button', style.id) as GeneratedComponent;
 
     const filePath = path.join(tempRoot, 'storage', 'components', result.path);
     const content = await fsPromises.readFile(filePath, 'utf-8');
