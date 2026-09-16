@@ -99,16 +99,17 @@ const ComponentDeltaResultSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('full'), html: z.string(), css: z.string() }).strict(),
 ]);
 
-function buildComponentPrompt(styleParameters: string, jobPrompt: string, componentType?: string, basedOnContent?: string): string {
+function buildComponentPrompt(styleParameters: string, jobPrompt: string, componentType?: string, basedOnContent?: string, toolInstruction?: string): string {
   const typeHint = componentType ? `Component type: ${componentType}.\n\n` : '';
   const basedOnSection = basedOnContent
     ? `\n\nHere is the current version's HTML+CSS, to use as your starting point for the requested change:\n${basedOnContent}`
     : '';
+  const closing = toolInstruction ?? "Respond by calling the emit_component tool with the component's html and css.";
   return `You are generating a single, reusable website UI component as plain HTML and CSS (no React, no JavaScript). ${typeHint}Style Bible parameters (JSON): ${styleParameters}
 
 Description: ${jobPrompt}${basedOnSection}
 
-Respond by calling the emit_component tool with the component's html and css.`;
+${closing}`;
 }
 
 /** Real Claude Messages API implementation — mirrors ClaudeApiThemeGenerator's exact pattern (direct fetch, forced tool_choice, no SDK dependency). */
@@ -181,13 +182,20 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
 
     // Regenerate-with-changes (basedOnContent present): never writes to disk on this path,
     // regardless of the resulting mode -- resolveComponentRegeneration() (Task 3) owns every write.
-    const fullPrompt = correction ? `${basePrompt}\n\n${correction}` : basePrompt;
     const useFullTool = forceFull === true;
     const toolName = useFullTool ? 'emit_component' : 'emit_component_delta';
     const toolDescription = useFullTool
       ? 'Emit a single website UI component as HTML and CSS.'
       : 'Emit either a list of targeted element patches, or a full replacement component, as HTML and CSS.';
     const inputSchema = useFullTool ? TOOL_INPUT_SCHEMA : DELTA_TOOL_INPUT_SCHEMA;
+    // Rebuild the base prompt with the correct tool name in the closing sentence, then
+    // append any correction text. Without this, the AI was told to call emit_component even
+    // when the registered tool was emit_component_delta.
+    const deltaToolInstruction = useFullTool
+      ? "Respond by calling the emit_component tool with the component's html and css."
+      : "Respond by calling the emit_component_delta tool. Choose mode 'patches' when the instruction only changes existing elements' content or styling; choose mode 'full' when it requires adding, removing, or reordering elements.";
+    const deltaBasePrompt = buildComponentPrompt(style?.parameters ?? '{}', prompt, componentType, basedOnContent, deltaToolInstruction);
+    const fullPrompt = correction ? `${deltaBasePrompt}\n\n${correction}` : deltaBasePrompt;
 
     const content: string | Array<Record<string, unknown>> = referenceImage
       ? [
@@ -223,7 +231,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
         });
 
     if (useFullTool) {
-      const raw = z.object({ html: z.string(), css: z.string() }).strict().parse(toolInput);
+      const raw = z.object({ html: z.string(), css: z.string() }).parse(toolInput);
       return { mode: 'full', html: raw.html, css: raw.css };
     }
     return ComponentDeltaResultSchema.parse(toolInput);
