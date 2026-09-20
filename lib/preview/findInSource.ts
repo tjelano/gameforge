@@ -23,8 +23,10 @@ function escapeRegExp(s: string): string {
 // lookahead (not a consuming boundary group) so the match itself is exactly `.gf-<id>`, with no
 // adjacent word character on either side, so `.gf-3` never matches inside `.gf-31` or `prefix-gf-3`.
 function findCssRuleRange(css: string, dataGfId: string): SourceMatch | null {
-  const selector = `.gf-${escapeRegExp(dataGfId)}`;
-  const re = new RegExp(`(?<![-\\w])${escapeRegExp(selector)}(?![-\\w])`);
+  // Escaped once, as a single already-literal `.gf-<id>` string — escaping dataGfId on its own
+  // first and then escaping that result again would double-escape any regex-special character in
+  // a hypothetical non-digit id, producing a pattern that could never match real CSS.
+  const re = new RegExp(`(?<![-\\w])${escapeRegExp(`.gf-${dataGfId}`)}(?![-\\w])`);
   const m = re.exec(css);
   if (!m) return null;
   return { start: m.index, end: m.index + m[0].length };

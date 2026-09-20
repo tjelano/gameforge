@@ -50,4 +50,12 @@ describe('resolveSourceTarget', () => {
     expect(() => resolveSourceTarget('3.', '', css)).not.toThrow();
     expect(resolveSourceTarget('3.', '', css).css).toBeNull();
   });
+
+  it('still finds a regex-special id when the CSS actually contains that literal selector (single-escape, not double-escape)', () => {
+    // A hypothetical non-digit id containing a regex-special character — real ids are digit-only,
+    // but the escaping must still find a genuine match, not just fail safe on one that isn't real.
+    const css = '.gf-3.x { color: red; }';
+    const result = resolveSourceTarget('3.x', '', css);
+    expect(result.css).toEqual({ start: 0, end: 7 });
+  });
 });
