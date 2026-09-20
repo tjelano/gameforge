@@ -46,7 +46,13 @@ describe('getDesignMd', () => {
   });
 
   it('fetches DESIGN.md for a valid slug and caches the result', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: () => Promise.resolve('# DESIGN.md content') });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-length', '18']]),
+      body: null,
+      text: () => Promise.resolve('# DESIGN.md content'),
+    });
     global.fetch = fetchMock as any;
 
     const first = await getDesignMd('acme-corp');
@@ -66,7 +72,13 @@ describe('getDesignMd', () => {
   });
 
   it('throws InspoHttpError with the status on a non-2xx response', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('not found') }) as any;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: new Map(),
+      body: null,
+      text: () => Promise.resolve('not found'),
+    }) as any;
     await expect(getDesignMd('missing-site')).rejects.toBeInstanceOf(InspoHttpError);
     await expect(getDesignMd('missing-site-2')).rejects.toMatchObject({ status: 404 });
   });
