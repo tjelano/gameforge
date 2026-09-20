@@ -88,19 +88,21 @@ export async function getDesignMd(slug: string): Promise<string> {
   try {
     if (!res.ok) {
       // Release socket to keep-alive pool without buffering the error body
-      res.body?.cancel();
+      await res.body?.cancel().catch(() => {});
       throw new InspoHttpError(res.status, `Inspo returned ${res.status}`);
     }
 
     // ponytail: size limit checks the Content-Length header (not streaming byte-count),
-    // with a post-read fallback for servers that lie about their Content-Length.
-    // A server sending false/small header but huge body still buffers once — acceptable
-    // for this known/generally-reliable API; true streaming reader is the upgrade path.
+    // with a post-read fallback for responses missing/lying about Content-Length.
+    // When Content-Length is present and accurate, pre-check prevents buffering large responses.
+    // When missing (e.g. Transfer-Encoding: chunked) or false, the full buffer is read before
+    // post-check enforces the limit — acceptable for this known/generally-reliable API;
+    // true streaming reader is the upgrade path if needed.
     const contentLength = res.headers.get('content-length');
     if (contentLength) {
       const length = parseInt(contentLength, 10);
       if (length > DESIGN_MD_CACHE_MAX_SIZE_BYTES) {
-        res.body?.cancel();
+        await res.body?.cancel().catch(() => {});
         throw new InspoHttpError(413, `Inspo DESIGN.md exceeds size limit (${length} > ${DESIGN_MD_CACHE_MAX_SIZE_BYTES} bytes)`);
       }
     }
@@ -116,7 +118,7 @@ export async function getDesignMd(slug: string): Promise<string> {
   }
 
   // Double-check byte size in case Content-Length header was wrong/missing
-  const byteLength = Buffer.byteLength(content, 'utf8');
+  const byteLength = new TextEncoder().encode(content).length;
   if (byteLength > DESIGN_MD_CACHE_MAX_SIZE_BYTES) {
     throw new InspoHttpError(413, `Inspo DESIGN.md exceeds size limit (${byteLength} > ${DESIGN_MD_CACHE_MAX_SIZE_BYTES} bytes)`);
   }

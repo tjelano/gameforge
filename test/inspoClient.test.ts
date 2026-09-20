@@ -49,7 +49,7 @@ describe('getDesignMd', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      headers: new Map([['content-length', '18']]),
+      headers: new Headers({ 'content-length': '19' }),
       body: null,
       text: () => Promise.resolve('# DESIGN.md content'),
     });
@@ -75,7 +75,7 @@ describe('getDesignMd', () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
-      headers: new Map(),
+      headers: new Headers(),
       body: null,
       text: () => Promise.resolve('not found'),
     }) as any;
