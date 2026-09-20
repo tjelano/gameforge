@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { Job } from '@/lib/database/schema';
 import { parseComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import { PreviewFrame } from '@/app/components/PreviewFrame';
+import { resolveSourceTarget } from '@/lib/preview/findInSource';
+import type { FrameElementInfo } from '@/lib/preview/inspectFrame';
 
 const DEBOUNCE_MS = 400;
 
@@ -17,6 +19,8 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
   const [resetting, setResetting] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const htmlRef = useRef<HTMLTextAreaElement>(null);
+  const cssRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -69,6 +73,30 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  // No .focus() here — an unfocused selection is a reasonable default regardless, and it avoids
+  // ever fighting another focused input (e.g. ElementPatchPanel's own instruction field, on the
+  // rare chance a future change lets this fire alongside it). setSelectionRange still shows a
+  // visible (if unfocused) selection, and scrollIntoView brings the field on screen without moving
+  // keyboard focus.
+  function selectInTextarea(ta: HTMLTextAreaElement, range: { start: number; end: number }) {
+    ta.setSelectionRange(range.start, range.end);
+    ta.scrollIntoView({ block: 'nearest' });
+  }
+
+  function handleElementClick(info: FrameElementInfo) {
+    if (!tokens) return;
+    const target = resolveSourceTarget(info.dataGfId, tokens.html, tokens.css);
+    if (target.html && htmlRef.current) selectInTextarea(htmlRef.current, target.html);
+    // Most elements have no per-element CSS rule (only ones touched by element-specific patching
+    // do) — a missing css match is the expected common case, not a failure to report.
+    if (target.css && cssRef.current) selectInTextarea(cssRef.current, target.css);
+    // `info.dataGfId === null` means the click landed on hand-edited/trusted content that was
+    // never assigned an id in the first place — not a failed match, so nothing to log there.
+    if (info.dataGfId && !target.html && !target.css) {
+      console.debug('Jump to source: no match for data-gf-id', info.dataGfId);
+    }
+  }
+
   async function handleReset() {
     if (resetting) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -111,6 +139,7 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
           border
           kind="component"
           patchEndpoint={`/api/jobs/${job.id}/component/patch-element`}
+          onElementClick={handleElementClick}
         />
 
         <div className="card" style={{ flex: 1, minWidth: 280 }}>
@@ -118,6 +147,7 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
             <label htmlFor="html">HTML</label>
             <textarea
               id="html"
+              ref={htmlRef}
               value={tokens.html}
               onChange={e => handleFieldChange('html', e.target.value)}
               rows={8}
@@ -127,6 +157,7 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
             <label htmlFor="css">CSS</label>
             <textarea
               id="css"
+              ref={cssRef}
               value={tokens.css}
               onChange={e => handleFieldChange('css', e.target.value)}
               rows={8}
