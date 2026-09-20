@@ -1,3 +1,6 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
 // Slug shape is observational (matches what Inspo's own search results
 // return as of 2026-09-20), not a fixed security policy — if real usage
 // turns up legitimate slugs this rejects, widen the charset then. The
@@ -128,4 +131,80 @@ export async function getDesignMd(slug: string): Promise<string> {
   designMdCache.delete(slug);
   designMdCache.set(slug, { content, fetchedAt: Date.now() });
   return content;
+}
+
+// Lazily-created, per-process singleton — not a fresh connection per call.
+// The initialize handshake and Mcp-Session-Id happen once and are reused
+// across search/recommend/find_components calls for the process's
+// lifetime, so a logical tool call costs one tools/call round trip against
+// the shared rate limit in the common case, not the full 2-4-round-trip
+// handshake every time.
+let clientPromise: Promise<Client> | null = null;
+
+function createClient(): Promise<Client> {
+  return (async () => {
+    const transport = new StreamableHTTPClientTransport(new URL(`${getInspoBaseUrl()}/api/mcp`));
+    const client = new Client({ name: 'gameforge', version: '1.0.0' });
+    await client.connect(transport);
+    return client;
+  })();
+}
+
+function getClient(): Promise<Client> {
+  if (!clientPromise) clientPromise = createClient();
+  return clientPromise;
+}
+
+// Test-only: forces the next getClient() call to reconnect, matching what
+// resetForTests()-style helpers do elsewhere in this codebase.
+export function resetInspoClientForTests(): void {
+  clientPromise = null;
+}
+
+function withDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Inspo MCP call timed out after ${deadlineMs}ms`)), deadlineMs);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+function isSessionInvalidError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /session/i.test(message) && /(invalid|expired|not found)/i.test(message);
+}
+
+/**
+ * Calls one MCP tool by name against the shared singleton client. The whole
+ * attempt (handshake-if-needed + the tools/call itself) is bounded by
+ * deadlineMs. If the call fails with a session-invalid/expired error, this
+ * reconnects (re-runs initialize) once and retries — inside the SAME
+ * deadline, not a fresh one, since a genuinely timed-out call has already
+ * exhausted its budget and isn't retried at all.
+ */
+export async function callMcpTool<T>(name: string, args: Record<string, unknown>, deadlineMs: number): Promise<T> {
+  const deadline = Date.now() + deadlineMs;
+
+  async function attempt(): Promise<T> {
+    const client = await getClient();
+    const remaining = Math.max(0, deadline - Date.now());
+    const result = await withDeadline(client.callTool({ name, arguments: args }) as Promise<any>, remaining);
+    const text = result?.content?.[0]?.text;
+    if (typeof text !== 'string') {
+      throw new Error(`Inspo MCP tool "${name}" returned an unexpected shape`);
+    }
+    return JSON.parse(text) as T;
+  }
+
+  try {
+    return await attempt();
+  } catch (error) {
+    if (isSessionInvalidError(error) && Date.now() < deadline) {
+      clientPromise = null;
+      return attempt();
+    }
+    throw error;
+  }
 }

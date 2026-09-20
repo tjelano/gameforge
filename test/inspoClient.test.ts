@@ -83,3 +83,42 @@ describe('getDesignMd', () => {
     await expect(getDesignMd('missing-site-2')).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe('callMcpTool', () => {
+  // The MCP Client/transport are mocked at the module level so these tests
+  // exercise callMcpTool's own deadline/reconnect logic, not the real SDK
+  // handshake (that's covered by the recorded-fixture contract test in
+  // Task 4's test file, run against a real captured response shape).
+  it('resolves with the tool result on success', async () => {
+    const mockClient = { callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"ok":true}' }] }) };
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
+      Client: vi.fn(() => mockClient),
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
+      StreamableHTTPClientTransport: vi.fn(() => ({})),
+    }));
+    vi.resetModules();
+    const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
+    mockClient.callTool.mockClear();
+    (mockClient as any).connect = vi.fn().mockResolvedValue(undefined);
+
+    const result = await freshCallMcpTool<{ ok: boolean }>('search_screens', { query: 'test' }, 3000);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('rejects when the call exceeds its deadline', async () => {
+    vi.useFakeTimers();
+    const neverResolves = new Promise(() => {});
+    const mockClient = { callTool: vi.fn().mockReturnValue(neverResolves), connect: vi.fn().mockResolvedValue(undefined) };
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: vi.fn(() => mockClient) }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.resetModules();
+    const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
+
+    const callPromise = freshCallMcpTool('search_screens', {}, 1000);
+    const assertion = expect(callPromise).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1100);
+    await assertion;
+    vi.useRealTimers();
+  });
+});
