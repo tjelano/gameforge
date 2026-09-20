@@ -110,4 +110,88 @@ describe('PageService', () => {
     const fetched = await pageService.getById(page.id);
     expect(fetched?.is_deleted).toBe(0);
   });
+
+  describe('findPagesReferencingAsset', () => {
+    it('finds a page whose component_asset_ids includes the target', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a1', 'a2']) });
+
+      const found = await pageService.findPagesReferencingAsset('a1');
+      expect(found.map(p => p.id)).toEqual([page.id]);
+    });
+
+    it('excludes a page that references a different asset', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a1']) });
+
+      const found = await pageService.findPagesReferencingAsset('a2');
+      expect(found).toEqual([]);
+    });
+
+    it('excludes a soft-deleted page even if it still references the asset', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a1']) });
+      await pageService.softDelete(page.id, 'user-1');
+
+      const found = await pageService.findPagesReferencingAsset('a1');
+      expect(found).toEqual([]);
+    });
+
+    it('finds the target id among several other ids on the same page', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a0', 'a1', 'a2']) });
+
+      const found = await pageService.findPagesReferencingAsset('a1');
+      expect(found.map(p => p.id)).toEqual([page.id]);
+    });
+
+    it('returns multiple matching pages, newest first', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const pageOlder = await pageService.create({ styleId: style.id, name: 'Older', createdBy: 'user-1' });
+      const pageNewer = await pageService.create({ styleId: style.id, name: 'Newer', createdBy: 'user-1' });
+      await pageService.update(pageOlder.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+      await pageService.update(pageNewer.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+      // Force distinct, unambiguous timestamps — two pageService.create() calls in the same test
+      // can land in the same millisecond, which would make an order assertion flaky rather than
+      // actually prove the ORDER BY clause.
+      const db = DatabaseConnection.getInstance();
+      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(1000, pageOlder.id);
+      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(2000, pageNewer.id);
+
+      const found = await pageService.findPagesReferencingAsset('shared');
+      expect(found.map(p => p.id)).toEqual([pageNewer.id, pageOlder.id]);
+    });
+
+    it('breaks a created_at tie deterministically by id, per the ORDER BY clause', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const db = DatabaseConnection.getInstance();
+      // Explicit ids inserted in the OPPOSITE order of what ascending-id sort should produce —
+      // pageService.create()'s random UUIDs can't guarantee this (id order vs. insertion order
+      // only disagree for a random pair about half the time). If the query's real `, id` clause
+      // were ever dropped, SQLite's rowid/insertion-order fallback would return the high-id row
+      // FIRST (it was inserted first) — the opposite of this test's expectation — so this only
+      // passes when the tiebreaker clause is actually doing the sorting, not by coincidence.
+      const highId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+      const lowId = '00000000-0000-4000-8000-000000000000';
+      const tiedTimestamp = 5000;
+      const insertPage = (id: string) => db.prepare(
+        `INSERT INTO pages (id, style_id, name, created_by, component_asset_ids, is_deleted, created_at, updated_at)
+         VALUES (?, ?, 'x', 'user-1', '["shared"]', 0, ?, ?)`
+      ).run(id, style.id, tiedTimestamp, tiedTimestamp);
+      insertPage(highId);
+      insertPage(lowId);
+
+      const found = await pageService.findPagesReferencingAsset('shared');
+      expect(found.map(p => p.id)).toEqual([lowId, highId]);
+    });
+
+    it('returns an empty array when nothing references the asset', async () => {
+      const found = await pageService.findPagesReferencingAsset('nonexistent');
+      expect(found).toEqual([]);
+    });
+  });
 });

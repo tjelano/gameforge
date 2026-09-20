@@ -28,6 +28,16 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
   const [deleting, setDeleting] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [componentTokens, setComponentTokens] = useState<{ html: string; css: string } | null>(null);
+  // Stores which asset id the fetched list is FOR, not just the list — so the displayed value
+  // (derived below) can never show one asset's page list attributed to a different one after a
+  // client-side navigation between two asset ids (this page component is reused, not remounted,
+  // across that navigation). The effect below only ever SETS this, never clears it — clearing
+  // synchronously in an effect body trips this codebase's react-hooks/set-state-in-effect lint
+  // rule (see ElementPatchPanel.tsx for the same lesson learned elsewhere); deriving from an id
+  // comparison instead means the stale value stops being USED the instant `id` changes, even
+  // before the new fetch resolves — no explicit clear needed at all.
+  const [usedByFetch, setUsedByFetch] = useState<{ forId: string; pages: { id: string; name: string }[] } | null>(null);
+  const usedByPages = usedByFetch?.forId === id ? usedByFetch.pages : [];
   const [trustAsEdited, setTrustAsEdited] = useState(false);
   const [savingComponent, setSavingComponent] = useState(false);
   const [componentSaveError, setComponentSaveError] = useState<string | null>(null);
@@ -92,6 +102,23 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     })();
     return () => { ignore = true; };
   }, [asset?.output_kind, asset?.image_path]);
+
+  useEffect(() => {
+    if (asset?.output_kind !== 'component') return;
+    let ignore = false;
+    (async () => {
+      try {
+        const body = await (await fetch(`/api/assets/${id}/used-by`)).json();
+        // Purely informational, same as the contrast effect above — a failed fetch or a
+        // malformed body just means the badge doesn't show and the delete dialog falls back to
+        // its generic text, never a user-facing error and never something that blocks deleting.
+        if (!ignore && body.success && Array.isArray(body.data)) setUsedByFetch({ forId: id, pages: body.data });
+      } catch {
+        // Same fallback as above.
+      }
+    })();
+    return () => { ignore = true; };
+  }, [id, asset?.output_kind]);
 
   async function handleSave() {
     setSaving(true);
@@ -279,9 +306,26 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  // First 3 names + a count for the rest — an unbounded name list runs off-screen in a
+  // window.confirm() dialog once a component is used on a couple dozen pages, and wraps into a
+  // wall of text in the badge below just the same. Shared by both.
+  function formatUsedByNames(pages: { id: string; name: string }[]): string {
+    const names = pages.slice(0, 3).map(p => p.name);
+    const rest = pages.length - names.length;
+    return rest > 0 ? `${names.join(', ')}, and ${rest} more` : names.join(', ');
+  }
+
   async function handleDelete() {
     if (deleting || !asset) return;
-    if (!window.confirm('Delete this asset? This can\'t be undone from the UI.')) return;
+    // usedByPages can be stale/empty if its fetch hasn't resolved yet or failed — that's an
+    // accepted, deliberate degrade to the plain generic message below, never a reason to block
+    // the delete on that fetch. Likewise, a page could start referencing this asset in another
+    // tab between this list loading and the user confirming (TOCTOU) — also accepted, matching
+    // the "warn, don't block" decision this feature was scoped to.
+    const message = usedByPages.length > 0
+      ? `Delete this asset? It's used on ${usedByPages.length} page${usedByPages.length === 1 ? '' : 's'} (${formatUsedByNames(usedByPages)}) — deleting it will remove that section from ${usedByPages.length === 1 ? 'that page' : 'those pages'}. This can't be undone from the UI.`
+      : 'Delete this asset? This can\'t be undone from the UI.';
+    if (!window.confirm(message)) return;
     setDeleting(true);
     setError(null);
     try {
@@ -336,6 +380,11 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
 
       {asset.output_kind === 'component' && asset.image_path && (
         <>
+          {usedByPages.length > 0 && (
+            <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 12 }}>
+              Used on {usedByPages.length} page{usedByPages.length === 1 ? '' : 's'}: {formatUsedByNames(usedByPages)}
+            </p>
+          )}
           <div style={{ marginBottom: 12 }}>
             <PreviewFrame
               src={`/api/components/${asset.image_path}?styleId=${asset.style_id}`}

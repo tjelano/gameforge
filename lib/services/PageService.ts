@@ -69,6 +69,22 @@ class PageServiceImpl {
     const db = DatabaseConnection.getInstance();
     db.prepare('UPDATE pages SET is_deleted = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
   }
+
+  /**
+   * Active pages whose component_asset_ids includes assetId — for warning a user before they
+   * discard a component that a page still relies on. `LIKE '%"<id>"%'` on the stored JSON array
+   * string is safe only because asset ids are always `crypto.randomUUID()` output (lowercase hex,
+   * no `"`/`%`/`_`) from `AssetService.create()` — never user-typed. Not scoped by requesting user:
+   * every other read on this service (getAll, getActivePagesForStyle, getById) is unscoped too,
+   * only mutations (update/softDelete) enforce ownership.
+   */
+  async findPagesReferencingAsset(assetId: string): Promise<Page[]> {
+    const db = DatabaseConnection.getInstance();
+    const rows = db.prepare(
+      'SELECT * FROM pages WHERE is_deleted = 0 AND component_asset_ids LIKE ? ORDER BY created_at DESC, id'
+    ).all(`%"${assetId}"%`);
+    return rows.map(row => PageSchema.parse(row));
+  }
 }
 
 export const pageService = new PageServiceImpl();
