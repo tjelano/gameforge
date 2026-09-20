@@ -110,4 +110,60 @@ describe('PageService', () => {
     const fetched = await pageService.getById(page.id);
     expect(fetched?.is_deleted).toBe(0);
   });
+
+  describe('findPagesReferencingAsset', () => {
+    it('finds a page whose component_asset_ids includes the target', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a1', 'a2']) });
+
+      const found = await pageService.findPagesReferencingAsset('a1');
+      expect(found.map(p => p.id)).toEqual([page.id]);
+    });
+
+    it('excludes a page that references a different asset', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a1']) });
+
+      const found = await pageService.findPagesReferencingAsset('a2');
+      expect(found).toEqual([]);
+    });
+
+    it('excludes a soft-deleted page even if it still references the asset', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a1']) });
+      await pageService.softDelete(page.id, 'user-1');
+
+      const found = await pageService.findPagesReferencingAsset('a1');
+      expect(found).toEqual([]);
+    });
+
+    it('finds the target id among several other ids on the same page', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const page = await pageService.create({ styleId: style.id, name: 'Landing', createdBy: 'user-1' });
+      await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify(['a0', 'a1', 'a2']) });
+
+      const found = await pageService.findPagesReferencingAsset('a1');
+      expect(found.map(p => p.id)).toEqual([page.id]);
+    });
+
+    it('returns multiple matching pages, newest first, with a deterministic tiebreaker', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const pageA = await pageService.create({ styleId: style.id, name: 'A', createdBy: 'user-1' });
+      const pageB = await pageService.create({ styleId: style.id, name: 'B', createdBy: 'user-1' });
+      await pageService.update(pageA.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+      await pageService.update(pageB.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+
+      const found = await pageService.findPagesReferencingAsset('shared');
+      expect(found.map(p => p.id).sort()).toEqual([pageA.id, pageB.id].sort());
+      expect(found.length).toBe(2);
+    });
+
+    it('returns an empty array when nothing references the asset', async () => {
+      const found = await pageService.findPagesReferencingAsset('nonexistent');
+      expect(found).toEqual([]);
+    });
+  });
 });
