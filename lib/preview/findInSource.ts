@@ -19,14 +19,16 @@ function escapeRegExp(s: string): string {
 }
 
 // `dataGfId` is attacker/AI-influenced content (digits only in practice, per assignElementIds,
-// but not type-guaranteed) — always escaped before entering a RegExp source string. Lookbehind/
-// lookahead (not a consuming boundary group) so the match itself is exactly `.gf-<id>`, with no
-// adjacent word character on either side, so `.gf-3` never matches inside `.gf-31` or `prefix-gf-3`.
+// but not type-guaranteed) — always escaped before entering a RegExp source string. A trailing
+// lookahead (not a consuming boundary group) keeps `.gf-3` from matching inside `.gf-31` — no
+// leading boundary is needed: the needle's own literal `.` already keeps it from matching inside
+// `prefix-gf-3` (which has no `.` before `gf-3` at all), and a leading boundary would wrongly
+// reject legitimate compound selectors like `p.gf-3` or `.card.gf-3`.
 function findCssRuleRange(css: string, dataGfId: string): SourceMatch | null {
   // Escaped once, as a single already-literal `.gf-<id>` string — escaping dataGfId on its own
   // first and then escaping that result again would double-escape any regex-special character in
   // a hypothetical non-digit id, producing a pattern that could never match real CSS.
-  const re = new RegExp(`(?<![-\\w])${escapeRegExp(`.gf-${dataGfId}`)}(?![-\\w])`);
+  const re = new RegExp(`${escapeRegExp(`.gf-${dataGfId}`)}(?![-\\w])`);
   const m = re.exec(css);
   if (!m) return null;
   return { start: m.index, end: m.index + m[0].length };

@@ -73,10 +73,11 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  // No .focus() here — this can fire from the same click that also opens ElementPatchPanel (select
-  // mode's Apply UI), and stealing focus into a textarea would pull it away from that panel's own
-  // input. setSelectionRange still shows a visible (if unfocused) selection, and scrollIntoView
-  // brings the field on screen without moving keyboard focus.
+  // No .focus() here — an unfocused selection is a reasonable default regardless, and it avoids
+  // ever fighting another focused input (e.g. ElementPatchPanel's own instruction field, on the
+  // rare chance a future change lets this fire alongside it). setSelectionRange still shows a
+  // visible (if unfocused) selection, and scrollIntoView brings the field on screen without moving
+  // keyboard focus.
   function selectInTextarea(ta: HTMLTextAreaElement, range: { start: number; end: number }) {
     ta.setSelectionRange(range.start, range.end);
     ta.scrollIntoView({ block: 'nearest' });
@@ -89,7 +90,9 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
     // Most elements have no per-element CSS rule (only ones touched by element-specific patching
     // do) — a missing css match is the expected common case, not a failure to report.
     if (target.css && cssRef.current) selectInTextarea(cssRef.current, target.css);
-    if (!target.html && !target.css) {
+    // `info.dataGfId === null` means the click landed on hand-edited/trusted content that was
+    // never assigned an id in the first place — not a failed match, so nothing to log there.
+    if (info.dataGfId && !target.html && !target.css) {
       console.debug('Jump to source: no match for data-gf-id', info.dataGfId);
     }
   }

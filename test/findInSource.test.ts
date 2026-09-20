@@ -39,10 +39,19 @@ describe('resolveSourceTarget', () => {
     expect(result.css).toBeNull();
   });
 
-  it('does not match .gf-3 as a substring of prefix-gf-3', () => {
+  it('does not match .gf-3 as a substring of prefix-gf-3 (no literal dot precedes it)', () => {
     const css = '.prefix-gf-3 { color: green; }';
     const result = resolveSourceTarget('3', '', css);
     expect(result.css).toBeNull();
+  });
+
+  it('matches .gf-<id> as part of a compound selector, e.g. a tag or another class prefixing it', () => {
+    // A hand-edited stylesheet could plausibly write a compound selector like this even though
+    // GameForge's own patch mechanism only ever emits a bare `.gf-<id>` rule — the character
+    // immediately before the dot must not be required to be a non-word character.
+    const css = 'p.gf-3 { color: red; }';
+    const result = resolveSourceTarget('3', '', css);
+    expect(result.css).toEqual({ start: 1, end: 6 });
   });
 
   it('handles a regex-special id safely without throwing (defensive, even though real ids are digit-only)', () => {

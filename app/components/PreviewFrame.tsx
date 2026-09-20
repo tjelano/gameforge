@@ -27,10 +27,12 @@ interface PreviewFrameProps {
   /** Enables the Apply UI once an element is selected. Omit for highlight-only select mode. */
   patchEndpoint?: string;
   /**
-   * Component previews only: fires on every click, independent of select mode (both can fire off
-   * the same click when select mode is also on). Never fires while fullscreen — a consumer of
-   * this (e.g. "jump to source" in a sibling textarea) is typically rendered outside this
-   * component's own fullscreened wrapper, so it would be invisible there.
+   * Component previews only: fires on every click, independent of whether select mode is on.
+   * Never fires while fullscreen — a consumer of this (e.g. "jump to source" in a sibling
+   * textarea) is typically rendered outside this component's own fullscreened wrapper, so it
+   * would be invisible there. In practice this means it never fires WHILE a selection is also
+   * being made: select mode's own toggle only renders while fullscreen, so the two features are
+   * only ever both configured on the same PreviewFrame, never both acting on the same click.
    */
   onElementClick?: (info: FrameElementInfo) => void;
 }
@@ -104,8 +106,11 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
   //
   // One shared `click` listener serves both select mode and onElementClick — computing
   // getElementAt() once and fanning out — rather than two independent listeners each doing their
-  // own hit-test on every click. `mousemove` (hover highlight) stays select-mode-only: it's a
-  // select-mode affordance, not something a plain onElementClick consumer should arm.
+  // own hit-test on every click. (The two consumers never actually BOTH act on one click in
+  // practice — see onElementClick's own doc comment above — but a call site can still configure
+  // both at once, e.g. the edit-component page always does, so the shared hit-test still matters.)
+  // `mousemove` (hover highlight) stays select-mode-only: it's a select-mode affordance, not
+  // something a plain onElementClick consumer should arm.
   const attachAll = useCallback(() => {
     const frame = iframeRef.current;
     if (!frame) return;
@@ -133,7 +138,7 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
     frame.contentWindow?.addEventListener('click', handleClick);
     return () => {
       cleanupAnchor?.();
-      frame.contentWindow?.removeEventListener('mousemove', handleMouseMove);
+      if (selectMode) frame.contentWindow?.removeEventListener('mousemove', handleMouseMove);
       frame.contentWindow?.removeEventListener('click', handleClick);
     };
   }, [kind, selectMode]);

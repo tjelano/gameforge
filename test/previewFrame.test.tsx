@@ -170,6 +170,63 @@ describe('PreviewFrame', () => {
     expect(getElementAt).toHaveBeenCalled();
   });
 
+  it('still clears the selection on a miss in select mode (unchanged by the onElementClick fan-out)', () => {
+    vi.mocked(getElementAt).mockReturnValueOnce(elementInfoOf()).mockReturnValueOnce(null);
+    vi.mocked(getRevisionHash).mockReturnValue('rev-1');
+
+    const { container } = render(
+      <PreviewFrame
+        title="t"
+        width={100}
+        height={100}
+        src="/api/components/x"
+        kind="component"
+        patchEndpoint="/api/jobs/1/component/patch-element"
+      />,
+    );
+    enterFullscreen(container);
+    clickSelectToggle();
+
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+    expect(screen.getByRole('button', { name: /apply/i })).toBeTruthy();
+
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+    expect(screen.queryByRole('button', { name: /apply/i })).toBeNull();
+  });
+
+  it('calls getElementAt exactly once per click when both patchEndpoint and onElementClick are configured (the real edit-component page passes both)', () => {
+    // Select mode itself can never be ON at the same time onElementClick actually fires — Select
+    // mode only exists while fullscreen (its toggle button only renders there), and
+    // onElementClick is unconditionally suppressed while fullscreen (see the dedicated fullscreen
+    // test above). So the two consumers never BOTH act on a single click in practice — but a call
+    // site can still configure both props at once (the real edit-component page always does), and
+    // the shared listener must still do exactly one hit-test per click rather than two.
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf({ dataGfId: '7' }));
+    const onElementClick = vi.fn();
+
+    render(
+      <PreviewFrame
+        title="t"
+        width={100}
+        height={100}
+        src="/api/components/x"
+        kind="component"
+        patchEndpoint="/api/jobs/1/component/patch-element"
+        onElementClick={onElementClick}
+      />,
+    );
+
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(getElementAt).toHaveBeenCalledTimes(1);
+    expect(onElementClick).toHaveBeenCalledWith(expect.objectContaining({ dataGfId: '7' }));
+    // Not fullscreen and select mode was never toggled on, so no patch panel — confirms this
+    // click was resolved by the onElementClick path, not mistaken for a select-mode selection.
+    expect(screen.queryByRole('button', { name: /apply/i })).toBeNull();
+  });
+
   it('fires onElementClick with the resolved element info on a plain click, independent of select mode', () => {
     vi.mocked(getElementAt).mockReturnValue(elementInfoOf({ dataGfId: '7' }));
     const onElementClick = vi.fn();
