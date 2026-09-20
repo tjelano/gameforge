@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isValidInspoSlug, isValidInspoIdx, getDesignMd, InspoHttpError } from '@/lib/services/inspoClient';
+import { isValidInspoSlug, isValidInspoIdx, getDesignMd, InspoHttpError, resetDesignMdCacheForTests } from '@/lib/services/inspoClient';
 
 describe('isValidInspoSlug', () => {
   it('accepts a plain lowercase-alnum-hyphen slug', () => {
@@ -37,6 +37,7 @@ describe('getDesignMd', () => {
   const originalFetch = global.fetch;
   beforeEach(() => {
     vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
+    resetDesignMdCacheForTests();
   });
   afterEach(() => {
     global.fetch = originalFetch;
@@ -67,10 +68,6 @@ describe('getDesignMd', () => {
   it('throws InspoHttpError with the status on a non-2xx response', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('not found') }) as any;
     await expect(getDesignMd('missing-site')).rejects.toBeInstanceOf(InspoHttpError);
-    try {
-      await getDesignMd('missing-site-2');
-    } catch (e) {
-      expect((e as InspoHttpError).status).toBe(404);
-    }
+    await expect(getDesignMd('missing-site-2')).rejects.toMatchObject({ status: 404 });
   });
 });

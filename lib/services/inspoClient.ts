@@ -38,6 +38,7 @@ export class InspoHttpError extends Error {
 
 const DESIGN_MD_CACHE_TTL_MS = 10 * 60 * 1000;
 const DESIGN_MD_CACHE_MAX_ENTRIES = 200;
+const DESIGN_MD_CACHE_MAX_SIZE_BYTES = 2 * 1024 * 1024; // 2MB, matching MAX_TOKENS_JSON_LENGTH pattern
 const designMdCache = new Map<string, { content: string; fetchedAt: number }>();
 
 function pruneDesignMdCacheIfNeeded(): void {
@@ -45,6 +46,10 @@ function pruneDesignMdCacheIfNeeded(): void {
   // Map iteration order is insertion order — the first key is the oldest.
   const oldestKey = designMdCache.keys().next().value;
   if (oldestKey !== undefined) designMdCache.delete(oldestKey);
+}
+
+export function resetDesignMdCacheForTests(): void {
+  designMdCache.clear();
 }
 
 const DESIGN_MD_FETCH_DEADLINE_MS = 2000;
@@ -58,7 +63,7 @@ const DESIGN_MD_FETCH_DEADLINE_MS = 2000;
  */
 export async function getDesignMd(slug: string): Promise<string> {
   if (!isValidInspoSlug(slug)) {
-    throw new Error(`Invalid slug: ${slug}`);
+    throw new InspoHttpError(400, `Invalid slug: ${JSON.stringify(slug).slice(0, 80)}`);
   }
 
   const cached = designMdCache.get(slug);
@@ -71,16 +76,36 @@ export async function getDesignMd(slug: string): Promise<string> {
   let res: Response;
   try {
     res = await fetch(`${getInspoBaseUrl()}/api/design/${slug}`, { signal: controller.signal });
-  } finally {
+  } catch (err) {
     clearTimeout(timeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new InspoHttpError(504, 'Inspo request timed out');
+    }
+    throw err;
   }
 
-  if (!res.ok) {
-    throw new InspoHttpError(res.status, `Inspo returned ${res.status} for slug "${slug}"`);
+  let content: string;
+  try {
+    if (!res.ok) {
+      // Drain the response body to return socket to keep-alive pool
+      await res.text().catch(() => {});
+      throw new InspoHttpError(res.status, `Inspo returned ${res.status}`);
+    }
+
+    content = await res.text();
+    clearTimeout(timeout);
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
   }
 
-  const content = await res.text();
+  if (content.length > DESIGN_MD_CACHE_MAX_SIZE_BYTES) {
+    throw new InspoHttpError(413, `Inspo DESIGN.md exceeds size limit (${content.length} > ${DESIGN_MD_CACHE_MAX_SIZE_BYTES} bytes)`);
+  }
+
   pruneDesignMdCacheIfNeeded();
+  // Delete before set to maintain recency ordering in Map
+  designMdCache.delete(slug);
   designMdCache.set(slug, { content, fetchedAt: Date.now() });
   return content;
 }
