@@ -170,6 +170,86 @@ describe('PreviewFrame', () => {
     expect(getElementAt).toHaveBeenCalled();
   });
 
+  it('fires onElementClick with the resolved element info on a plain click, independent of select mode', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf({ dataGfId: '7' }));
+    const onElementClick = vi.fn();
+
+    render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" onElementClick={onElementClick} />,
+    );
+    // No enterFullscreen(), no clickSelectToggle() — select mode is off and the toolbar isn't
+    // even rendered, confirming this listener is independent of both.
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(onElementClick).toHaveBeenCalledWith(expect.objectContaining({ dataGfId: '7' }));
+  });
+
+  it('does not fire onElementClick for non-component previews', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf());
+    const onElementClick = vi.fn();
+
+    render(<PreviewFrame title="t" width={100} height={100} src="/api/themes/x" onElementClick={onElementClick} />);
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(onElementClick).not.toHaveBeenCalled();
+  });
+
+  it('does not fire onElementClick while fullscreen (the textareas it jumps to are outside the fullscreened wrapper and invisible)', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf());
+    const onElementClick = vi.fn();
+
+    const { container } = render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" onElementClick={onElementClick} />,
+    );
+    enterFullscreen(container);
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(onElementClick).not.toHaveBeenCalled();
+  });
+
+  it('re-attaches the onElementClick listener after an iframe reload', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf());
+    const onElementClick = vi.fn();
+
+    render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" onElementClick={onElementClick} />,
+    );
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+
+    const newContentWindow = new EventTarget();
+    Object.defineProperty(iframe, 'contentWindow', { value: newContentWindow, configurable: true });
+    fireEvent(iframe, new Event('load'));
+
+    fireEvent(newContentWindow as unknown as Window, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(onElementClick).toHaveBeenCalled();
+  });
+
+  it('does not stack duplicate listeners when onElementClick is passed a new function identity on every render', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf());
+    const calls: number[] = [];
+
+    const { rerender } = render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" onElementClick={() => calls.push(1)} />,
+    );
+    // A fresh inline arrow function on every rerender, same as a page passing an unmemoized
+    // handler — this is exactly the identity churn a naive `[kind, onElementClick]` effect
+    // dependency would re-run on, stacking a second listener.
+    for (let i = 0; i < 5; i++) {
+      rerender(
+        <PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" onElementClick={() => calls.push(1)} />,
+      );
+    }
+
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(calls.length).toBe(1);
+  });
+
   it('is the only component in the app rendering an iframe sandbox attribute', () => {
     // A real filesystem grep, not a hardcoded file list — a future new iframe usage in the app
     // directory can't silently bypass PreviewFrame's closed-union sandbox handling without this

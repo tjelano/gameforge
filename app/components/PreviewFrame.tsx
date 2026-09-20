@@ -26,6 +26,13 @@ interface PreviewFrameProps {
   kind?: 'component';
   /** Enables the Apply UI once an element is selected. Omit for highlight-only select mode. */
   patchEndpoint?: string;
+  /**
+   * Component previews only: fires on every click, independent of select mode (both can fire off
+   * the same click when select mode is also on). Never fires while fullscreen — a consumer of
+   * this (e.g. "jump to source" in a sibling textarea) is typically rendered outside this
+   * component's own fullscreened wrapper, so it would be invisible there.
+   */
+  onElementClick?: (info: FrameElementInfo) => void;
 }
 
 const BREAKPOINTS = ['mobile', 'tablet', 'desktop'] as const;
@@ -49,10 +56,21 @@ function resolveSandbox(kind: PreviewFrameProps['kind']): '' | 'allow-same-origi
 // code can read iframe.contentDocument through inspectFrame.ts. See globals.css for the
 // .preview-frame-wrapper:fullscreen rules that reset the scale-down transform and apply
 // per-breakpoint iframe widths.
-export function PreviewFrame({ title, width, height, scale, srcDoc, src, border, kind, patchEndpoint }: PreviewFrameProps) {
+export function PreviewFrame({ title, width, height, scale, srcDoc, src, border, kind, patchEndpoint, onElementClick }: PreviewFrameProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Read inside the listener rather than closed over at attach time — onElementClick is commonly
+  // an unmemoized inline function from the call site, and putting it directly in the effect below
+  // would re-run that effect (tearing down and re-attaching) on every render, stacking listeners
+  // if a click ever landed between renders. The ref sidesteps that: the effect's own deps stay
+  // stable across an identity-only change.
+  const onElementClickRef = useRef(onElementClick);
+  const isFullscreenRef = useRef(isFullscreen);
+  useEffect(() => {
+    onElementClickRef.current = onElementClick;
+    isFullscreenRef.current = isFullscreen;
+  });
   const [breakpoint, setBreakpoint] = useState<Breakpoint>('desktop');
   const [selectMode, setSelectMode] = useState(false);
   const [selection, setSelection] = useState<(FrameElementInfo & { documentHash: string | null }) | null>(null);
@@ -81,8 +99,13 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
   // Re-attached on every frame `load` (not just once) — a component preview's iframe navigates (or
   // reloads, e.g. after a successful patch) while select mode may still be active, and the browser
   // tears down the old contentWindow — and every listener on it, including mousemove/click — on
-  // every navigation. The anchor-nav guard and the mousemove/click listeners are attached together
+  // every navigation. The anchor-nav guard and the click/mousemove listeners are attached together
   // here so a reload can never re-arm one without the other.
+  //
+  // One shared `click` listener serves both select mode and onElementClick — computing
+  // getElementAt() once and fanning out — rather than two independent listeners each doing their
+  // own hit-test on every click. `mousemove` (hover highlight) stays select-mode-only: it's a
+  // select-mode affordance, not something a plain onElementClick consumer should arm.
   const attachAll = useCallback(() => {
     const frame = iframeRef.current;
     if (!frame) return;
@@ -97,21 +120,27 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
     }
     function handleClick(e: MouseEvent) {
       const info = getElementAt(frame!, e.clientX, e.clientY);
-      const documentHash = getRevisionHash(frame!);
-      setSelection(info ? { ...info, documentHash } : null);
+      if (selectMode) {
+        const documentHash = getRevisionHash(frame!);
+        setSelection(info ? { ...info, documentHash } : null);
+      }
+      // Never while fullscreen: a typical onElementClick consumer (e.g. "jump to source" in a
+      // sibling textarea) lives outside this component's own fullscreened wrapper and would be
+      // invisible there.
+      if (info && onElementClickRef.current && !isFullscreenRef.current) onElementClickRef.current(info);
     }
-    frame.contentWindow?.addEventListener('mousemove', handleMouseMove);
+    if (selectMode) frame.contentWindow?.addEventListener('mousemove', handleMouseMove);
     frame.contentWindow?.addEventListener('click', handleClick);
     return () => {
       cleanupAnchor?.();
       frame.contentWindow?.removeEventListener('mousemove', handleMouseMove);
       frame.contentWindow?.removeEventListener('click', handleClick);
     };
-  }, [kind]);
+  }, [kind, selectMode]);
 
   useEffect(() => {
     const frame = iframeRef.current;
-    if (!frame || !selectMode) return;
+    if (!frame || kind !== 'component' || !(selectMode || onElementClick)) return;
     let cleanupAll = attachAll();
     function handleLoad() {
       cleanupAll?.();
@@ -123,7 +152,12 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
       frame.removeEventListener('load', handleLoad);
       removeHighlight(frame);
     };
-  }, [selectMode, attachAll]);
+    // `onElementClick` intentionally omitted from deps beyond the `!!` check above — its identity
+    // is read fresh from onElementClickRef inside the handler, not closed over here. Depending on
+    // it directly would tear down and re-attach on every render a call site passes a fresh inline
+    // function, stacking listeners.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, selectMode, !!onElementClick, attachAll]);
 
   function handleFullscreenClick(e: React.MouseEvent) {
     // Defensive on every call site, not just the ones currently wrapped in a <Link> — stops the
