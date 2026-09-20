@@ -46,7 +46,10 @@ is picked up much later — an unauthenticated public API can change.)
   uses the official MCP SDK rather than hand-rolling that envelope).
 - **No auth, free, rate-limited.** 120 requests/minute per warm Vercel lambda instance
   (IP-keyed, soft brake, not a hard account fence), 256KB request body cap. No API key for either
-  surface.
+  surface. Since every GameForge call originates server-side from the same host, this is
+  effectively one shared budget across every GameForge user, not per-user — and a single logical
+  MCP tool call costs 2-4 underlying requests (the `initialize`/`initialized` handshake plus
+  `tools/call`), not one, so the effective search/recommend budget is a fraction of the raw 120.
 - **DESIGN.md's real structure** (from `packages/db/src/design-md.ts`): conditionally-present
   sections — Header (source URL, captured date, mode, macrostructure, designer, stack), Tone,
   Colors (a markdown table of hex + a **heuristic-guessed role** — lightest swatch in light mode →
@@ -72,11 +75,14 @@ is picked up much later — an unauthenticated public API can change.)
   values, px measurements, font names, CSS variable names) rather than the screenshot or JSX
   itself. DESIGN.md's own instruction to a consumer is design-ethics guidance ("Reference
   material for intentional design decisions: adapt, don't copy"), not a license term. This is not
-  legal advice — flagging the actual finding, not a legal conclusion.
+  legal advice — flagging the actual finding, not a legal conclusion. **This analysis covers
+  Feature 1 only** (reused hex/font/spacing values). It does not extend to Feature 2, which
+  downloads and caches the actual screenshot crop — a materially different case, tracked as its own
+  open, unresolved question below (Open questions / risks).
 
 ## GameForge's existing shapes this design must fit into
 
-Verified directly against current source, 2026-09-20:
+Verified directly against source at commit `639124f`, 2026-09-20:
 
 - **`ThemeTokens`** (`lib/services/themeTokens.ts`) is deliberately minimal — 8 fields:
   `colorBackground, colorForeground, colorAccent, colorBorder, fontHeading, fontBody, spaceUnit,
@@ -84,8 +90,16 @@ Verified directly against current source, 2026-09-20:
   `CSS_FONT_RE`, `CSS_LENGTH_RE`) before it can become part of a real CSS file GameForge serves —
   this is a hard security boundary (prevents a malicious/malformed extracted value from breaking
   out of a CSS custom-property declaration), not just a style preference. Any Inspo-derived value
-  must pass through this exact schema; a value that doesn't validate makes the import fail with a
-  clear error, the same as a malformed W3C tokens file does today.
+  must pass through this exact schema. **Two different validation events, not one**, apply this
+  boundary at two different stages: while *extracting* tokens from a DESIGN.md (Feature 1's
+  mapper), a single field's value failing validation drops that field to a safe default rather than
+  failing the whole import (see Feature 1 below — a hard "fail the import" rule here would reject
+  nearly every real Inspo site, since heuristic/CSS-var values routinely don't survive the regexes);
+  while *committing* a Style Bible (both the W3C importer today, and this spec's new commit route),
+  the full, already-approved `ThemeTokens` object is re-validated as a whole and a failure there
+  *is* a hard error, the same as a malformed W3C tokens file — because at that point the value came
+  from a client request body, not a live extraction, and defense-in-depth against a tampered
+  request is the point.
 - **The existing "import from an external token source" pattern** (`app/api/styles/import-tokens/
   route.ts` + `lib/services/themeImport/w3cImporter.ts`): a pure `parse<Source>(raw: string):
   {success:true, tokens:ThemeTokens} | {success:false, error:string}` function, called from a
@@ -93,7 +107,11 @@ Verified directly against current source, 2026-09-20:
   `storage/themes/`, (4) creates a Style Bible (`styleService.create`) with `parameters:
   JSON.stringify(tokens)`, (5) creates a `theme`-kind asset pointing at the written file. This
   spec's Inspo importer follows this exact shape and file-write ordering (write before any DB row,
-  so a failed write never leaves an orphaned Style Bible).
+  so a failed write never leaves an orphaned Style Bible). This ordering does not guarantee the
+  reverse — a written CSS file whose later `styleService.create`/asset-insert step then fails can
+  leave an orphaned file on disk with no DB row pointing at it. That's an existing, accepted
+  characteristic of the W3C importer this design deliberately matches rather than improves on; not
+  a new gap introduced here.
 - **`ReferenceImagePayload`** (`lib/services/referenceImage.ts`) is just
   `{ base64: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp' }`. The generate route
   (`app/api/generate/route.ts`) already accepts an optional `referenceImage` on the request body,
@@ -135,16 +153,26 @@ Style Bible the user didn't actually see and approve.
 - **Slug validation, everywhere a slug crosses a trust boundary.** `slug` comes back from an
   unauthenticated third party and is interpolated into both a URL and (for grounding, see Feature
   2) a cache lookup. `lib/services/inspoClient.ts` exports `isValidInspoSlug(s: string): boolean`
-  (`^[a-z0-9][a-z0-9-]{0,63}$`) and every function that accepts a slug — client and route — checks
-  it before doing anything else. Same for `idx` (a component crop index): must be a non-negative
-  integer within `find_components`'s own stated result-count bound before being used to build
+  (`^[a-z0-9][a-z0-9-]{0,63}$`, matching the plain lowercase-alnum-hyphen shape Inspo's own search
+  results return). The *character set* is chosen from observed shape, not fixed policy — if real
+  usage during implementation turns up legitimate slugs this rejects, widen the charset then — but
+  the *enforcement itself*, at every point a slug is interpolated into a URL path or used as a cache
+  key, is exactly what makes that interpolation safe, and stays mandatory regardless of how the
+  charset is tuned; a future reader should read this as "the allowed characters may need widening,"
+  never as "this check is optional." Every function that accepts a slug — client and route — checks
+  it before doing anything else. Same for `idx` (a component crop index):
+  must be a non-negative integer strictly less than 40 (`find_components`'s own hard `limit` cap,
+  not merely "within the returned result count," since a malicious/misbehaving response's own count
+  field is not something to trust as a bound) before being used to build
   `/api/component/<slug>/<idx>`.
 - **`lib/services/inspoClient.ts`** (new): `getDesignMd(slug): Promise<string>` — plain `fetch`
   against `/api/design/<slug>` after slug validation, with an `AbortController` deadline (2s) and
-  a short in-memory `Map<slug, {content, fetchedAt}>` cache (10 min TTL) so opening the preview
-  panel and clicking the same result twice doesn't spend the shared rate-limit budget twice; being
-  in-memory and per-process is fine here since staleness cost is just "an extra live fetch" if the
-  worker/dev-server restarts, not correctness.
+  a short in-memory `Map<slug, {content, fetchedAt}>` cache (10 min TTL, capped at 200 entries,
+  evict-oldest-on-overflow — bounding it is a one-line addition and keeps a burst of distinct-slug
+  traffic from growing the map unbounded) so opening the preview panel and clicking the same result
+  twice doesn't spend the shared rate-limit budget twice; being in-memory and per-process is fine
+  here since staleness cost is just "an extra live fetch" if the worker/dev-server restarts, not
+  correctness.
   For everything else (`search_screens`, `recommend`, `find_components`, `find_by_color`,
   `get_filters`), use the official **`@modelcontextprotocol/sdk`** package's
   `StreamableHTTPClientTransport` + `Client` rather than hand-rolling the JSON-RPC envelope. The
@@ -152,11 +180,26 @@ Style Bible the user didn't actually see and approve.
   trips, not one POST), the response may arrive as `text/event-stream` rather than plain JSON, and
   a compliant server expects `Accept: application/json, text/event-stream` and an echoed
   `Mcp-Session-Id`/`Mcp-Protocol-Version` — reimplementing that correctly is more code and more
-  risk than the one new dependency. Wrap `client.callTool(name, args)` in `callMcpTool<T>(name,
-  args, deadlineMs)` with a per-call `AbortController` (separate budgets: 3s for search/recommend
-  UI calls, 2s for the grounding-path calls in Feature 2). `INSPO_BASE_URL` env var, default
-  `https://inspomcp.dev`, read lazily (matching `PIXELLAB_API_KEY`'s lazy-getter precedent in
-  `ImageGenerator.ts` — not a module-level constant, so it's never evaluated before env vars land).
+  risk than the one new dependency. **The `Client` is a lazily-created, per-process singleton**
+  (same lazy-getter shape as the rest of this module), not a fresh connection per call — the
+  `initialize` handshake and `Mcp-Session-Id` happen once and are reused across
+  search/recommend/find_components calls for the process's lifetime, so a logical tool call costs
+  one `tools/call` round trip against the shared rate limit in the common case, not the full
+  handshake every time. If a call fails with a session-invalid/expired error, `callMcpTool`
+  reconnects (re-runs `initialize`) once and retries that single call before giving up — this
+  reconnect-on-invalidation path is the only retry Feature 1's client does, and it happens *inside*
+  the same per-call deadline below, not a fresh one (a timed-out call has already exhausted its
+  budget and isn't retried at all; only an explicit invalidation error, which can arrive well before
+  the deadline, triggers the reconnect-and-retry). The singleton is also expected to serve
+  concurrent calls correctly — the official SDK's client is built for concurrent `callTool`
+  invocations over one session, which matters here since `worker.ts` already processes a claimed
+  batch of jobs concurrently via `Promise.allSettled`, so multiple grounding calls can legitimately
+  call `callTool` on the same singleton at once. Wrap `client.callTool(name, args)` in
+  `callMcpTool<T>(name, args, deadlineMs)` with a per-call `AbortController` (separate budgets: 3s
+  for search/recommend UI calls, 2s for the grounding-path calls in Feature 2). `INSPO_BASE_URL` env
+  var, default `https://inspomcp.dev`, read lazily (matching `PIXELLAB_API_KEY`'s lazy-getter
+  precedent in `ImageGenerator.ts` — not a module-level constant, so it's never evaluated before env
+  vars land).
   A circuit breaker across calls is explicitly **not** built for v1 — every caller already has its
   own short deadline and fails soft or returns a foreground error, so a string of failures costs at
   most one timeout per call, not a cascading one; revisit only if that turns out wrong in practice.
@@ -180,10 +223,16 @@ Style Bible the user didn't actually see and approve.
      lightest→`colorForeground`) — DESIGN.md's own `guessRole()` already accounts for `mode`
      internally, so the mapper reads the *role labels* it assigns (surface/ink/accent/support/
      muted), not raw luminance order, avoiding a second, possibly-conflicting inversion. `accent`→
-     `colorAccent`. `colorBorder` has no dedicated role: prefer the **lowest-contrast**
-     support/muted swatch against the chosen background (not simply "first"), since a border color
-     needs to be visually subtle, and a vivid brand-tint swatch in that role would be wrong; if no
-     support/muted swatch exists at all, fall back to the default.
+     `colorAccent`; if `guessRole()` assigned no `accent` swatch at all, fall back to the default.
+     `colorForeground` similarly falls back to the default if no `ink` swatch was assigned (a very
+     low-swatch-count site can produce this) — the mapper never leaves a field unset, every branch
+     here terminates in either a real swatch or the fixed default. `colorBorder` has no dedicated
+     role: prefer the swatch with the **lowest WCAG contrast ratio** (the standard relative-
+     luminance formula, already a small, dependency-free calculation over a hex value — nothing
+     beyond what computing `CSS_COLOR_RE`-validated hex values already requires) against the chosen
+     `colorBackground`, among the support/muted-role swatches (not simply "first"), since a border
+     color needs to be visually subtle and a vivid brand-tint swatch in that role would be wrong; if
+     no support/muted swatch exists at all, fall back to the default.
   3. Typography: first two detected face names → `fontHeading`/`fontBody`. If only one face is
      detected, reuse it for both fields explicitly (not an unspecified collapse) — note doc order
      is not guaranteed to be heading-then-body order, so this is a best-effort pairing, not a
@@ -205,26 +254,41 @@ Style Bible the user didn't actually see and approve.
      text ever reaches a generation prompt.** Every value that survives step 5 has already passed a
      strict CSS-value allowlist regex — nothing free-text from an untrusted remote document is ever
      forwarded verbatim.
-- **`POST /api/inspo/preview`** (new route, requires login): body `{ slug }` — validates the slug,
-  calls `getDesignMd` → `mapDesignMdToTokens`, returns `{tokens, provenance, lowConfidence}`. No DB
-  writes.
+- **`POST /api/inspo/preview`** (new route, requires login): body `{ slug }` — validates the slug
+  (400 if it fails `isValidInspoSlug`), calls `getDesignMd` → `mapDesignMdToTokens`. On
+  `{success:false}` from the mapper (a malformed/empty DESIGN.md), returns a 4xx with the mapper's
+  `error` message, the same "clear error" contract the W3C importer already uses for a malformed
+  input file. On success, returns `{tokens, provenance, lowConfidence}`. No DB writes.
 - **`POST /api/styles/import-inspo`** (new route, mirrors `import-tokens/route.ts`, requires
-  login): body `{ name: string, slug: string, tokens: ThemeTokens }` — the exact tokens the user
-  approved in the preview step, not a slug to re-resolve. Re-validates `tokens` against
-  `ThemeTokensSchema` (cheap, and it's the same defense-in-depth every other write path in this
-  codebase already applies to client-supplied data), then runs the same write-CSS-then-create-
-  Style-Bible-then-create-asset sequence as the W3C importer, with `prompt: `Imported from Inspo:
-  ${slug}`` matching the W3C importer's `'Imported from W3C Design Tokens JSON'` convention.
-  Stores `parameters.__source = {slug, capturedAt: <now>}` alongside the tokens (mirrors what the
-  W3C path already loses today, but worth capturing here since Inspo re-imports and future
-  dedupe/update-in-place tooling need to know which Style Bibles came from which slug — no
-  dedupe/update UI is built in this pass; re-importing the same slug just creates another Style
-  Bible, same as re-importing a W3C file today).
-- **`GET /api/inspo/search`** (new route, requires login — same as every other new route here;
-  Inspo's `recommend()` forwards the user's free-text `brief` to what's likely an LLM-backed
-  endpoint, so this must never be reachable by an unauthenticated caller): thin server-side proxy
-  for `search_screens`/`recommend`/`get_filters`, with `brief` length-capped before being
-  forwarded. The browser never talks to Inspo directly, keeping the endpoint URL and any future
+  login): body `{ name: string, slug: string, tokens: ThemeTokens, provenance: FieldProvenance,
+  lowConfidence: boolean }` — the exact tokens (and their provenance) the user approved in the
+  preview step, not a slug to re-resolve. Validates `slug` with `isValidInspoSlug` here too (the
+  preview route validating it doesn't cover this route — a client could call `import-inspo`
+  directly), and re-validates `tokens` against `ThemeTokensSchema` (cheap, and it's the same
+  defense-in-depth every other write path in this codebase already applies to client-supplied
+  data; a failure here is a hard error, per the two-stage-validation note above). Then runs the
+  same write-CSS-then-create-Style-Bible-then-create-asset sequence as the W3C importer, with
+  `prompt: `Imported from Inspo: ${slug}`` matching the W3C importer's `'Imported from W3C Design
+  Tokens JSON'` convention. Stores `parameters.__source = {slug, capturedAt, importedAt, provenance,
+  lowConfidence}` alongside the tokens, where `capturedAt` is DESIGN.md's own Header-section capture
+  date (already parsed by the mapper — the date the *site* was captured, not this import) and
+  `importedAt` is `Date.now()` (when *this Style Bible* was created) — conflating the two was an
+  error in an earlier draft of this spec; they answer different questions and future dedupe/
+  "site changed since import" logic needs the real one. Persisting `provenance`/`lowConfidence`
+  here too (not just shown transiently in the preview) means a Style Bible created from a
+  low-confidence import stays distinguishable from a clean one after the fact, instead of the
+  distinction being lost the moment the user clicks confirm. No dedupe/update-in-place UI is built
+  in this pass; re-importing the same slug just creates another Style Bible, same as re-importing a
+  W3C file today — `__source.slug` is recorded specifically so a future dedupe feature has
+  something to key on, not because this pass builds that feature.
+- **`POST /api/inspo/search`** (new route — `POST`, not `GET`, since it forwards the user's
+  free-text `brief` to what's likely an LLM-backed endpoint (`recommend()`); a `GET` with `brief` in
+  the query string would land that text in server access logs and browser history for no benefit,
+  since this call is neither cacheable nor idempotent in any way that matters here. Requires login —
+  same as every other new route here, since an unauthenticated caller must never be able to reach
+  it): thin server-side proxy for `search_screens`/`recommend`/`get_filters`, with `brief`
+  length-capped before being forwarded. The browser never talks to Inspo directly, keeping the
+  endpoint URL and any future
   auth server-side, consistent with how every other external-API call in this codebase (Pixellab,
   Ollama, Claude) is proxied through GameForge's own API routes. A per-user request quota / token
   bucket in front of the shared 120 rpm budget is deliberately **not** built for v1: GameForge is a
@@ -239,35 +303,72 @@ Style Bible the user didn't actually see and approve.
 
 A new toggle on the Style Bible (stored as a `NOT NULL DEFAULT false` boolean column on `styles`,
 `ground_with_inspo`; migration is additive/forward-only, existing rows backfill to `false`): "Use
-real-site references when generating components." Off by default. No per-generation UI change
-beyond that — when on, generation just quietly tends to produce better-grounded output; when Inspo
-doesn't have a good match or is unavailable, generation proceeds exactly as it does today. The
-job's own metadata records whether grounding actually happened and why not when it didn't (see
-below), so this is inspectable after the fact even though there's no separate UI for it in v1.
+real-site references when generating components." Off by default, set via the Style Bible's
+existing edit/update route (the same one that already writes other Style Bible fields — no new
+route needed just for this one boolean). No per-generation UI change beyond that — when on,
+generation just quietly tends to produce better-grounded output; when Inspo doesn't have a good
+match or is unavailable, generation proceeds exactly as it does today. The job's own metadata
+records whether grounding actually happened and why not when it didn't (see below), so this is
+inspectable after the fact even though there's no separate UI for it in v1. Note this feature also
+finally puts a *value* into `ComponentGenerator.generate()`'s previously-always-`undefined`
+`componentType` argument (see below) — since that argument already feeds the prompt as a type hint
+independent of grounding, every component generation that now supplies a `componentType` (not just
+grounded ones) gets this small prompt-quality change, whether or not `ground_with_inspo` is on.
 
 ### Server design
 
-- **Component-type → Inspo-type mapping** (a small fixed table, not configurable): Button→`cta`,
-  Nav Bar→`nav`, Card→`features` (closest real fit — Inspo has no unified card category), Form→
-  `cta` (closest real fit — inline-form-as-CTA is a named archetype; no first-class Form type
-  exists), Other→ *no mapping, grounding skipped for this type*. This table lives in
-  `lib/services/inspoClient.ts` alongside the client itself, documented with the "why" (the actual
-  archetype-coverage gap found during research), not silently guessed. The mapping intentionally
-  happens *before* the cache lookup/key, not after, so Button and Form — which map to the same
-  Inspo type (`cta`) — still get separate cache entries keyed on GameForge's own component type;
-  see the cache key below.
+- **`componentType` must become a real, structured field — it currently isn't one.** Verified
+  directly against source: today the Components page's type `<select>`
+  (`app/dashboard/components/page.tsx`, `COMPONENT_TYPES = ['Button', 'Card', 'Nav Bar', 'Form',
+  'Other']`) is folded into the free-text prompt string client-side (`` `${componentType}:
+  ${prompt.trim()}` ``) and never sent as its own field; `worker.ts` always calls
+  `ComponentGenerator.generate()` with `componentType` hardcoded to `undefined` even though the
+  generator interface already accepts it. Grounding needs to know the component type at `worker.ts`
+  time without parsing prompt text (fragile — a user-edited prompt might not start with a
+  recognized prefix, and parsing it would be guessing at intent from a free-text field). This
+  design adds `componentType` as an explicit field on the generate request body, threaded into the
+  job's options (`options.componentType`) the same way `groundWithInspo` and
+  `referenceImageFilename` already are, and read directly by both the grounding step and the
+  existing (currently-dead) `componentType` argument to `ComponentGenerator.generate()` — a small,
+  independently-useful fix (the generator's prompt-building already accepts a type hint; it's just
+  never received one) that this feature happens to be what finally requires it. A job queued before
+  this field existed, or from any future caller that omits it, simply has `options.componentType`
+  undefined — the mapping table below treats an unrecognized/absent type the same as `Other`: no
+  mapping, grounding skipped, no special-cased backward-compat branch needed.
+- **Component-type → Inspo-type mapping** (a small fixed table, not configurable) — every entry is
+  a closest-fit approximation, not a clean match, since Inspo's 10 crop types don't line up with
+  GameForge's 5 component types; none of the four mapped entries should be read as more confident
+  than the others just because only some call it out explicitly: Button→`cta` (a `cta` crop is
+  typically a whole band — headline, button, sometimes an image — not an isolated button; this is
+  arguably the loosest mapping of the four despite being the most common component type), Nav
+  Bar→`nav`, Card→`features` (Inspo has no unified card category; a `features` crop is often a
+  multi-card grid, not a single card), Form→`cta` (inline-form-as-CTA is a named archetype; no
+  first-class Form type exists), Other→ *no mapping, grounding skipped for this type*. This table
+  lives in `lib/services/inspoClient.ts` alongside the client itself, documented with the "why" (the
+  actual archetype-coverage gap found during research), not silently guessed. The mapping
+  intentionally happens *before* the cache lookup/key, not after, so Button and Form — which map to
+  the same Inspo type (`cta`) — still get separate cache entries keyed on GameForge's own component
+  type; see the cache key below.
 - **Color-matched selection**: when grounding fires, call `find_components(type, color:
   <hex derived from the Style Bible's own colorAccent>)` so the returned reference is actually
   palette-relevant to this Style Bible. The `color` parameter's expected format (name vs. hex vs. a
   `get_filters()`-listed key) hasn't been confirmed against the live `tools/list` schema — verify
   before implementing this call; if the server rejects the value, degrade to calling without
-  `color` rather than failing the whole grounding attempt.
-- **Deterministic result selection.** `find_components` can return multiple matches, some
-  `fallback:true` (whole-page thumbnail, not a real crop). Selection rule: first non-fallback
-  result; if none, the lowest-index fallback result. Record which was picked
+  `color` rather than failing the whole grounding attempt. Whichever happened is recorded —
+  `colorMatched: boolean` — alongside `referenceIsFallbackThumbnail` in both the cache row and the
+  job metadata, for the same reason: a degraded (unmatched) result would otherwise be
+  indistinguishable from a properly color-matched one for the rest of its 7-day cache lifetime.
+- **Deterministic result selection, and a deliberate choice to accept fallback thumbnails.**
+  `find_components` can return multiple matches, some `fallback:true` (the parent page's whole
+  screenshot, not a real crop — a materially weaker signal for "here's what a Card looks like").
+  Selection rule: first non-fallback result; if none, the lowest-index fallback result — accepting
+  it rather than rejecting and treating the call as a miss, on the reasoning that a real, if
+  imprecise, reference to a similar real site still beats no reference at all for this feature's
+  stated goal (nudging generation away from generic AI-default output). Record which was picked
   (`referenceIsFallbackThumbnail: boolean`) in both the cache row and the job metadata, so a
   thumbnail-standing-in-for-a-crop is visible after the fact rather than silently passed off as a
-  real component reference.
+  real component reference — this is what makes the acceptance decision inspectable rather than
+  just asserted.
 - **Where grounding actually happens: `worker.ts`, not `app/api/generate/route.ts`.** The route
   only reads the target Style Bible's `ground_with_inspo` column (already loaded, no extra query)
   and stamps `groundWithInspo: boolean` into the job's options alongside the existing
@@ -280,10 +381,15 @@ below), so this is inspectable after the fact even though there's no separate UI
   Inspo type. On success it builds a `ReferenceImagePayload` exactly as `loadReferenceImage` would
   have from an upload, and the **existing** generator code runs completely unchanged from there.
   This placement means grounding's latency lands on the worker's own per-job processing time (which
-  already varies with generation latency) rather than on the user-facing queue-submission request —
-  the "never delays the job" language below now means what it says, instead of contradicting a
-  route-level implementation that would have added up to several seconds in front of every opted-in
-  queue request.
+  already varies with generation latency) rather than on the user-facing queue-submission request.
+  It costs bounded *worker occupancy* for the opted-in job itself, not queue-submission latency for
+  anyone — and, verified directly against `worker.ts`, that cost is not serialized across unrelated
+  jobs either: `processJobs()` claims up to `WORKER_BATCH_SIZE` pending jobs and runs them
+  concurrently via `Promise.allSettled`, so one job's grounding step does not hold up its
+  batch-mates. (A job claimed in the *next* batch can still be delayed if the current batch hasn't
+  fully settled yet, same as any other slow job would delay the next poll today — grounding doesn't
+  change that existing behavior, it's bound by the same short per-call deadlines as every other
+  grounding failure mode above.)
 - **Fail-soft, always.** The whole grounding attempt (MCP call + image fetch) is wrapped in a
   single try/catch with separate short deadlines (2s MCP call, 2s image download —  split rather
   than one shared 4s budget, since a slow MCP handshake shouldn't also eat the image fetch's
@@ -293,18 +399,30 @@ below), so this is inspectable after the fact even though there's no separate UI
   nearly free to add since the job row already exists and is already being written, and it's what
   actually answers "what fraction of opted-in generations got grounded" after the fact) and the job
   proceeds exactly as it would with `ground_with_inspo` off. Grounding is never a reason a
-  generation job fails.
-- **SSRF guard on every fetched URL.** Both a fresh `image_url` from `find_components` and a
-  cached one are validated before being fetched: scheme must be `http`/`https` and
-  `new URL(url).origin === new URL(INSPO_BASE_URL).origin`. A cached row that fails this check is
-  deleted (handles the case where a future self-host switch left a stale cross-host URL behind) and
-  grounding is treated as a miss for this call.
+  generation job fails. **A failure is not negative-cached** — only a successful lookup writes a
+  cache row — so the next generation for the same `(style, componentType, accentHash)` retries
+  normally rather than being suppressed for the TTL window; this is deliberate (a transient 429 or
+  timeout shouldn't disable grounding for 7 days) and safe because each retry is bounded by the
+  same short per-call deadlines above, so a persistently-failing Inspo just costs a few extra
+  seconds of worker time per generation, never an unbounded one.
+- **SSRF guard on every fetched URL, with explicit relative-URL handling.** A relative path from
+  `find_components` (e.g. `/api/component/<slug>/<idx>`, which is how the URL shape is documented
+  above) is resolved against `INSPO_BASE_URL` *before* the origin check — safe by construction,
+  since resolving against the configured base can't produce a cross-origin URL. An already-absolute
+  URL (fresh or cached) is validated as-is: scheme must be `http`/`https` and
+  `new URL(url).origin === new URL(INSPO_BASE_URL).origin`. A same-origin-but-relative case never
+  fails the check; a genuinely cross-origin absolute URL (e.g. a CDN-hosted crop, if Inspo ever
+  returns one) is rejected with `groundedReason: 'origin-mismatch'` — a distinct reason, not folded
+  into the generic "no match" case, so a systematic mismatch (e.g. Inspo switching to a CDN) is
+  visible in job metadata rather than looking like ordinary misses. A cached row that fails this
+  check is deleted (handles the case where a future self-host switch left a stale cross-host URL
+  behind) and grounding is treated as a miss for this call.
 - **Downloaded crop validation.** Cap response size (~4 MB) and sniff `Content-Type` against an
   allowlist of `image/png`, `image/jpeg`, `image/webp` — matching `ReferenceImagePayload`'s own
   union. Anything outside the cap or allowlist is **rejected**, never coerced, and treated as a
   grounding failure (fail-soft, same as any other failure mode above).
 - **Cache**: a new table, `inspo_reference_cache(style_id, component_type, accent_hash, image_url,
-  is_fallback, fetched_at)`, `FOREIGN KEY(style_id) REFERENCES styles(id) ON DELETE CASCADE`,
+  is_fallback, is_color_matched, fetched_at)`, `FOREIGN KEY(style_id) REFERENCES styles(id) ON DELETE CASCADE`,
   `UNIQUE(style_id, component_type, accent_hash)` — keyed on GameForge's own component type (fixing
   the Button/Form collision noted above) plus a short hash of the Style Bible's current
   `colorAccent`. Editing a Style Bible's accent changes the hash, so a palette edit naturally misses
@@ -334,7 +452,7 @@ below), so this is inspectable after the fact even though there's no separate UI
 | More than half of the 8 fields fell back to defaults | `lowConfidence: true` is returned; the preview UI and the Style Bible's suggested name both flag it, rather than looking indistinguishable from a well-extracted import. |
 | Preview and commit diverge (site re-captured between the two) | Impossible by construction — commit takes the exact tokens the preview returned, not a slug to re-resolve, so there is nothing to re-fetch that could have changed. |
 | Inspo down/slow during grounding (worker-side) | Silent skip, job queues and processes without a reference image; `{grounded: false, groundedReason}` recorded on the job. Never blocks queue submission at all — the attempt happens entirely inside the worker's own per-job processing. |
-| Crop image fails SSRF/size/content-type validation | Rejected (not coerced), treated as a grounding failure like any other. |
+| Crop image fails SSRF/size/content-type validation | Rejected (not coerced), treated as a grounding failure like any other; a cross-origin absolute URL specifically records `groundedReason: 'origin-mismatch'` rather than a generic reason, so a systematic pattern (vs. an ordinary miss) is visible in job metadata. |
 | Component type has no Inspo mapping (Other) | Grounding skipped, no call made at all; `groundedReason: 'unmapped-type'`. |
 | User supplied their own reference image | Grounding never runs — an explicit user choice always wins; `groundedReason: 'user-supplied-reference'`. |
 
@@ -357,7 +475,7 @@ below), so this is inspectable after the fact even though there's no separate UI
 - Slug/idx validation: unit tests for `isValidInspoSlug` covering the traversal/injection shapes
   DeepSeek's review specifically flagged (`../`, encoded slashes, query characters, out-of-range
   `idx`).
-- `POST /api/inspo/preview`, `POST /api/styles/import-inspo`, `GET /api/inspo/search`: standard
+- `POST /api/inspo/preview`, `POST /api/styles/import-inspo`, `POST /api/inspo/search`: standard
   route tests, real temp-DB pattern, mirroring `importTokensRoute.test.ts` — including that all
   three reject an unauthenticated request, and that `import-inspo` re-validates a tampered/invalid
   `tokens` body against `ThemeTokensSchema` rather than trusting the client.
@@ -366,12 +484,17 @@ below), so this is inspectable after the fact even though there's no separate UI
   `ReferenceImagePayload` is built identically to a user-uploaded one from the generator's point of
   view, (c) any Inspo failure still completes the job successfully with no reference image and a
   recorded `groundedReason`, (d) a crop URL failing the SSRF origin check is rejected and the cache
-  row deleted, (e) an oversized or wrong-Content-Type download is rejected, not coerced.
+  row deleted, (e) an oversized or wrong-Content-Type download is rejected, not coerced, (f) a
+  relative crop URL resolves against `INSPO_BASE_URL` and passes the origin check rather than being
+  rejected, (g) `options.componentType` being absent (a pre-existing job shape) behaves identically
+  to an unrecognized type — grounding skipped, no crash.
 - Cache table: service-level tests (real temp SQLite) confirming: a second grounding attempt for
   the same `(styleId, componentType, accentHash)` within the TTL skips `find_components`; changing
   the Style Bible's `colorAccent` produces a different key and misses the old entry; two concurrent
   upserts for the same key don't error or duplicate (the `UNIQUE` + `ON CONFLICT` path actually
-  being exercised, not just asserted in prose); deleting a Style Bible cascades to its cache rows.
+  being exercised, not just asserted in prose); deleting a Style Bible cascades to its cache rows;
+  `is_color_matched` and `is_fallback` are both persisted and read back accurately (a degraded,
+  unmatched result is distinguishable from a properly color-matched one).
 - Manual verification (required, per this project's UI/external-integration convention): actually
   search/pick/preview/seed a real Style Bible from Inspo's live endpoint, and actually queue a
   grounded component generation (both Button and Form, to confirm they no longer collide on the
