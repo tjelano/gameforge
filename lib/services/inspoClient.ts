@@ -1,5 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // Slug shape is observational (matches what Inspo's own search results
 // return as of 2026-09-20), not a fixed security policy — if real usage
@@ -150,9 +150,41 @@ function createClient(): Promise<Client> {
   })();
 }
 
+// A rejected connection attempt must not become a permanent tombstone: reset
+// clientPromise back to null on failure so the NEXT call retries instead of
+// replaying the same stale rejection for the rest of the process lifetime.
 function getClient(): Promise<Client> {
-  if (!clientPromise) clientPromise = createClient();
+  if (!clientPromise) {
+    clientPromise = createClient().catch(err => {
+      clientPromise = null;
+      throw err;
+    });
+  }
   return clientPromise;
+}
+
+// Best-effort cleanup of a superseded client — a close() failure (socket
+// already gone, etc.) is not this call's problem and must never surface.
+function closeQuietly(promise: Promise<Client>): void {
+  promise.then(client => client.close()).catch(() => {});
+}
+
+// Swaps in a fresh connection to replace `staleClientPromise`, closing the
+// old one. Compares against the CURRENT clientPromise first: if another
+// concurrent caller already performed this same swap (both hit a
+// session-invalid error around the same time, off the same shared
+// connection), this is a no-op and the caller just awaits the reconnect
+// that's already in flight, instead of every concurrent caller opening its
+// own redundant connection.
+function reconnect(staleClientPromise: Promise<Client>): Promise<Client> {
+  if (clientPromise === staleClientPromise) {
+    closeQuietly(staleClientPromise);
+    clientPromise = createClient().catch(err => {
+      clientPromise = null;
+      throw err;
+    });
+  }
+  return getClient();
 }
 
 // Test-only: forces the next getClient() call to reconnect, matching what
@@ -172,9 +204,29 @@ function withDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
 }
 
 function isSessionInvalidError(error: unknown): boolean {
+  // A gone/expired Streamable HTTP session's canonical signal is an HTTP 404
+  // on POST (see client/streamableHttp.js: any non-ok POST response throws
+  // `new StreamableHTTPError(response.status, ...)`), per the MCP spec's
+  // session-recovery contract — the body text isn't guaranteed to mention
+  // "session" at all. Check the real error shape first (the `typeof` guard
+  // is just belt-and-suspenders for a non-function binding; it does NOT
+  // protect against a test module-mock that omits this export entirely —
+  // Vitest's mock proxy throws on that property access before `typeof` ever
+  // sees a value, so any test mocking this module must export the class).
+  // Keep the regex as a fallback for transports/servers that report it as a
+  // plain message instead of a 404.
+  if (typeof StreamableHTTPError === 'function' && error instanceof StreamableHTTPError && error.code === 404) {
+    return true;
+  }
   const message = error instanceof Error ? error.message : String(error);
   return /session/i.test(message) && /(invalid|expired|not found)/i.test(message);
 }
+
+// Below this budget, a reconnect+retry is more likely to just fail its own
+// withDeadline race than actually complete — retrying would replace a clear
+// session-invalidation error with a confusing "timed out" one. Give up and
+// surface the original error instead.
+const MIN_RETRY_BUDGET_MS = 100;
 
 /**
  * Calls one MCP tool by name against the shared singleton client. The whole
@@ -186,24 +238,29 @@ function isSessionInvalidError(error: unknown): boolean {
  */
 export async function callMcpTool<T>(name: string, args: Record<string, unknown>, deadlineMs: number): Promise<T> {
   const deadline = Date.now() + deadlineMs;
+  const remaining = () => Math.max(0, deadline - Date.now());
 
-  async function attempt(): Promise<T> {
-    const client = await getClient();
-    const remaining = Math.max(0, deadline - Date.now());
-    const result = await withDeadline(client.callTool({ name, arguments: args }) as Promise<any>, remaining);
-    const text = result?.content?.[0]?.text;
+  async function attempt(usedClientPromise: Promise<Client>): Promise<T> {
+    const client = await withDeadline(usedClientPromise, remaining());
+    const result = await withDeadline(client.callTool({ name, arguments: args }) as Promise<any>, remaining());
+    const block = result?.content?.find((c: any) => c?.type === 'text');
+    if (result?.isError) {
+      throw new Error(`Inspo MCP tool "${name}" returned an error: ${block?.text ?? JSON.stringify(result)}`);
+    }
+    const text = block?.text;
     if (typeof text !== 'string') {
       throw new Error(`Inspo MCP tool "${name}" returned an unexpected shape`);
     }
     return JSON.parse(text) as T;
   }
 
+  const firstClientPromise = getClient();
   try {
-    return await attempt();
+    return await attempt(firstClientPromise);
   } catch (error) {
-    if (isSessionInvalidError(error) && Date.now() < deadline) {
-      clientPromise = null;
-      return attempt();
+    if (isSessionInvalidError(error) && remaining() > MIN_RETRY_BUDGET_MS) {
+      const retryClientPromise = reconnect(firstClientPromise);
+      return attempt(retryClientPromise);
     }
     throw error;
   }

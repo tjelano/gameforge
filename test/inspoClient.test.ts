@@ -84,11 +84,40 @@ describe('getDesignMd', () => {
   });
 });
 
+// Matches the shape of the real @modelcontextprotocol/sdk StreamableHTTPError
+// (see node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.d.ts:
+// `class StreamableHTTPError extends Error { readonly code: number | undefined; }`).
+// inspoClient.ts imports this named export directly, so every mock of the
+// streamableHttp module below must provide it too — Vitest's mock proxy
+// throws on accessing an export the mock factory didn't return, even via a
+// harmless `typeof` check.
+class FakeStreamableHTTPError extends Error {
+  code: number | undefined;
+  constructor(code: number | undefined, message?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 describe('callMcpTool', () => {
   // The MCP Client/transport are mocked at the module level so these tests
   // exercise callMcpTool's own deadline/reconnect logic, not the real SDK
   // handshake (that's covered by the recorded-fixture contract test in
   // Task 4's test file, run against a real captured response shape).
+  //
+  // Unconditional cleanup regardless of assertion outcome: `vi.doMock`
+  // registers a mock that outlives `vi.resetModules()` (that only clears the
+  // module cache, not the mocks registry), and `vi.useFakeTimers()` in the
+  // deadline test only reached its own `vi.useRealTimers()` on the happy
+  // path — a failed assertion there would otherwise leak fake timers and
+  // stale SDK mocks into every later test in this file.
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.doUnmock('@modelcontextprotocol/sdk/client/index.js');
+    vi.doUnmock('@modelcontextprotocol/sdk/client/streamableHttp.js');
+    vi.resetModules();
+  });
+
   it('resolves with the tool result on success', async () => {
     const mockClient = { callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"ok":true}' }] }) };
     vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
@@ -96,6 +125,7 @@ describe('callMcpTool', () => {
     }));
     vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
       StreamableHTTPClientTransport: vi.fn(() => ({})),
+      StreamableHTTPError: FakeStreamableHTTPError,
     }));
     vi.resetModules();
     const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
@@ -111,7 +141,7 @@ describe('callMcpTool', () => {
     const neverResolves = new Promise(() => {});
     const mockClient = { callTool: vi.fn().mockReturnValue(neverResolves), connect: vi.fn().mockResolvedValue(undefined) };
     vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: vi.fn(() => mockClient) }));
-    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})), StreamableHTTPError: FakeStreamableHTTPError }));
     vi.resetModules();
     const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
 
@@ -119,6 +149,62 @@ describe('callMcpTool', () => {
     const assertion = expect(callPromise).rejects.toThrow();
     await vi.advanceTimersByTimeAsync(1100);
     await assertion;
-    vi.useRealTimers();
+  });
+
+  it('reconnects once and retries after a session-invalid error, then succeeds', async () => {
+    const sessionError = new Error('Session invalid or expired');
+    const firstClient = {
+      callTool: vi.fn().mockRejectedValue(sessionError),
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const secondClient = {
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"ok":true}' }] }),
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const remainingClients = [firstClient, secondClient];
+    const ClientMock = vi.fn(() => remainingClients.shift());
+    const TransportMock = vi.fn(() => ({}));
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: ClientMock }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: TransportMock, StreamableHTTPError: FakeStreamableHTTPError }));
+    vi.resetModules();
+    const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
+
+    const result = await freshCallMcpTool<{ ok: boolean }>('search_screens', {}, 3000);
+
+    expect(result).toEqual({ ok: true });
+    expect(ClientMock).toHaveBeenCalledTimes(2); // reconnect actually constructed a fresh Client
+    expect(TransportMock).toHaveBeenCalledTimes(2); // ...and a fresh transport
+    expect(firstClient.callTool).toHaveBeenCalledTimes(1);
+    expect(secondClient.callTool).toHaveBeenCalledTimes(1);
+    expect(firstClient.close).toHaveBeenCalledTimes(1); // superseded client is closed, not leaked
+  });
+
+  it('does not loop when the post-reconnect retry also fails with a session-invalid error', async () => {
+    const firstError = new Error('Session invalid or expired');
+    const secondError = new Error('Session invalid or expired (again)');
+    const firstClient = {
+      callTool: vi.fn().mockRejectedValue(firstError),
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const secondClient = {
+      callTool: vi.fn().mockRejectedValue(secondError),
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const remainingClients = [firstClient, secondClient];
+    const ClientMock = vi.fn(() => remainingClients.shift());
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: ClientMock }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})), StreamableHTTPError: FakeStreamableHTTPError }));
+    vi.resetModules();
+    const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
+
+    await expect(freshCallMcpTool('search_screens', {}, 3000)).rejects.toThrow(/session invalid or expired \(again\)/i);
+
+    expect(ClientMock).toHaveBeenCalledTimes(2); // exactly one reconnect attempt, not an infinite loop
+    expect(firstClient.callTool).toHaveBeenCalledTimes(1);
+    expect(secondClient.callTool).toHaveBeenCalledTimes(1);
   });
 });
