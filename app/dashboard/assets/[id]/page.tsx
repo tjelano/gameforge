@@ -306,9 +306,10 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  // First 3 names + a count for the rest — an unbounded window.confirm() string runs off-screen
-  // once a component is used on a couple dozen pages.
-  function formatUsedByForDialog(pages: { id: string; name: string }[]): string {
+  // First 3 names + a count for the rest — an unbounded name list runs off-screen in a
+  // window.confirm() dialog once a component is used on a couple dozen pages, and wraps into a
+  // wall of text in the badge below just the same. Shared by both.
+  function formatUsedByNames(pages: { id: string; name: string }[]): string {
     const names = pages.slice(0, 3).map(p => p.name);
     const rest = pages.length - names.length;
     return rest > 0 ? `${names.join(', ')}, and ${rest} more` : names.join(', ');
@@ -322,7 +323,7 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
     // tab between this list loading and the user confirming (TOCTOU) — also accepted, matching
     // the "warn, don't block" decision this feature was scoped to.
     const message = usedByPages.length > 0
-      ? `Delete this asset? It's used on ${usedByPages.length} page${usedByPages.length === 1 ? '' : 's'} (${formatUsedByForDialog(usedByPages)}) — deleting it will remove that section from ${usedByPages.length === 1 ? 'that page' : 'those pages'}. This can't be undone from the UI.`
+      ? `Delete this asset? It's used on ${usedByPages.length} page${usedByPages.length === 1 ? '' : 's'} (${formatUsedByNames(usedByPages)}) — deleting it will remove that section from ${usedByPages.length === 1 ? 'that page' : 'those pages'}. This can't be undone from the UI.`
       : 'Delete this asset? This can\'t be undone from the UI.';
     if (!window.confirm(message)) return;
     setDeleting(true);
@@ -379,9 +380,9 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
 
       {asset.output_kind === 'component' && asset.image_path && (
         <>
-          {asset.output_kind === 'component' && usedByPages.length > 0 && (
+          {usedByPages.length > 0 && (
             <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 12 }}>
-              Used on {usedByPages.length} page{usedByPages.length === 1 ? '' : 's'}: {usedByPages.map(p => p.name).join(', ')}
+              Used on {usedByPages.length} page{usedByPages.length === 1 ? '' : 's'}: {formatUsedByNames(usedByPages)}
             </p>
           )}
           <div style={{ marginBottom: 12 }}>

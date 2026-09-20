@@ -149,16 +149,36 @@ describe('PageService', () => {
       expect(found.map(p => p.id)).toEqual([page.id]);
     });
 
-    it('returns multiple matching pages, newest first, with a deterministic tiebreaker', async () => {
+    it('returns multiple matching pages, newest first', async () => {
+      const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+      const pageOlder = await pageService.create({ styleId: style.id, name: 'Older', createdBy: 'user-1' });
+      const pageNewer = await pageService.create({ styleId: style.id, name: 'Newer', createdBy: 'user-1' });
+      await pageService.update(pageOlder.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+      await pageService.update(pageNewer.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+      // Force distinct, unambiguous timestamps — two pageService.create() calls in the same test
+      // can land in the same millisecond, which would make an order assertion flaky rather than
+      // actually prove the ORDER BY clause.
+      const db = DatabaseConnection.getInstance();
+      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(1000, pageOlder.id);
+      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(2000, pageNewer.id);
+
+      const found = await pageService.findPagesReferencingAsset('shared');
+      expect(found.map(p => p.id)).toEqual([pageNewer.id, pageOlder.id]);
+    });
+
+    it('breaks a created_at tie deterministically by id, per the ORDER BY clause', async () => {
       const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
       const pageA = await pageService.create({ styleId: style.id, name: 'A', createdBy: 'user-1' });
       const pageB = await pageService.create({ styleId: style.id, name: 'B', createdBy: 'user-1' });
       await pageService.update(pageA.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
       await pageService.update(pageB.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
+      const db = DatabaseConnection.getInstance();
+      const tiedTimestamp = 5000;
+      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(tiedTimestamp, pageA.id);
+      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(tiedTimestamp, pageB.id);
 
       const found = await pageService.findPagesReferencingAsset('shared');
-      expect(found.map(p => p.id).sort()).toEqual([pageA.id, pageB.id].sort());
-      expect(found.length).toBe(2);
+      expect(found.map(p => p.id)).toEqual([pageA.id, pageB.id].sort());
     });
 
     it('returns an empty array when nothing references the asset', async () => {
