@@ -4,7 +4,7 @@ import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
-import { combineComponentHtml, parseComponentHtml, MockComponentGenerator, ClaudeApiComponentGenerator } from '@/lib/services/ComponentGenerator';
+import { combineComponentHtml, parseComponentHtml, MockComponentGenerator, ClaudeApiComponentGenerator, type GeneratedComponent } from '@/lib/services/ComponentGenerator';
 import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
 import { ANTHROPIC_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { callOllamaTool } from '@/lib/services/ollamaToolCall';
@@ -44,7 +44,7 @@ describe('combineComponentHtml / parseComponentHtml round-trip', () => {
 describe('MockComponentGenerator', () => {
   it('writes a real file under storage/components/ and returns its filename', async () => {
     const generator = new MockComponentGenerator();
-    const result = await generator.generate('a primary button', 'style-1');
+    const result = await generator.generate('a primary button', 'style-1') as GeneratedComponent;
     expect(result.path).toMatch(/\.html$/);
     expect(result.prompt).toBe('a primary button');
     const filePath = path.join(tempRoot, 'storage', 'components', result.path);
@@ -94,7 +94,7 @@ describe('ClaudeApiComponentGenerator', () => {
     const generator = new ClaudeApiComponentGenerator('fake-key', ANTHROPIC_PROVIDER);
     const result = await generator.generate('a button', 'style-1', undefined, undefined, undefined, undefined, {
       type: 'ollama', host: 'http://localhost:11434', model: 'llama3-groq-tool-use:8b',
-    });
+    }) as GeneratedComponent;
     const filePath = path.join(tempRoot, 'storage', 'components', result.path);
     const content = await fsPromises.readFile(filePath, 'utf-8');
     expect(content).toMatch(/data-gf-id="\d+"/);
