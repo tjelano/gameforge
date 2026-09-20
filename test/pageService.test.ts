@@ -168,17 +168,25 @@ describe('PageService', () => {
 
     it('breaks a created_at tie deterministically by id, per the ORDER BY clause', async () => {
       const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
-      const pageA = await pageService.create({ styleId: style.id, name: 'A', createdBy: 'user-1' });
-      const pageB = await pageService.create({ styleId: style.id, name: 'B', createdBy: 'user-1' });
-      await pageService.update(pageA.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
-      await pageService.update(pageB.id, 'user-1', { componentAssetIds: JSON.stringify(['shared']) });
       const db = DatabaseConnection.getInstance();
+      // Explicit ids inserted in the OPPOSITE order of what ascending-id sort should produce —
+      // pageService.create()'s random UUIDs can't guarantee this (id order vs. insertion order
+      // only disagree for a random pair about half the time). If the query's real `, id` clause
+      // were ever dropped, SQLite's rowid/insertion-order fallback would return the high-id row
+      // FIRST (it was inserted first) — the opposite of this test's expectation — so this only
+      // passes when the tiebreaker clause is actually doing the sorting, not by coincidence.
+      const highId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+      const lowId = '00000000-0000-4000-8000-000000000000';
       const tiedTimestamp = 5000;
-      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(tiedTimestamp, pageA.id);
-      db.prepare('UPDATE pages SET created_at = ? WHERE id = ?').run(tiedTimestamp, pageB.id);
+      const insertPage = (id: string) => db.prepare(
+        `INSERT INTO pages (id, style_id, name, created_by, component_asset_ids, is_deleted, created_at, updated_at)
+         VALUES (?, ?, 'x', 'user-1', '["shared"]', 0, ?, ?)`
+      ).run(id, style.id, tiedTimestamp, tiedTimestamp);
+      insertPage(highId);
+      insertPage(lowId);
 
       const found = await pageService.findPagesReferencingAsset('shared');
-      expect(found.map(p => p.id)).toEqual([pageA.id, pageB.id].sort());
+      expect(found.map(p => p.id)).toEqual([lowId, highId]);
     });
 
     it('returns an empty array when nothing references the asset', async () => {
