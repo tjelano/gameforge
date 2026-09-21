@@ -193,9 +193,15 @@ export function resetInspoClientForTests(): void {
   clientPromise = null;
 }
 
-function withDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
+// onDeadline, when given, fires right before the timeout rejection — used to
+// abort the underlying request that's still running in the background
+// instead of just abandoning it (see callMcpTool's `attempt`).
+function withDeadline<T>(promise: Promise<T>, deadlineMs: number, onDeadline?: () => void): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Inspo MCP call timed out after ${deadlineMs}ms`)), deadlineMs);
+    const timer = setTimeout(() => {
+      onDeadline?.();
+      reject(new Error(`Inspo MCP call timed out after ${deadlineMs}ms`));
+    }, deadlineMs);
     promise.then(
       value => { clearTimeout(timer); resolve(value); },
       err => { clearTimeout(timer); reject(err); }
@@ -242,7 +248,16 @@ export async function callMcpTool<T>(name: string, args: Record<string, unknown>
 
   async function attempt(usedClientPromise: Promise<Client>): Promise<T> {
     const client = await withDeadline(usedClientPromise, remaining());
-    const result = await withDeadline(client.callTool({ name, arguments: args }) as Promise<any>, remaining());
+    // Pass an AbortSignal through to the SDK so a deadline timeout actually
+    // cancels the in-flight request against the MCP server (the SDK sends a
+    // cancellation notification and aborts its own wait), instead of merely
+    // abandoning it while it keeps running server-side in the background.
+    const controller = new AbortController();
+    const result = await withDeadline(
+      client.callTool({ name, arguments: args }, undefined, { signal: controller.signal }) as Promise<any>,
+      remaining(),
+      () => controller.abort()
+    );
     const block = result?.content?.find((c: any) => c?.type === 'text');
     if (result?.isError) {
       throw new Error(`Inspo MCP tool "${name}" returned an error: ${block?.text ?? JSON.stringify(result)}`);
@@ -320,7 +335,11 @@ export async function findComponents(
 ): Promise<InspoComponentResult[]> {
   const response = await callMcpTool<{ components: RawFindComponentsResult[] }>('find_components', args, deadlineMs);
   const out: InspoComponentResult[] = [];
-  for (const r of response.components ?? []) {
+  // A malformed/unexpected response (components missing, null, or not an
+  // array at all) is treated the same as an empty result set — fail soft,
+  // matching this function's per-item silent-drop philosophy below.
+  const components = Array.isArray(response?.components) ? response.components : [];
+  for (const r of components) {
     // Minimal sanity guard only — real URL validation (origin/scheme) already
     // happens downstream in inspoGrounding.ts's resolveAndValidateUrl. `!r`
     // guards a null/non-object array item: `typeof r.imageUrl` throws on
