@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -104,5 +104,116 @@ describe('lookupCachedReference', () => {
     `).run('22222222-2222-2222-2222-222222222222', style.id, 'Button', hash, 'https://inspomcp.dev/api/component/x/1', eightDaysAgo);
 
     expect(lookupCachedReference(style.id, 'Button', hash)).toBeNull();
+  });
+});
+
+describe('selectGroundingCandidate', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.doUnmock('@/lib/services/inspoClient'); });
+
+  it('returns null for a component type with no Inspo mapping', async () => {
+    const { selectGroundingCandidate } = await import('@/lib/services/inspoGrounding');
+    const result = await selectGroundingCandidate('Other', '#3b82f6', 2000);
+    expect(result).toBeNull();
+  });
+
+  it('picks the first non-fallback result and records colorMatched:true on success', async () => {
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return {
+        ...actual,
+        findComponents: vi.fn().mockResolvedValue([
+          { imageUrl: 'https://inspomcp.dev/api/component/a/1', fallback: true },
+          { imageUrl: 'https://inspomcp.dev/api/component/b/2', fallback: false },
+        ]),
+      };
+    });
+    vi.resetModules();
+    const { selectGroundingCandidate } = await import('@/lib/services/inspoGrounding');
+    const result = await selectGroundingCandidate('Button', '#3b82f6', 2000);
+    expect(result).toEqual({ imageUrl: 'https://inspomcp.dev/api/component/b/2', fallback: false, colorMatched: true });
+  });
+
+  it('falls back to the lowest-index fallback result when nothing else matches', async () => {
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return {
+        ...actual,
+        findComponents: vi.fn().mockResolvedValue([
+          { imageUrl: 'https://inspomcp.dev/api/component/a/5', fallback: true },
+          { imageUrl: 'https://inspomcp.dev/api/component/a/1', fallback: true },
+        ]),
+      };
+    });
+    vi.resetModules();
+    const { selectGroundingCandidate } = await import('@/lib/services/inspoGrounding');
+    const result = await selectGroundingCandidate('Button', '#3b82f6', 2000);
+    expect(result?.fallback).toBe(true);
+  });
+
+  it('degrades to no-color and colorMatched:false when the color-matched call rejects', async () => {
+    let callCount = 0;
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return {
+        ...actual,
+        findComponents: vi.fn().mockImplementation(async (args: any) => {
+          callCount++;
+          if (args.color) throw new Error('invalid color parameter');
+          return [{ imageUrl: 'https://inspomcp.dev/api/component/a/1', fallback: false }];
+        }),
+      };
+    });
+    vi.resetModules();
+    const { selectGroundingCandidate } = await import('@/lib/services/inspoGrounding');
+    const result = await selectGroundingCandidate('Button', '#3b82f6', 2000);
+    expect(result?.colorMatched).toBe(false);
+    expect(callCount).toBe(2); // one failed color-matched attempt, one degraded retry
+  });
+});
+
+describe('downloadAndValidateCropImage', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it('returns a valid ReferenceImagePayload-shaped result for an allowed content type under the size cap', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Map([['content-type', 'image/png'], ['content-length', '4']]),
+      arrayBuffer: () => Promise.resolve(bytes.buffer),
+    }) as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result?.mediaType).toBe('image/png');
+    expect(typeof result?.base64).toBe('string');
+  });
+
+  it('rejects a disallowed content type', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Map([['content-type', 'image/avif'], ['content-length', '4']]),
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
+    }) as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result).toBeNull();
+  });
+
+  it('rejects a response over the size cap', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Map([['content-type', 'image/png'], ['content-length', String(5 * 1024 * 1024)]]),
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(5 * 1024 * 1024)),
+    }) as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result).toBeNull();
+  });
+
+  it('rejects a non-2xx response', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: new Map(), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) }) as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { DatabaseConnection } from '@/lib/database';
 import { InspoReferenceCacheSchema, type InspoReferenceCache } from '@/lib/database/schema';
-import { getInspoBaseUrl } from '@/lib/services/inspoClient';
+import { getInspoBaseUrl, findComponents, INSPO_TYPE_FOR_COMPONENT_TYPE } from '@/lib/services/inspoClient';
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -48,4 +48,78 @@ export function lookupCachedReference(styleId: string, componentType: string, ac
 export function deleteCachedReference(styleId: string, componentType: string, accentHash: string): void {
   const db = DatabaseConnection.getInstance();
   db.prepare('DELETE FROM inspo_reference_cache WHERE style_id = ? AND component_type = ? AND accent_hash = ?').run(styleId, componentType, accentHash);
+}
+
+export interface GroundingCandidate {
+  imageUrl: string;
+  fallback: boolean;
+  colorMatched: boolean;
+}
+
+/**
+ * Calls find_components for the mapped Inspo type, preferring a color-matched
+ * call first; if that rejects (the `color` parameter's real format is
+ * unverified against Inspo's live schema), degrades to an unmatched call
+ * rather than failing the whole grounding attempt. Selection is
+ * deterministic: first non-fallback result, else the lowest-index fallback
+ * result — never a random/first-returned pick.
+ */
+export async function selectGroundingCandidate(componentType: string, colorAccent: string, deadlineMs: number): Promise<GroundingCandidate | null> {
+  const inspoType = INSPO_TYPE_FOR_COMPONENT_TYPE[componentType];
+  if (!inspoType) return null;
+
+  let colorMatched = true;
+  let results;
+  try {
+    results = await findComponents({ type: inspoType, color: colorAccent }, deadlineMs);
+  } catch {
+    colorMatched = false;
+    results = await findComponents({ type: inspoType }, deadlineMs);
+  }
+
+  if (results.length === 0) return null;
+
+  const nonFallback = results.find(r => !r.fallback);
+  const chosen = nonFallback ?? results[0];
+  return { imageUrl: chosen.imageUrl, fallback: chosen.fallback, colorMatched };
+}
+
+const MAX_CROP_IMAGE_BYTES = 4 * 1024 * 1024;
+const ALLOWED_CROP_CONTENT_TYPES: Record<string, 'image/png' | 'image/jpeg' | 'image/webp'> = {
+  'image/png': 'image/png',
+  'image/jpeg': 'image/jpeg',
+  'image/webp': 'image/webp',
+};
+
+/**
+ * Downloads a crop image with a byte cap and a Content-Type allowlist —
+ * rejects (never coerces) anything outside either bound, or a non-2xx
+ * response. Returns null on any rejection; the caller treats that as an
+ * ordinary grounding-failure case, same as a timeout or a 404.
+ */
+export async function downloadAndValidateCropImage(url: string, deadlineMs: number): Promise<{ base64: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp' } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), deadlineMs);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: controller.signal });
+  } catch {
+    clearTimeout(timeout);
+    return null;
+  }
+  clearTimeout(timeout);
+
+  if (!res.ok) return null;
+
+  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim();
+  const mediaType = ALLOWED_CROP_CONTENT_TYPES[contentType];
+  if (!mediaType) return null;
+
+  const contentLength = Number(res.headers.get('content-length') ?? '0');
+  if (contentLength > MAX_CROP_IMAGE_BYTES) return null;
+
+  const buffer = await res.arrayBuffer();
+  if (buffer.byteLength > MAX_CROP_IMAGE_BYTES) return null;
+
+  return { base64: Buffer.from(buffer).toString('base64'), mediaType };
 }
