@@ -52,7 +52,12 @@ const GenerateSchema = z.object({
 // otherwise inject a raw referenceImageFilename/referenceStrength/
 // basedOnAssetId directly into options and bypass ReferenceImageSchema's
 // size/type checks and basedOnAssetId's uuid format check entirely.
-const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested', 'componentType', 'groundWithInspo'] as const;
+// grounded/groundedReason/referenceIsFallbackThumbnail/colorMatched are
+// computed by worker.ts and written onto a job's options on completion -
+// stripped here too so a forged value at job creation can't survive into
+// the completed job's options for a job where grounding never actually
+// runs (worker.ts only overwrites these fields when grounding fires).
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested', 'componentType', 'groundWithInspo', 'grounded', 'groundedReason', 'referenceIsFallbackThumbnail', 'colorMatched'] as const;
 
 export async function POST(req: NextRequest) {
   try {

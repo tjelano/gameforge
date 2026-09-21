@@ -91,4 +91,36 @@ describe('POST /api/generate componentType/groundWithInspo threading', () => {
     const options = JSON.parse(job.options);
     expect(options.componentType).toBeUndefined();
   });
+
+  it('strips forged grounding-result fields from options instead of storing them at job creation', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    // Style has NOT opted into grounding, so worker.ts's shouldAttemptGrounding
+    // would evaluate false and never overwrite these fields - if they weren't
+    // stripped here, the client's forged values would persist untouched into
+    // the completed job's options, misrepresenting the generation's provenance.
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+
+    const res = await POST(req({
+      styleId: style.id, assetType: 'component', prompt: 'A submit button',
+      outputKind: 'component',
+      options: {
+        componentType: 'Button',
+        grounded: true,
+        groundedReason: 'fake',
+        referenceIsFallbackThumbnail: false,
+        colorMatched: true,
+      },
+    }, cookieHeader));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+
+    const db = DatabaseConnection.getInstance();
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(body.data.id) as any;
+    const options = JSON.parse(job.options);
+    expect(options).not.toHaveProperty('grounded');
+    expect(options).not.toHaveProperty('groundedReason');
+    expect(options).not.toHaveProperty('referenceIsFallbackThumbnail');
+    expect(options).not.toHaveProperty('colorMatched');
+    expect(options.componentType).toBe('Button');
+  });
 });

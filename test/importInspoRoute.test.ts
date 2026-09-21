@@ -50,22 +50,43 @@ const VALID_TOKENS = {
   radiusBase: '6px',
 };
 
+const VALID_PROVENANCE = {
+  colorBackground: 'css-var',
+  colorForeground: 'css-var',
+  colorAccent: 'heuristic',
+  colorBorder: 'heuristic',
+  fontHeading: 'css-var',
+  fontBody: 'heuristic',
+  spaceUnit: 'default',
+  radiusBase: 'default',
+};
+
 describe('POST /api/styles/import-inspo', () => {
   it('requires login', async () => {
-    const res = await POST(req({ name: 'X', slug: 'acme-corp', tokens: VALID_TOKENS, provenance: {}, lowConfidence: false }));
+    const res = await POST(req({ name: 'X', slug: 'acme-corp', tokens: VALID_TOKENS, provenance: VALID_PROVENANCE }));
     expect(res.status).toBe(401);
   });
 
   it('rejects an invalid slug with a 400', async () => {
     const { cookieHeader } = await seedSession();
-    const res = await POST(req({ name: 'X', slug: '../etc/passwd', tokens: VALID_TOKENS, provenance: {}, lowConfidence: false }, cookieHeader));
+    const res = await POST(req({ name: 'X', slug: '../etc/passwd', tokens: VALID_TOKENS, provenance: VALID_PROVENANCE }, cookieHeader));
     expect(res.status).toBe(400);
   });
 
   it('rejects tampered tokens that fail ThemeTokensSchema, even though preview already validated once', async () => {
     const { cookieHeader } = await seedSession();
     const tampered = { ...VALID_TOKENS, colorAccent: "'; } body { background: url(evil) } .x {" };
-    const res = await POST(req({ name: 'X', slug: 'acme-corp', tokens: tampered, provenance: {}, lowConfidence: false }, cookieHeader));
+    const res = await POST(req({ name: 'X', slug: 'acme-corp', tokens: tampered, provenance: VALID_PROVENANCE }, cookieHeader));
+    expect(res.status).toBe(400);
+
+    const styles = await styleService.getAll();
+    expect(styles).toHaveLength(0);
+  });
+
+  it('rejects a provenance with an invalid tier for a field instead of silently accepting it', async () => {
+    const { cookieHeader } = await seedSession();
+    const badProvenance = { ...VALID_PROVENANCE, colorBackground: 'not-a-real-tier' };
+    const res = await POST(req({ name: 'X', slug: 'acme-corp', tokens: VALID_TOKENS, provenance: badProvenance }, cookieHeader));
     expect(res.status).toBe(400);
 
     const styles = await styleService.getAll();
@@ -76,7 +97,7 @@ describe('POST /api/styles/import-inspo', () => {
     const { cookieHeader, userId } = await seedSession();
     const res = await POST(req({
       name: 'Acme Style', slug: 'acme-corp', tokens: VALID_TOKENS,
-      provenance: { colorAccent: 'heuristic' }, lowConfidence: false,
+      provenance: VALID_PROVENANCE,
     }, cookieHeader));
     const body = await res.json();
     expect(res.status).toBe(200);
@@ -93,5 +114,30 @@ describe('POST /api/styles/import-inspo', () => {
     expect(assets).toHaveLength(1);
     expect(assets[0].output_kind).toBe('theme');
     expect(assets[0].prompt).toBe('Imported from Inspo: acme-corp');
+  });
+
+  it('derives lowConfidence server-side from provenance, ignoring a contradicting client value', async () => {
+    const { cookieHeader } = await seedSession();
+    // 5 of 8 fields at 'default' tier (> 4) should compute lowConfidence: true,
+    // regardless of the client's own (deliberately wrong) claim of false.
+    const mostlyDefaultProvenance = {
+      colorBackground: 'default',
+      colorForeground: 'default',
+      colorAccent: 'default',
+      colorBorder: 'default',
+      fontHeading: 'default',
+      fontBody: 'heuristic',
+      spaceUnit: 'heuristic',
+      radiusBase: 'css-var',
+    };
+    const res = await POST(req({
+      name: 'Low Confidence Style', slug: 'acme-corp', tokens: VALID_TOKENS,
+      provenance: mostlyDefaultProvenance, lowConfidence: false,
+    }, cookieHeader));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+
+    const parsed = JSON.parse(body.data.parameters);
+    expect(parsed.__source.lowConfidence).toBe(true);
   });
 });

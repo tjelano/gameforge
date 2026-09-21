@@ -12,12 +12,30 @@ import { isValidInspoSlug } from '@/lib/services/inspoClient';
 
 export const dynamic = 'force-dynamic';
 
+// Mirrors inspoImporter.ts's FieldProvenance type (one of the 3 tiers per
+// ThemeTokens field) - a closed shape, not a loose record, so a client
+// can't fabricate provenance for a field that doesn't exist or claim an
+// invalid tier. lowConfidence is intentionally NOT part of this schema:
+// it's derived server-side from the validated provenance below (mirroring
+// mapDesignMdToTokens's own defaultCount > 4 rule), never trusted from
+// the client - a client-supplied lowConfidence would otherwise let a
+// forged "high confidence" claim contradict fabricated provenance.
+const FieldProvenanceSchema = z.object({
+  colorBackground: z.enum(['css-var', 'heuristic', 'default']),
+  colorForeground: z.enum(['css-var', 'heuristic', 'default']),
+  colorAccent: z.enum(['css-var', 'heuristic', 'default']),
+  colorBorder: z.enum(['css-var', 'heuristic', 'default']),
+  fontHeading: z.enum(['css-var', 'heuristic', 'default']),
+  fontBody: z.enum(['css-var', 'heuristic', 'default']),
+  spaceUnit: z.enum(['css-var', 'heuristic', 'default']),
+  radiusBase: z.enum(['css-var', 'heuristic', 'default']),
+});
+
 const ImportInspoSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1),
   tokens: z.record(z.string(), z.unknown()),
-  provenance: z.record(z.string(), z.unknown()).optional().default({}),
-  lowConfidence: z.boolean().optional().default(false),
+  provenance: FieldProvenanceSchema,
 });
 
 export async function POST(req: NextRequest) {
@@ -55,6 +73,12 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
+    // Same rule as mapDesignMdToTokens (lib/services/themeImport/inspoImporter.ts):
+    // more than half of the 8 fields defaulted -> low confidence. Computed
+    // here from the now-validated provenance, not trusted from the client.
+    const defaultCount = Object.values(input.provenance).filter(tier => tier === 'default').length;
+    const lowConfidence = defaultCount > 4;
+
     const parameters = {
       ...validatedTokens.data,
       __source: {
@@ -62,7 +86,7 @@ export async function POST(req: NextRequest) {
         capturedAt: null as string | null, // set below if a capturedAt was actually passed through
         importedAt: Date.now(),
         provenance: input.provenance,
-        lowConfidence: input.lowConfidence,
+        lowConfidence,
       },
     };
 
