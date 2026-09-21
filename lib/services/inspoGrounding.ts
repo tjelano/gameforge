@@ -110,9 +110,9 @@ const MAX_CROP_IMAGE_REDIRECTS = 5;
  * the same-origin check the caller already ran on the initial URL means
  * nothing without a redirect the origin itself would otherwise silently
  * bypass it and land somewhere unvalidated (loopback, private-network,
- * cloud metadata). Bounded by MAX_CROP_IMAGE_REDIRECTS; returns null
- * (never throws) on an invalid target or exceeding the budget, so the
- * caller's fail-soft contract holds.
+ * cloud metadata). Bounded by MAX_CROP_IMAGE_REDIRECTS. Returns null on an
+ * invalid or excessive redirect target; a network error or abort still
+ * throws and is caught by the caller.
  */
 async function followValidatedRedirects(url: string, signal: AbortSignal): Promise<Response | null> {
   let currentUrl = url;
@@ -156,6 +156,7 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
     return null;
   }
 
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
     if (!res.ok) {
       await res.body?.cancel().catch(() => {});
@@ -178,7 +179,7 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
       return null;
     }
 
-    const reader = res.body?.getReader();
+    reader = res.body?.getReader() ?? null;
     if (!reader) {
       clearTimeout(timeout);
       return null;
@@ -201,6 +202,7 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
     const buffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
     return { base64: buffer.toString('base64'), mediaType };
   } catch {
+    await reader?.cancel().catch(() => {});
     clearTimeout(timeout);
     return null;
   }
