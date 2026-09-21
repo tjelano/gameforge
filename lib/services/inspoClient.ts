@@ -299,29 +299,40 @@ export function getFilters(): Promise<unknown> {
   return callMcpTool('get_filters', {}, SEARCH_DEADLINE_MS);
 }
 
+// Real find_components response items also carry siteSlug, siteTitle,
+// siteHost, width, height, label, palette, and mode — confirmed live
+// 2026-09-21 — none of that is consumed downstream yet, so the interface
+// stays narrowed to what's actually used.
 interface RawFindComponentsResult {
-  slug: string;
-  idx: number;
-  fallback: boolean;
+  imageUrl: string;
 }
 
 /**
- * Wraps find_components: builds the crop image URL for every result whose
- * slug/idx pass validation, and silently drops any that don't rather than
- * building a URL from unvalidated remote data. deadlineMs is the caller's
- * to set — Feature 1's UI calls use SEARCH_DEADLINE_MS-equivalent budgets,
- * Feature 2's grounding path uses a tighter one (see inspoGrounding.ts).
+ * Wraps find_components: passes through the ready-to-use imageUrl for every
+ * result with one present, and silently drops any that don't rather than
+ * trusting a malformed/missing field. deadlineMs is the caller's to set —
+ * Feature 1's UI calls use SEARCH_DEADLINE_MS-equivalent budgets, Feature
+ * 2's grounding path uses a tighter one (see inspoGrounding.ts).
  */
 export async function findComponents(
   args: { type: string; color?: string } & Record<string, unknown>,
   deadlineMs: number = SEARCH_DEADLINE_MS
 ): Promise<InspoComponentResult[]> {
-  const response = await callMcpTool<{ results: RawFindComponentsResult[] }>('find_components', args, deadlineMs);
-  const baseUrl = getInspoBaseUrl();
+  const response = await callMcpTool<{ components: RawFindComponentsResult[] }>('find_components', args, deadlineMs);
   const out: InspoComponentResult[] = [];
-  for (const r of response.results ?? []) {
-    if (!isValidInspoSlug(r.slug) || !isValidInspoIdx(r.idx)) continue;
-    out.push({ imageUrl: `${baseUrl}/api/component/${r.slug}/${r.idx}`, fallback: !!r.fallback });
+  for (const r of response.components ?? []) {
+    // Minimal sanity guard only — real URL validation (origin/scheme) already
+    // happens downstream in inspoGrounding.ts's resolveAndValidateUrl.
+    if (typeof r.imageUrl !== 'string' || !r.imageUrl) continue;
+    // Always false: find_components' live response carries no fallback/
+    // full-page-thumbnail signal at all, so this is the honest current value,
+    // not a placeholder. This makes selectGroundingCandidate's
+    // `.find(r => !r.fallback)` always match the FIRST result immediately —
+    // i.e. trust Inspo's own result ordering — which is correct behavior;
+    // its lowest-index-fallback branch is unreachable given this but is
+    // cheap, harmless, forward-compatible defensive code if Inspo's schema
+    // ever adds a real fallback signal later.
+    out.push({ imageUrl: r.imageUrl, fallback: false });
   }
   return out;
 }

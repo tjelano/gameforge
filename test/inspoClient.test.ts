@@ -221,11 +221,22 @@ describe('INSPO_TYPE_FOR_COMPONENT_TYPE', () => {
 });
 
 describe('findComponents', () => {
-  it('builds a crop image URL for a non-fallback result', async () => {
+  it('passes through imageUrl unchanged and always reports fallback:false (the real API gives no fallback signal)', async () => {
     vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
       Client: vi.fn(() => ({
         connect: vi.fn().mockResolvedValue(undefined),
-        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ results: [{ slug: 'acme-corp', idx: 2, fallback: false }] }) }] }),
+        callTool: vi.fn().mockResolvedValue({
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              components: [{
+                imageUrl: 'https://inspomcp.dev/api/component/alloy-com/3',
+                siteSlug: 'alloy-com', siteTitle: 'Alloy', siteHost: 'alloy.com',
+                width: 1280, height: 195, label: 'whatever', palette: [], mode: 'light',
+              }],
+            }),
+          }],
+        }),
       })),
     }));
     vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
@@ -234,30 +245,24 @@ describe('findComponents', () => {
     const { findComponents } = await import('@/lib/services/inspoClient');
 
     const results = await findComponents({ type: 'cta' });
-    expect(results).toEqual([{ imageUrl: 'https://inspo.test/api/component/acme-corp/2', fallback: false }]);
+    expect(results).toEqual([{ imageUrl: 'https://inspomcp.dev/api/component/alloy-com/3', fallback: false }]);
   });
 
-  it('falls back to a whole-page thumbnail URL when fallback:true', async () => {
+  it('drops a result whose imageUrl is missing/malformed', async () => {
     vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
       Client: vi.fn(() => ({
         connect: vi.fn().mockResolvedValue(undefined),
-        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ results: [{ slug: 'acme-corp', idx: 0, fallback: true }] }) }] }),
-      })),
-    }));
-    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
-    vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
-    vi.resetModules();
-    const { findComponents } = await import('@/lib/services/inspoClient');
-
-    const results = await findComponents({ type: 'cta' });
-    expect(results[0].fallback).toBe(true);
-  });
-
-  it('drops a result whose slug fails validation rather than building an unsafe URL', async () => {
-    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
-      Client: vi.fn(() => ({
-        connect: vi.fn().mockResolvedValue(undefined),
-        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ results: [{ slug: '../etc', idx: 0, fallback: false }, { slug: 'acme-corp', idx: 0, fallback: false }] }) }] }),
+        callTool: vi.fn().mockResolvedValue({
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              components: [
+                { siteSlug: 'no-image', siteTitle: 'whatever', siteHost: 'whatever', width: 100, height: 100, label: 'whatever', palette: [], mode: 'light' },
+                { imageUrl: 'https://inspomcp.dev/api/component/acme-corp/0', siteSlug: 'acme-corp', siteTitle: 'whatever', siteHost: 'whatever', width: 100, height: 100, label: 'whatever', palette: [], mode: 'light' },
+              ],
+            }),
+          }],
+        }),
       })),
     }));
     vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
@@ -268,5 +273,6 @@ describe('findComponents', () => {
     const results = await findComponents({ type: 'cta' });
     expect(results).toHaveLength(1);
     expect(results[0].imageUrl).toContain('acme-corp');
+    expect(results[0].fallback).toBe(false);
   });
 });
