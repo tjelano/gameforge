@@ -151,3 +151,89 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
     return null;
   }
 }
+
+export function upsertCachedReference(
+  styleId: string, componentType: string, accentHash: string,
+  imageUrl: string, isFallback: boolean, isColorMatched: boolean
+): void {
+  const db = DatabaseConnection.getInstance();
+  db.prepare(`
+    INSERT INTO inspo_reference_cache (id, style_id, component_type, accent_hash, image_url, is_fallback, is_color_matched, fetched_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (style_id, component_type, accent_hash) DO UPDATE SET
+      image_url = excluded.image_url, is_fallback = excluded.is_fallback,
+      is_color_matched = excluded.is_color_matched, fetched_at = excluded.fetched_at
+  `).run(crypto.randomUUID(), styleId, componentType, accentHash, imageUrl, isFallback ? 1 : 0, isColorMatched ? 1 : 0, Date.now());
+}
+
+export type GroundingOutcome =
+  | { grounded: true; referenceImage: { base64: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp' }; referenceIsFallbackThumbnail: boolean; colorMatched: boolean }
+  | { grounded: false; groundedReason: string };
+
+const MCP_CALL_DEADLINE_MS = 2000;
+const IMAGE_DOWNLOAD_DEADLINE_MS = 2000;
+
+/**
+ * The single entry point worker.ts calls. Fully fail-soft: every failure
+ * mode (unmapped type, no match, timeout, SSRF rejection, oversized/wrong-
+ * type download, an unexpected throw from anywhere in the chain) resolves
+ * to {grounded:false, groundedReason}, never rejects. A cache row is only
+ * written on a full success — a failed attempt is not negative-cached, so
+ * the next generation for the same key retries normally rather than being
+ * suppressed for the 7-day TTL.
+ */
+export async function groundComponent(params: { styleId: string; componentType: string; colorAccent: string }): Promise<GroundingOutcome> {
+  try {
+    const accentHash = hashAccentColor(params.colorAccent);
+
+    const cached = lookupCachedReference(params.styleId, params.componentType, accentHash);
+    if (cached) {
+      const validUrl = resolveAndValidateUrl(cached.image_url);
+      if (!validUrl) {
+        deleteCachedReference(params.styleId, params.componentType, accentHash);
+      } else {
+        const image = await downloadAndValidateCropImage(validUrl, IMAGE_DOWNLOAD_DEADLINE_MS);
+        if (image) {
+          return {
+            grounded: true, referenceImage: image,
+            referenceIsFallbackThumbnail: !!cached.is_fallback,
+            colorMatched: !!cached.is_color_matched,
+          };
+        }
+        // Cached URL no longer resolves to a valid image (e.g. upstream
+        // scheme change) — drop it and fall through to a fresh lookup.
+        deleteCachedReference(params.styleId, params.componentType, accentHash);
+      }
+    }
+
+    if (!INSPO_TYPE_FOR_COMPONENT_TYPE[params.componentType]) {
+      return { grounded: false, groundedReason: 'unmapped-type' };
+    }
+
+    const candidate = await selectGroundingCandidate(params.componentType, params.colorAccent, MCP_CALL_DEADLINE_MS);
+    if (!candidate) {
+      return { grounded: false, groundedReason: 'no-match' };
+    }
+
+    const validUrl = resolveAndValidateUrl(candidate.imageUrl);
+    if (!validUrl) {
+      return { grounded: false, groundedReason: 'origin-mismatch' };
+    }
+
+    const image = await downloadAndValidateCropImage(validUrl, IMAGE_DOWNLOAD_DEADLINE_MS);
+    if (!image) {
+      return { grounded: false, groundedReason: 'invalid-image' };
+    }
+
+    upsertCachedReference(params.styleId, params.componentType, accentHash, validUrl, candidate.fallback, candidate.colorMatched);
+
+    return {
+      grounded: true, referenceImage: image,
+      referenceIsFallbackThumbnail: candidate.fallback,
+      colorMatched: candidate.colorMatched,
+    };
+  } catch (error) {
+    console.error('Inspo grounding attempt failed unexpectedly:', error);
+    return { grounded: false, groundedReason: 'error' };
+  }
+}

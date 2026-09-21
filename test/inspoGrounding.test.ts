@@ -39,7 +39,14 @@ describe('hashAccentColor', () => {
 describe('resolveAndValidateUrl', () => {
   const originalEnv = process.env.INSPO_BASE_URL;
   beforeEach(() => { process.env.INSPO_BASE_URL = 'https://inspo.test'; });
-  afterEach(() => { process.env.INSPO_BASE_URL = originalEnv; });
+  // Node's process.env coerces any assigned value to a string, so
+  // `process.env.X = undefined` sets the literal string "undefined" instead
+  // of clearing the var — it doesn't restore getInspoBaseUrl()'s fallback
+  // default and poisons every later test in this file that relies on it.
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.INSPO_BASE_URL;
+    else process.env.INSPO_BASE_URL = originalEnv;
+  });
 
   it('resolves a relative path against INSPO_BASE_URL', async () => {
     const { resolveAndValidateUrl } = await import('@/lib/services/inspoGrounding');
@@ -216,5 +223,96 @@ describe('downloadAndValidateCropImage', () => {
     const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
     const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
     expect(result).toBeNull();
+  });
+});
+
+describe('upsertCachedReference', () => {
+  it('writes a row retrievable via lookupCachedReference', async () => {
+    const { upsertCachedReference, lookupCachedReference, hashAccentColor } = await import('@/lib/services/inspoGrounding');
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+    const hash = hashAccentColor('#3b82f6');
+
+    upsertCachedReference(style.id, 'Button', hash, 'https://inspomcp.dev/api/component/a/1', false, true);
+
+    const found = lookupCachedReference(style.id, 'Button', hash);
+    expect(found?.image_url).toBe('https://inspomcp.dev/api/component/a/1');
+    expect(found?.is_color_matched).toBe(1);
+  });
+});
+
+describe('groundComponent (fail-soft wrapper)', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.doUnmock('@/lib/services/inspoClient'); });
+
+  it('returns grounded:false with reason unmapped-type for Other', async () => {
+    const { groundComponent } = await import('@/lib/services/inspoGrounding');
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+    const outcome = await groundComponent({ styleId: style.id, componentType: 'Other', colorAccent: '#3b82f6' });
+    expect(outcome).toEqual({ grounded: false, groundedReason: 'unmapped-type' });
+  });
+
+  it('returns grounded:false with reason no-match when find_components returns nothing', async () => {
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return { ...actual, findComponents: vi.fn().mockResolvedValue([]) };
+    });
+    vi.resetModules();
+    const { groundComponent } = await import('@/lib/services/inspoGrounding');
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+    const outcome = await groundComponent({ styleId: style.id, componentType: 'Button', colorAccent: '#3b82f6' });
+    expect(outcome.grounded).toBe(false);
+  });
+
+  it('never throws even when the underlying MCP call throws', async () => {
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return { ...actual, findComponents: vi.fn().mockRejectedValue(new Error('network error')) };
+    });
+    vi.resetModules();
+    const { groundComponent } = await import('@/lib/services/inspoGrounding');
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+    const outcome = await groundComponent({ styleId: style.id, componentType: 'Button', colorAccent: '#3b82f6' });
+    expect(outcome.grounded).toBe(false);
+  });
+
+  it('returns grounded:true and upserts the cache on a full success path', async () => {
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return { ...actual, findComponents: vi.fn().mockResolvedValue([{ imageUrl: 'https://inspomcp.dev/api/component/a/1', fallback: false }]) };
+    });
+    vi.resetModules();
+    const bytes = new Uint8Array([1, 2, 3]);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Map([['content-type', 'image/png'], ['content-length', '3']]),
+      arrayBuffer: () => Promise.resolve(bytes.buffer),
+    }) as any;
+    const { groundComponent, lookupCachedReference, hashAccentColor } = await import('@/lib/services/inspoGrounding');
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+
+    const outcome = await groundComponent({ styleId: style.id, componentType: 'Button', colorAccent: '#3b82f6' });
+    expect(outcome.grounded).toBe(true);
+    if (outcome.grounded) {
+      expect(outcome.referenceImage.mediaType).toBe('image/png');
+    }
+    expect(lookupCachedReference(style.id, 'Button', hashAccentColor('#3b82f6'))).not.toBeNull();
+  });
+
+  it('does not write a cache row on a failed attempt (failures are not negative-cached)', async () => {
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return { ...actual, findComponents: vi.fn().mockResolvedValue([]) };
+    });
+    vi.resetModules();
+    const { groundComponent, lookupCachedReference, hashAccentColor } = await import('@/lib/services/inspoGrounding');
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+
+    await groundComponent({ styleId: style.id, componentType: 'Button', colorAccent: '#3b82f6' });
+    expect(lookupCachedReference(style.id, 'Button', hashAccentColor('#3b82f6'))).toBeNull();
   });
 });
