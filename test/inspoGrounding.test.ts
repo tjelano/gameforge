@@ -148,6 +148,7 @@ describe('selectGroundingCandidate', () => {
     const { selectGroundingCandidate } = await import('@/lib/services/inspoGrounding');
     const result = await selectGroundingCandidate('Button', '#3b82f6', 2000);
     expect(result?.fallback).toBe(true);
+    expect(result?.imageUrl).toBe('https://inspomcp.dev/api/component/a/1');
   });
 
   it('degrades to no-color and colorMatched:false when the color-matched call rejects', async () => {

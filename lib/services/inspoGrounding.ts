@@ -56,6 +56,15 @@ export interface GroundingCandidate {
   colorMatched: boolean;
 }
 
+// InspoComponentResult only carries {imageUrl, fallback} — findComponents drops the raw MCP
+// response's `idx` field when it builds imageUrl. Parse it back out of the same URL shape
+// findComponents itself builds (`.../api/component/<slug>/<idx>`) so fallback selection can sort
+// by real index instead of just "whatever order find_components returned."
+function extractIdxFromUrl(url: string): number {
+  const match = url.match(/\/(\d+)$/);
+  return match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
 /**
  * Calls find_components for the mapped Inspo type, preferring a color-matched
  * call first; if that rejects (the `color` parameter's real format is
@@ -80,7 +89,9 @@ export async function selectGroundingCandidate(componentType: string, colorAccen
   if (results.length === 0) return null;
 
   const nonFallback = results.find(r => !r.fallback);
-  const chosen = nonFallback ?? results[0];
+  const chosen = nonFallback ?? results.reduce((lowest, r) =>
+    extractIdxFromUrl(r.imageUrl) < extractIdxFromUrl(lowest.imageUrl) ? r : lowest
+  );
   return { imageUrl: chosen.imageUrl, fallback: chosen.fallback, colorMatched };
 }
 
@@ -107,19 +118,33 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
     clearTimeout(timeout);
     return null;
   }
-  clearTimeout(timeout);
 
-  if (!res.ok) return null;
+  try {
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
 
-  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim();
-  const mediaType = ALLOWED_CROP_CONTENT_TYPES[contentType];
-  if (!mediaType) return null;
+    const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim();
+    const mediaType = ALLOWED_CROP_CONTENT_TYPES[contentType];
+    if (!mediaType) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
 
-  const contentLength = Number(res.headers.get('content-length') ?? '0');
-  if (contentLength > MAX_CROP_IMAGE_BYTES) return null;
+    const contentLength = Number(res.headers.get('content-length') ?? '0');
+    if (contentLength > MAX_CROP_IMAGE_BYTES) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
 
-  const buffer = await res.arrayBuffer();
-  if (buffer.byteLength > MAX_CROP_IMAGE_BYTES) return null;
+    const buffer = await res.arrayBuffer();
+    clearTimeout(timeout);
+    if (buffer.byteLength > MAX_CROP_IMAGE_BYTES) return null;
 
-  return { base64: Buffer.from(buffer).toString('base64'), mediaType };
+    return { base64: Buffer.from(buffer).toString('base64'), mediaType };
+  } catch {
+    clearTimeout(timeout);
+    return null;
+  }
 }
