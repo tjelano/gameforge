@@ -314,6 +314,34 @@ export function getFilters(): Promise<unknown> {
   return callMcpTool('get_filters', {}, SEARCH_DEADLINE_MS);
 }
 
+// search/recommend responses carry one top-level `images` template string
+// (not a per-result image URL) shaped like:
+// "https://<host>/captures/<slug>/hero.1440.webp (also full.1440, thumb.384,
+// mobile.384; get_screen returns exact URLs)". To display a small thumbnail
+// for a given result we substitute the real slug and swap in the smallest
+// listed size. `imagesTemplate` is API-returned data, not a hardcoded
+// constant, so this validates defensively rather than trusting the shape:
+// fails soft (null) on anything that isn't a string containing the literal
+// `/captures/` segment, that fails to parse as a well-formed https URL, or
+// (the slug, also API data) that doesn't match this file's own
+// isValidInspoSlug guard — the same one getDesignMd() and
+// app/api/inspo/preview/route.ts already use before a slug crosses into a URL.
+export function deriveThumbnailUrl(imagesTemplate: unknown, slug: string): string | null {
+  if (typeof imagesTemplate !== 'string' || !isValidInspoSlug(slug)) return null;
+  const marker = '/captures/';
+  const markerIdx = imagesTemplate.indexOf(marker);
+  if (markerIdx === -1) return null;
+  const base = imagesTemplate.slice(0, markerIdx + marker.length);
+  const url = `${base}${slug}/thumb.384.webp`;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return null;
+  } catch {
+    return null;
+  }
+  return url;
+}
+
 // Real find_components response items also carry siteSlug, siteTitle,
 // siteHost, width, height, label, palette, and mode — confirmed live
 // 2026-09-21 — none of that is consumed downstream yet, so the interface
