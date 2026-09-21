@@ -35,17 +35,18 @@ describe('inspo_reference_cache table', () => {
     const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
     const db = DatabaseConnection.getInstance();
 
-    const insert = () => db.prepare(`
+    const insert = (imageUrl: string) => db.prepare(`
       INSERT INTO inspo_reference_cache (id, style_id, component_type, accent_hash, image_url, is_fallback, is_color_matched, fetched_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (style_id, component_type, accent_hash) DO UPDATE SET image_url = excluded.image_url, fetched_at = excluded.fetched_at
-    `).run(crypto.randomUUID(), style.id, 'Button', 'abc123', 'https://inspomcp.dev/api/component/x/1', 0, 1, Date.now());
+    `).run(crypto.randomUUID(), style.id, 'Button', 'abc123', imageUrl, 0, 1, Date.now());
 
-    insert();
-    insert(); // second write with the same key must not throw or duplicate
+    insert('https://inspomcp.dev/api/component/x/1');
+    insert('https://inspomcp.dev/api/component/x/2'); // second write with the same key must update, not duplicate
 
     const rows = db.prepare('SELECT * FROM inspo_reference_cache WHERE style_id = ?').all(style.id);
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(1); // proves UNIQUE constraint prevents duplicate row
+    expect((rows[0] as Record<string, unknown>).image_url).toBe('https://inspomcp.dev/api/component/x/2'); // proves DO UPDATE SET applied the new value
   });
 
   it('cascades delete when the owning style is deleted', async () => {
