@@ -10,6 +10,8 @@ import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
 import { resolveComponentRegeneration } from '@/lib/services/componentPatchService';
 import { assetService } from '@/lib/services/AssetService';
 import { loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referenceImage';
+import { groundComponent } from '@/lib/services/inspoGrounding';
+import { styleService } from '@/lib/services/StyleService';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
@@ -153,6 +155,33 @@ export async function processJob(job: any): Promise<void> {
   const height = typeof options.height === 'number' ? options.height : undefined;
   const componentType = typeof options.componentType === 'string' ? options.componentType : undefined;
 
+  let groundingResult: { grounded: boolean; groundedReason?: string; referenceIsFallbackThumbnail?: boolean; colorMatched?: boolean } | undefined;
+  let groundedReferenceImage: { base64: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp' } | undefined;
+
+  const shouldAttemptGrounding =
+    job.output_kind === 'component' &&
+    options.groundWithInspo === true &&
+    !referenceImage &&
+    typeof componentType === 'string';
+
+  if (shouldAttemptGrounding) {
+    const style = await styleService.getById(job.style_id);
+    const colorAccent = style ? (JSON.parse(style.parameters || '{}').colorAccent as string | undefined) : undefined;
+    if (colorAccent) {
+      const outcome = await groundComponent({ styleId: job.style_id, componentType: componentType!, colorAccent });
+      if (outcome.grounded) {
+        groundedReferenceImage = outcome.referenceImage;
+        groundingResult = { grounded: true, referenceIsFallbackThumbnail: outcome.referenceIsFallbackThumbnail, colorMatched: outcome.colorMatched };
+      } else {
+        groundingResult = { grounded: false, groundedReason: outcome.groundedReason };
+      }
+    } else {
+      groundingResult = { grounded: false, groundedReason: 'no-accent-color' };
+    }
+  }
+
+  const effectiveReferenceImage = referenceImage ?? groundedReferenceImage ?? null;
+
   try {
     let result: { path: string };
     switch (job.output_kind) {
@@ -172,13 +201,13 @@ export async function processJob(job: any): Promise<void> {
             instruction: job.prompt,
             styleId: job.style_id,
             componentType,
-            referenceImage: referenceImage ?? undefined,
+            referenceImage: effectiveReferenceImage ?? undefined,
             providerOverride,
           });
           if (!resolved.ok) throw new Error(resolved.message);
           result = { path: resolved.filename };
         } else {
-          result = await getComponentGenerator().generate(job.prompt, job.style_id, componentType, referenceImage ?? undefined, basedOnContent, undefined, providerOverride) as { path: string };
+          result = await getComponentGenerator().generate(job.prompt, job.style_id, componentType, effectiveReferenceImage ?? undefined, basedOnContent, undefined, providerOverride) as { path: string };
         }
         break;
       }
@@ -203,8 +232,9 @@ export async function processJob(job: any): Promise<void> {
         throw new Error(`Job ${job.id} has unrecognized output_kind: ${job.output_kind}`);
     }
 
-    db.prepare(`UPDATE jobs SET status = 'complete', result_path = ?, updated_at = ? WHERE id = ?`)
-      .run(result.path, Date.now(), job.id);
+    const finalOptions = groundingResult ? JSON.stringify({ ...options, ...groundingResult }) : job.options;
+    db.prepare(`UPDATE jobs SET status = 'complete', result_path = ?, options = ?, updated_at = ? WHERE id = ?`)
+      .run(result.path, finalOptions, Date.now(), job.id);
     console.log(`✅ Job ${job.id} complete -> ${result.path}`);
   } catch (error: any) {
     markJobFailed(db, job.id, error instanceof Error ? error.message : String(error));
