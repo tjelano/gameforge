@@ -265,3 +265,63 @@ export async function callMcpTool<T>(name: string, args: Record<string, unknown>
     throw error;
   }
 }
+
+// None of these four mappings is a clean match — Inspo's 10 crop types
+// don't line up with GameForge's 5 component types. Button->cta is
+// arguably the loosest of the four (a cta crop is typically a whole
+// headline+button+image band, not an isolated button) despite being the
+// most common component type; it gets no special treatment here because
+// none of the mapped entries should read as more confident than another.
+export const INSPO_TYPE_FOR_COMPONENT_TYPE: Record<string, string | null> = {
+  Button: 'cta',
+  'Nav Bar': 'nav',
+  Card: 'features', // Inspo has no unified card category; features crops are often a multi-card grid
+  Form: 'cta', // inline-form-as-CTA is a named archetype; no first-class Form type exists
+  Other: null,
+};
+
+export interface InspoComponentResult {
+  imageUrl: string;
+  fallback: boolean;
+}
+
+const SEARCH_DEADLINE_MS = 3000;
+
+export function searchScreens(args: Record<string, unknown>): Promise<unknown> {
+  return callMcpTool('search_screens', args, SEARCH_DEADLINE_MS);
+}
+
+export function recommend(brief: string): Promise<unknown> {
+  return callMcpTool('recommend', { brief }, SEARCH_DEADLINE_MS);
+}
+
+export function getFilters(): Promise<unknown> {
+  return callMcpTool('get_filters', {}, SEARCH_DEADLINE_MS);
+}
+
+interface RawFindComponentsResult {
+  slug: string;
+  idx: number;
+  fallback: boolean;
+}
+
+/**
+ * Wraps find_components: builds the crop image URL for every result whose
+ * slug/idx pass validation, and silently drops any that don't rather than
+ * building a URL from unvalidated remote data. deadlineMs is the caller's
+ * to set — Feature 1's UI calls use SEARCH_DEADLINE_MS-equivalent budgets,
+ * Feature 2's grounding path uses a tighter one (see inspoGrounding.ts).
+ */
+export async function findComponents(
+  args: { type: string; color?: string } & Record<string, unknown>,
+  deadlineMs: number = SEARCH_DEADLINE_MS
+): Promise<InspoComponentResult[]> {
+  const response = await callMcpTool<{ results: RawFindComponentsResult[] }>('find_components', args, deadlineMs);
+  const baseUrl = getInspoBaseUrl();
+  const out: InspoComponentResult[] = [];
+  for (const r of response.results ?? []) {
+    if (!isValidInspoSlug(r.slug) || !isValidInspoIdx(r.idx)) continue;
+    out.push({ imageUrl: `${baseUrl}/api/component/${r.slug}/${r.idx}`, fallback: !!r.fallback });
+  }
+  return out;
+}

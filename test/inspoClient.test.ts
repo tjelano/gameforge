@@ -208,3 +208,65 @@ describe('callMcpTool', () => {
     expect(secondClient.callTool).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('INSPO_TYPE_FOR_COMPONENT_TYPE', () => {
+  it('maps every real GameForge component type, including the loose ones', async () => {
+    const { INSPO_TYPE_FOR_COMPONENT_TYPE } = await import('@/lib/services/inspoClient');
+    expect(INSPO_TYPE_FOR_COMPONENT_TYPE.Button).toBe('cta');
+    expect(INSPO_TYPE_FOR_COMPONENT_TYPE['Nav Bar']).toBe('nav');
+    expect(INSPO_TYPE_FOR_COMPONENT_TYPE.Card).toBe('features');
+    expect(INSPO_TYPE_FOR_COMPONENT_TYPE.Form).toBe('cta');
+    expect(INSPO_TYPE_FOR_COMPONENT_TYPE.Other).toBeNull();
+  });
+});
+
+describe('findComponents', () => {
+  it('builds a crop image URL for a non-fallback result', async () => {
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
+      Client: vi.fn(() => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ results: [{ slug: 'acme-corp', idx: 2, fallback: false }] }) }] }),
+      })),
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
+    vi.resetModules();
+    const { findComponents } = await import('@/lib/services/inspoClient');
+
+    const results = await findComponents({ type: 'cta' });
+    expect(results).toEqual([{ imageUrl: 'https://inspo.test/api/component/acme-corp/2', fallback: false }]);
+  });
+
+  it('falls back to a whole-page thumbnail URL when fallback:true', async () => {
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
+      Client: vi.fn(() => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ results: [{ slug: 'acme-corp', idx: 0, fallback: true }] }) }] }),
+      })),
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
+    vi.resetModules();
+    const { findComponents } = await import('@/lib/services/inspoClient');
+
+    const results = await findComponents({ type: 'cta' });
+    expect(results[0].fallback).toBe(true);
+  });
+
+  it('drops a result whose slug fails validation rather than building an unsafe URL', async () => {
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
+      Client: vi.fn(() => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ results: [{ slug: '../etc', idx: 0, fallback: false }, { slug: 'acme-corp', idx: 0, fallback: false }] }) }] }),
+      })),
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
+    vi.resetModules();
+    const { findComponents } = await import('@/lib/services/inspoClient');
+
+    const results = await findComponents({ type: 'cta' });
+    expect(results).toHaveLength(1);
+    expect(results[0].imageUrl).toContain('acme-corp');
+  });
+});
