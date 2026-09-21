@@ -44,7 +44,7 @@ class StyleServiceImpl {
   async update(
     id: string,
     requestingUserId: string,
-    patch: { name?: string; parameters?: string },
+    patch: { name?: string; parameters?: string; groundWithInspo?: boolean },
     isAdmin: boolean = false
   ): Promise<Style | { error: 'NOT_FOUND' | 'FORBIDDEN' }> {
     const existing = await this.getById(id);
@@ -53,10 +53,11 @@ class StyleServiceImpl {
 
     const db = DatabaseConnection.getInstance();
     db.prepare(`
-      UPDATE styles SET name = ?, parameters = ?, updated_at = ? WHERE id = ?
+      UPDATE styles SET name = ?, parameters = ?, ground_with_inspo = ?, updated_at = ? WHERE id = ?
     `).run(
       patch.name ?? existing.name,
       patch.parameters ?? existing.parameters,
+      patch.groundWithInspo !== undefined ? (patch.groundWithInspo ? 1 : 0) : existing.ground_with_inspo,
       Date.now(),
       id
     );

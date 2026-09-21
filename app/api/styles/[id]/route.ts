@@ -20,6 +20,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 const UpdateStyleSchema = z.object({
   name: z.string().min(1).optional(),
   parameters: z.string().optional(),
+  groundWithInspo: z.boolean().optional(),
 });
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -1,0 +1,1 @@
+ALTER TABLE styles ADD COLUMN ground_with_inspo INTEGER NOT NULL DEFAULT 0;

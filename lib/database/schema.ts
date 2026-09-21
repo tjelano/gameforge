@@ -20,6 +20,7 @@ export const StyleSchema = z.object({
   is_deleted: z.union([z.literal(0), z.literal(1)]),
   created_at: z.number().int(),
   updated_at: z.number().int(),
+  ground_with_inspo: z.union([z.literal(0), z.literal(1)]).default(0),
 });
 export type Style = z.infer<typeof StyleSchema>;
 
