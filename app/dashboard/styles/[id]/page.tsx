@@ -54,6 +54,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   const [savingName, setSavingName] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savingGrounding, setSavingGrounding] = useState(false);
 
   const [showSavePreset, setShowSavePreset] = useState(false);
   const [savePresetStatus, setSavePresetStatus] = useState<string | null>(null);
@@ -131,6 +132,29 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
     } catch {
       setError('Could not reach the server.');
       setDeleting(false);
+    }
+  }
+
+  async function handleToggleGrounding() {
+    if (!style || savingGrounding) return;
+    setSavingGrounding(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/styles/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groundWithInspo: !style.ground_with_inspo }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setError(body.error ?? 'Could not update grounding setting.');
+        return;
+      }
+      setStyle(body.data);
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setSavingGrounding(false);
     }
   }
 
@@ -363,6 +387,19 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
           Deleting a Style Bible does not delete its assets — they stay active and remain visible in the
           global Assets list.
         </p>
+      )}
+      {isOwner && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={!!style.ground_with_inspo}
+              onChange={handleToggleGrounding}
+              disabled={savingGrounding}
+            />
+            Use real-site references when generating components
+          </label>
+        </div>
       )}
 
       {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
