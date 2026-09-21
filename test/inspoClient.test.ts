@@ -151,6 +151,26 @@ describe('callMcpTool', () => {
     await assertion;
   });
 
+  it('aborts the underlying request (via AbortSignal) when the deadline fires, instead of just abandoning it', async () => {
+    vi.useFakeTimers();
+    const neverResolves = new Promise(() => {});
+    const mockClient = { callTool: vi.fn().mockReturnValue(neverResolves), connect: vi.fn().mockResolvedValue(undefined) };
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: vi.fn(() => mockClient) }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})), StreamableHTTPError: FakeStreamableHTTPError }));
+    vi.resetModules();
+    const { callMcpTool: freshCallMcpTool } = await import('@/lib/services/inspoClient');
+
+    const callPromise = freshCallMcpTool('search_screens', {}, 1000);
+    const assertion = expect(callPromise).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1100);
+    await assertion;
+
+    expect(mockClient.callTool).toHaveBeenCalledTimes(1);
+    const [, , options] = mockClient.callTool.mock.calls[0];
+    expect(options?.signal).toBeInstanceOf(AbortSignal);
+    expect(options.signal.aborted).toBe(true); // the in-flight request was actually cancelled, not just abandoned
+  });
+
   it('reconnects once and retries after a session-invalid error, then succeeds', async () => {
     const sessionError = new FakeStreamableHTTPError(404, 'Session invalid or expired');
     const firstClient = {
@@ -274,5 +294,41 @@ describe('findComponents', () => {
     expect(results).toHaveLength(1);
     expect(results[0].imageUrl).toContain('acme-corp');
     expect(results[0].fallback).toBe(false);
+  });
+
+  it('returns [] instead of throwing when components is not an array', async () => {
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
+      Client: vi.fn(() => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        callTool: vi.fn().mockResolvedValue({
+          content: [{ type: 'text', text: JSON.stringify({ components: 'not-an-array' }) }],
+        }),
+      })),
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
+    vi.resetModules();
+    const { findComponents } = await import('@/lib/services/inspoClient');
+
+    const results = await findComponents({ type: 'cta' });
+    expect(results).toEqual([]);
+  });
+
+  it('returns [] instead of throwing when components is missing entirely', async () => {
+    vi.doMock('@modelcontextprotocol/sdk/client/index.js', () => ({
+      Client: vi.fn(() => ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        callTool: vi.fn().mockResolvedValue({
+          content: [{ type: 'text', text: JSON.stringify({}) }],
+        }),
+      })),
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn(() => ({})) }));
+    vi.stubEnv('INSPO_BASE_URL', 'https://inspo.test');
+    vi.resetModules();
+    const { findComponents } = await import('@/lib/services/inspoClient');
+
+    const results = await findComponents({ type: 'cta' });
+    expect(results).toEqual([]);
   });
 });
