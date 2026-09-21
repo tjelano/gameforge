@@ -8,7 +8,9 @@ import { styleService } from '@/lib/services/StyleService';
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { callClaudeTool } from '@/lib/services/claudeToolCall';
-import { callOllamaTool, type OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
+import { callOllamaTool } from '@/lib/services/ollamaToolCall';
+import { callOpenRouterTool, resolveOpenRouterApiKey } from '@/lib/services/openrouterToolCall';
+import type { ProviderOverride } from '@/lib/services/providerOverride';
 import { combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 
@@ -32,8 +34,8 @@ export interface PatchedElement {
 }
 
 export interface ComponentGenerator {
-  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride, correction?: string, forceFull?: boolean): Promise<GeneratedComponent | ComponentDeltaResult>;
-  patchElement(elementOuterHtml: string, instruction: string, currentDeclarations: string | null, styleId: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<PatchedElement>;
+  generate(prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload, basedOnContent?: string, signal?: AbortSignal, providerOverride?: ProviderOverride, correction?: string, forceFull?: boolean): Promise<GeneratedComponent | ComponentDeltaResult>;
+  patchElement(elementOuterHtml: string, instruction: string, currentDeclarations: string | null, styleId: string, signal?: AbortSignal, providerOverride?: ProviderOverride): Promise<PatchedElement>;
 }
 
 const TOOL_INPUT_SCHEMA = {
@@ -118,7 +120,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
 
   async generate(
     prompt: string, styleId: string, componentType?: string, referenceImage?: ReferenceImagePayload,
-    basedOnContent?: string, signal?: AbortSignal, providerOverride?: OllamaProviderOverride,
+    basedOnContent?: string, signal?: AbortSignal, providerOverride?: ProviderOverride,
     correction?: string, forceFull?: boolean,
   ): Promise<GeneratedComponent | ComponentDeltaResult> {
     const style = await styleService.getById(styleId);
@@ -135,16 +137,29 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
           ]
         : fullPrompt;
 
-      const toolInput = providerOverride
+      const correctedContent = providerOverride?.correctionRequested
+        ? `${fullPrompt}\n\nYou did not call the emit_component tool last time -- you must call it now with valid arguments matching its schema.`
+        : content;
+      const toolInput = providerOverride?.type === 'ollama'
         ? await callOllamaTool({
             host: providerOverride.host,
             model: providerOverride.model,
             toolName: 'emit_component',
             toolDescription: 'Emit a single website UI component as HTML and CSS.',
             inputSchema: TOOL_INPUT_SCHEMA,
-            messages: [{ role: 'user', content: providerOverride.correctionRequested
-              ? `${fullPrompt}\n\nYou did not call the emit_component tool last time -- you must call it now with valid arguments matching its schema.`
-              : content }],
+            messages: [{ role: 'user', content: correctedContent }],
+            signal,
+            operationLabel: 'component generation',
+            truncatedMessage: 'the component could not be generated',
+          })
+        : providerOverride?.type === 'openrouter'
+        ? await callOpenRouterTool({
+            apiKey: resolveOpenRouterApiKey(),
+            model: providerOverride.model,
+            toolName: 'emit_component',
+            toolDescription: 'Emit a single website UI component as HTML and CSS.',
+            inputSchema: TOOL_INPUT_SCHEMA,
+            messages: [{ role: 'user', content: correctedContent }],
             signal,
             operationLabel: 'component generation',
             truncatedMessage: 'the component could not be generated',
@@ -204,16 +219,29 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
         ]
       : fullPrompt;
 
-    const toolInput = providerOverride
+    const correctedDeltaContent = providerOverride?.correctionRequested
+      ? `${fullPrompt}\n\nYou did not call the ${toolName} tool last time -- you must call it now with valid arguments matching its schema.`
+      : content;
+    const toolInput = providerOverride?.type === 'ollama'
       ? await callOllamaTool({
           host: providerOverride.host,
           model: providerOverride.model,
           toolName,
           toolDescription,
           inputSchema,
-          messages: [{ role: 'user', content: providerOverride.correctionRequested
-            ? `${fullPrompt}\n\nYou did not call the ${toolName} tool last time -- you must call it now with valid arguments matching its schema.`
-            : content }],
+          messages: [{ role: 'user', content: correctedDeltaContent }],
+          signal,
+          operationLabel: 'component generation',
+          truncatedMessage: 'the component could not be generated',
+        })
+      : providerOverride?.type === 'openrouter'
+      ? await callOpenRouterTool({
+          apiKey: resolveOpenRouterApiKey(),
+          model: providerOverride.model,
+          toolName,
+          toolDescription,
+          inputSchema,
+          messages: [{ role: 'user', content: correctedDeltaContent }],
           signal,
           operationLabel: 'component generation',
           truncatedMessage: 'the component could not be generated',
@@ -243,7 +271,7 @@ export class ClaudeApiComponentGenerator implements ComponentGenerator {
     currentDeclarations: string | null,
     styleId: string,
     signal?: AbortSignal,
-    providerOverride?: OllamaProviderOverride,
+    providerOverride?: ProviderOverride,
   ): Promise<PatchedElement> {
     const style = await styleService.getById(styleId);
     const declarationsSection = currentDeclarations
@@ -258,16 +286,29 @@ Instruction: ${instruction}
 
 Respond by calling the emit_element_patch tool with the element's complete replacement html and, if a style change is requested, the COMPLETE desired css declaration list (not a diff — see the tool's own description).`;
 
-    const toolInput = providerOverride
+    const correctedPatchPrompt = providerOverride?.correctionRequested
+      ? `${fullPrompt}\n\nYou did not call the emit_element_patch tool last time -- you must call it now with valid arguments matching its schema.`
+      : fullPrompt;
+    const toolInput = providerOverride?.type === 'ollama'
       ? await callOllamaTool({
           host: providerOverride.host,
           model: providerOverride.model,
           toolName: 'emit_element_patch',
           toolDescription: 'Emit a patched replacement for one HTML element, and optionally its complete CSS declaration list.',
           inputSchema: PATCH_TOOL_INPUT_SCHEMA,
-          messages: [{ role: 'user', content: providerOverride.correctionRequested
-            ? `${fullPrompt}\n\nYou did not call the emit_element_patch tool last time -- you must call it now with valid arguments matching its schema.`
-            : fullPrompt }],
+          messages: [{ role: 'user', content: correctedPatchPrompt }],
+          signal,
+          operationLabel: 'element patch',
+          truncatedMessage: 'the element patch could not be generated',
+        })
+      : providerOverride?.type === 'openrouter'
+      ? await callOpenRouterTool({
+          apiKey: resolveOpenRouterApiKey(),
+          model: providerOverride.model,
+          toolName: 'emit_element_patch',
+          toolDescription: 'Emit a patched replacement for one HTML element, and optionally its complete CSS declaration list.',
+          inputSchema: PATCH_TOOL_INPUT_SCHEMA,
+          messages: [{ role: 'user', content: correctedPatchPrompt }],
           signal,
           operationLabel: 'element patch',
           truncatedMessage: 'the element patch could not be generated',
@@ -295,11 +336,11 @@ Respond by calling the emit_element_patch tool with the element's complete repla
 export class MockComponentGenerator implements ComponentGenerator {
   async generate(
     prompt: string, _styleId: string, _componentType?: string, _referenceImage?: ReferenceImagePayload,
-    basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride,
+    basedOnContent?: string, _signal?: AbortSignal, _providerOverride?: ProviderOverride,
     _correction?: string, _forceFull?: boolean,
   ): Promise<GeneratedComponent | ComponentDeltaResult> {
     if (_providerOverride) {
-      throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
+      throw new Error(`A provider override (${_providerOverride.type}) was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.`);
     }
     const tokens: ComponentTokens = {
       html: '<button class="btn-primary">Buy now</button>',
@@ -326,10 +367,10 @@ export class MockComponentGenerator implements ComponentGenerator {
     _currentDeclarations: string | null,
     _styleId: string,
     _signal?: AbortSignal,
-    _providerOverride?: OllamaProviderOverride,
+    _providerOverride?: ProviderOverride,
   ): Promise<PatchedElement> {
     if (_providerOverride) {
-      throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
+      throw new Error(`A provider override (${_providerOverride.type}) was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.`);
     }
     return { html: sanitizeComponentHtml(elementOuterHtml), cssDeclarations: null };
   }

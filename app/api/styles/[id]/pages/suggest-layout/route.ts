@@ -3,18 +3,21 @@ import { z, ZodError } from 'zod';
 import { getCurrentUser } from '@/lib/utils/session';
 import { assetService } from '@/lib/services/AssetService';
 import { getPageLayoutSuggester, type PageLayoutComponentCandidate } from '@/lib/services/PageLayoutSuggester';
-import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
+import type { ProviderOverride } from '@/lib/services/providerOverride';
 
 export const dynamic = 'force-dynamic';
 
 const SuggestLayoutSchema = z.object({
   pageName: z.string().min(1),
-  provider: z.enum(['claude', 'ollama']).optional(),
+  provider: z.enum(['claude', 'ollama', 'openrouter']).optional(),
   model: z.string().min(1).optional(),
   ollamaHost: z.string().regex(/^https?:\/\//).optional(),
 }).refine(
   input => input.provider !== 'ollama' || (!!input.model && !!input.ollamaHost),
   { message: 'model and ollamaHost are required when provider is "ollama"' }
+).refine(
+  input => input.provider !== 'openrouter' || !!input.model,
+  { message: 'model is required when provider is "openrouter"' }
 );
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -32,8 +35,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .filter(a => a.output_kind === 'component')
       .map(a => ({ id: a.id, assetType: a.asset_type, prompt: a.prompt }));
 
-    const providerOverride: OllamaProviderOverride | undefined = input.provider === 'ollama'
+    const providerOverride: ProviderOverride | undefined = input.provider === 'ollama'
       ? { type: 'ollama', host: input.ollamaHost!, model: input.model! }
+      : input.provider === 'openrouter'
+      ? { type: 'openrouter', model: input.model! }
       : undefined;
 
     const componentAssetIds = await getPageLayoutSuggester().suggest(input.pageName, candidates, undefined, providerOverride);

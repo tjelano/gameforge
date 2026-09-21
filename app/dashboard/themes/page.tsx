@@ -26,7 +26,12 @@ export default function ThemesPage() {
   const [referenceImage, setReferenceImage] = useState<{ base64: string; mediaType: string } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
-  const [provider, setProvider] = useState<'claude' | string>('claude'); // 'claude' or an ollama model name
+  const [provider, setProvider] = useState<'claude' | 'openrouter' | string>('claude'); // 'claude', 'openrouter', or an ollama model name
+  // Pre-filled with a real, verified OpenRouter model slug so picking
+  // "OpenRouter" works out of the box -- still a plain editable text field,
+  // not a fetched/curated catalog (OpenRouter has hundreds of models; this
+  // app doesn't try to browse them).
+  const [openrouterModel, setOpenrouterModel] = useState('anthropic/claude-sonnet-5');
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
@@ -64,6 +69,7 @@ export default function ThemesPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!activeStyleId || !prompt.trim() || submitting) return;
+    if (provider === 'openrouter' && !referenceImage && !openrouterModel.trim()) return;
 
     setSubmitting(true);
     setError(null);
@@ -78,9 +84,13 @@ export default function ThemesPage() {
           outputKind: 'theme',
           candidateCount,
           ...(referenceImage ? { referenceImage } : {}),
-          ...(provider !== 'claude' && !referenceImage
-            ? { provider: 'ollama', model: provider, ollamaHost: ollamaHost }
-            : {}),
+          ...(referenceImage
+            ? {}
+            : provider === 'openrouter'
+              ? { provider: 'openrouter', model: openrouterModel.trim() }
+              : provider !== 'claude'
+                ? { provider: 'ollama', model: provider, ollamaHost: ollamaHost }
+                : {}),
         }),
       });
       const body = await res.json();
@@ -178,16 +188,26 @@ export default function ThemesPage() {
               onChange={e => setProvider(e.target.value)}
             >
               <option value="claude">Claude</option>
+              <option value="openrouter">OpenRouter</option>
               {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
             </select>
-            {referenceImage && <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>{`Ollama isn't available with a reference image attached.`}</p>}
+            {referenceImage && <p style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 4 }}>{`Ollama and OpenRouter aren't available with a reference image attached.`}</p>}
+            {!referenceImage && provider === 'openrouter' && (
+              <input
+                aria-label="OpenRouter model"
+                value={openrouterModel}
+                onChange={e => setOpenrouterModel(e.target.value)}
+                placeholder="anthropic/claude-sonnet-5"
+                style={{ marginTop: 8 }}
+              />
+            )}
           </div>
 
           {error && (
             <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -8, marginBottom: 16 }}>{error}</p>
           )}
 
-          <button className="btn btn-primary" type="submit" disabled={submitting || !prompt.trim()}>
+          <button className="btn btn-primary" type="submit" disabled={submitting || !prompt.trim() || (provider === 'openrouter' && !referenceImage && !openrouterModel.trim())}>
             {submitting ? 'Queuing…' : 'Queue generation'}
           </button>
         </form>

@@ -38,12 +38,15 @@ const GenerateSchema = z.object({
   // 400 instead of being silently clamped deep in the generator.
   width: z.number().int().min(16).max(400).optional(),
   height: z.number().int().min(16).max(400).optional(),
-  provider: z.enum(['claude', 'ollama']).optional(),
+  provider: z.enum(['claude', 'ollama', 'openrouter']).optional(),
   model: z.string().min(1).optional(),
   ollamaHost: z.string().regex(/^https?:\/\//).optional(),
 }).refine(
   input => input.provider !== 'ollama' || (!!input.model && !!input.ollamaHost),
   { message: 'model and ollamaHost are required when provider is "ollama"' }
+).refine(
+  input => input.provider !== 'openrouter' || !!input.model,
+  { message: 'model is required when provider is "openrouter"' }
 );
 
 // These three keys are computed by THIS route from the validated
@@ -89,11 +92,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Component jobs do not support multi-candidate generation.' }, { status: 400 });
     }
 
-    if (input.provider === 'ollama' && (input.outputKind === 'image' || input.outputKind === undefined)) {
-      return NextResponse.json({ success: false, error: 'Ollama is not supported for image (sprite) generation.' }, { status: 400 });
+    if ((input.provider === 'ollama' || input.provider === 'openrouter') && (input.outputKind === 'image' || input.outputKind === undefined)) {
+      return NextResponse.json({ success: false, error: `${input.provider === 'ollama' ? 'Ollama' : 'OpenRouter'} is not supported for image (sprite) generation.` }, { status: 400 });
     }
-    if (input.provider === 'ollama' && input.referenceImage) {
-      return NextResponse.json({ success: false, error: 'Ollama is not supported alongside a reference image.' }, { status: 400 });
+    if ((input.provider === 'ollama' || input.provider === 'openrouter') && input.referenceImage) {
+      return NextResponse.json({ success: false, error: `${input.provider === 'ollama' ? 'Ollama' : 'OpenRouter'} is not supported alongside a reference image.` }, { status: 400 });
     }
 
     let mergedOptions: Record<string, unknown> = { ...(input.options ?? {}) };
@@ -123,6 +126,9 @@ export async function POST(req: NextRequest) {
       mergedOptions.provider = input.provider;
       mergedOptions.model = input.model;
       mergedOptions.ollamaHost = input.ollamaHost;
+    } else if (input.provider === 'openrouter') {
+      mergedOptions.provider = input.provider;
+      mergedOptions.model = input.model;
     }
     if (input.outputKind === 'component') {
       if (requestedComponentType !== undefined) {

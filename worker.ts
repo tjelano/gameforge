@@ -14,7 +14,7 @@ import { groundComponent } from '@/lib/services/inspoGrounding';
 import { styleService } from '@/lib/services/StyleService';
 import { WORKER_BATCH_SIZE } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
-import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
+import type { ProviderOverride } from '@/lib/services/providerOverride';
 
 const POLL_INTERVAL_MS = 2000;
 const LOCK_FILE = path.join(getProjectRoot(), '.worker.lock');
@@ -98,17 +98,33 @@ async function loadSpriteBasedOnImage(basedOnAssetId: unknown, jobId: string): P
 /**
  * Builds the providerOverride the Task-2 generators expect, from a job's
  * raw options object. Returns undefined for a Claude job (the default) --
- * only 'ollama' jobs ever set this. `correctionRequested` is omitted
- * entirely rather than set to `false` when absent -- it's an optional
- * field on OllamaProviderOverride, and omitting it (instead of always
- * including an explicit `false`) keeps the object's shape identical to
- * what a plain ollama job (no correction) already produces.
+ * only 'ollama'/'openrouter' jobs ever set this. `correctionRequested` is
+ * omitted entirely rather than set to `false` when absent -- it's an
+ * optional field on both override variants, and omitting it (instead of
+ * always including an explicit `false`) keeps the object's shape identical
+ * to what a plain job (no correction) already produces.
+ *
+ * `options.ollamaCorrectionRequested` is read for the openrouter branch too
+ * (not renamed) since it's currently unreachable there anyway:
+ * app/api/jobs/retry-with-correction/route.ts -- the only place that sets
+ * this flag -- gates the whole retry feature on the job's error_message
+ * starting with OLLAMA_NO_TOOL_CALL_ERROR_PREFIX, which callOpenRouterTool()
+ * never throws. If that route is ever extended to cover OpenRouter's own
+ * hard-fail errors, give it its own option key at that point rather than
+ * reusing this Ollama-named one.
  */
-function buildOllamaOverride(options: any): OllamaProviderOverride | undefined {
-  if (options.provider !== 'ollama') return undefined;
-  const override: OllamaProviderOverride = { type: 'ollama', host: options.ollamaHost, model: options.model };
-  if (options.ollamaCorrectionRequested === true) override.correctionRequested = true;
-  return override;
+function buildProviderOverride(options: any): ProviderOverride | undefined {
+  if (options.provider === 'ollama') {
+    const override: ProviderOverride = { type: 'ollama', host: options.ollamaHost, model: options.model };
+    if (options.ollamaCorrectionRequested === true) override.correctionRequested = true;
+    return override;
+  }
+  if (options.provider === 'openrouter') {
+    const override: ProviderOverride = { type: 'openrouter', model: options.model };
+    if (options.ollamaCorrectionRequested === true) override.correctionRequested = true;
+    return override;
+  }
+  return undefined;
 }
 
 function markJobFailed(db: ReturnType<typeof DatabaseConnection.getInstance>, jobId: string, errorMessage: string): void {
@@ -192,13 +208,13 @@ export async function processJob(job: any): Promise<void> {
     switch (job.output_kind) {
       case 'theme': {
         const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
-        const providerOverride = buildOllamaOverride(options);
+        const providerOverride = buildProviderOverride(options);
         result = await getThemeGenerator().generate(job.prompt, job.style_id, referenceImage ?? undefined, basedOnContent, undefined, providerOverride);
         break;
       }
       case 'component': {
         const basedOnContent = await loadBasedOnContent(options.basedOnAssetId, job.id);
-        const providerOverride = buildOllamaOverride(options);
+        const providerOverride = buildProviderOverride(options);
         if (basedOnContent !== undefined && typeof options.basedOnAssetId === 'string') {
           const resolved = await resolveComponentRegeneration({
             basedOnAssetId: options.basedOnAssetId,

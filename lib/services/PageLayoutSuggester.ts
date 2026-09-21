@@ -2,7 +2,9 @@
 import type { ClaudeApiProvider } from '@/lib/services/claudeApiProviders';
 import { ANTHROPIC_PROVIDER, CHEAPERINFERENCE_PROVIDER } from '@/lib/services/claudeApiProviders';
 import { callClaudeTool } from '@/lib/services/claudeToolCall';
-import { callOllamaTool, type OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
+import { callOllamaTool } from '@/lib/services/ollamaToolCall';
+import { callOpenRouterTool, resolveOpenRouterApiKey } from '@/lib/services/openrouterToolCall';
+import type { ProviderOverride } from '@/lib/services/providerOverride';
 
 export interface PageLayoutComponentCandidate {
   id: string;
@@ -12,7 +14,7 @@ export interface PageLayoutComponentCandidate {
 
 export interface PageLayoutSuggester {
   /** Ordered componentAssetIds to put on a page named `pageName`, chosen from `candidates`. */
-  suggest(pageName: string, candidates: PageLayoutComponentCandidate[], signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<string[]>;
+  suggest(pageName: string, candidates: PageLayoutComponentCandidate[], signal?: AbortSignal, providerOverride?: ProviderOverride): Promise<string[]>;
 }
 
 const TOOL_INPUT_SCHEMA = {
@@ -41,20 +43,33 @@ Respond by calling the emit_page_layout tool with the indices of the components 
 export class ClaudeApiPageLayoutSuggester implements PageLayoutSuggester {
   constructor(private apiKey: string, private provider: ClaudeApiProvider) {}
 
-  async suggest(pageName: string, candidates: PageLayoutComponentCandidate[], signal?: AbortSignal, providerOverride?: OllamaProviderOverride): Promise<string[]> {
+  async suggest(pageName: string, candidates: PageLayoutComponentCandidate[], signal?: AbortSignal, providerOverride?: ProviderOverride): Promise<string[]> {
     if (candidates.length === 0) return [];
 
     const prompt = buildLayoutPrompt(pageName, candidates);
-    const input = providerOverride
+    const correctedPrompt = providerOverride?.correctionRequested
+      ? `${prompt}\n\nYou did not call the emit_page_layout tool last time -- you must call it now with valid arguments matching its schema.`
+      : prompt;
+    const input = providerOverride?.type === 'ollama'
       ? await callOllamaTool({
           host: providerOverride.host,
           model: providerOverride.model,
           toolName: 'emit_page_layout',
           toolDescription: 'Emit the ordered list of component indices that belong on this page.',
           inputSchema: TOOL_INPUT_SCHEMA,
-          messages: [{ role: 'user', content: providerOverride.correctionRequested
-            ? `${prompt}\n\nYou did not call the emit_page_layout tool last time -- you must call it now with valid arguments matching its schema.`
-            : prompt }],
+          messages: [{ role: 'user', content: correctedPrompt }],
+          signal,
+          operationLabel: 'page layout suggestion',
+          truncatedMessage: 'the layout could not be suggested',
+        })
+      : providerOverride?.type === 'openrouter'
+      ? await callOpenRouterTool({
+          apiKey: resolveOpenRouterApiKey(),
+          model: providerOverride.model,
+          toolName: 'emit_page_layout',
+          toolDescription: 'Emit the ordered list of component indices that belong on this page.',
+          inputSchema: TOOL_INPUT_SCHEMA,
+          messages: [{ role: 'user', content: correctedPrompt }],
           signal,
           operationLabel: 'page layout suggestion',
           truncatedMessage: 'the layout could not be suggested',
@@ -100,9 +115,9 @@ export class ClaudeApiPageLayoutSuggester implements PageLayoutSuggester {
 
 /** No API key configured — deterministic placeholder so local dev/tests without a key still work, same role as MockThemeGenerator/MockComponentGenerator. */
 export class MockPageLayoutSuggester implements PageLayoutSuggester {
-  async suggest(_pageName: string, candidates: PageLayoutComponentCandidate[], _signal?: AbortSignal, _providerOverride?: OllamaProviderOverride): Promise<string[]> {
+  async suggest(_pageName: string, candidates: PageLayoutComponentCandidate[], _signal?: AbortSignal, _providerOverride?: ProviderOverride): Promise<string[]> {
     if (_providerOverride) {
-      throw new Error('Ollama was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.');
+      throw new Error(`A provider override (${_providerOverride.type}) was requested but no real generator is configured (ANTHROPIC_API_KEY unset), so the mock generator is active.`);
     }
     return candidates.map(c => c.id);
   }
