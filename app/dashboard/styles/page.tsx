@@ -26,7 +26,10 @@ export default function StylesPage() {
   const [inspoImportName, setInspoImportName] = useState('');
   const [inspoImporting, setInspoImporting] = useState(false);
   const [inspoImportError, setInspoImportError] = useState<string | null>(null);
-  const selectedSlugRef = useRef<string | null>(null); // Guard against out-of-order preview responses
+  // Guard against out-of-order preview responses. A monotonic id per request, not the slug
+  // value: comparing by slug alone lets a stale response win when the SAME slug is clicked
+  // twice in a row (double-click / click-away-and-back) and the first request resolves last.
+  const requestIdRef = useRef(0);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -129,8 +132,8 @@ export default function StylesPage() {
   }
 
   async function handleInspoPreview(slug: string) {
+    const myRequestId = ++requestIdRef.current;
     setInspoSelectedSlug(slug);
-    selectedSlugRef.current = slug;
     setInspoPreview(null);
     setInspoPreviewError(null);
     setInspoPreviewLoading(true);
@@ -145,23 +148,23 @@ export default function StylesPage() {
         setInspoPreviewError(body.error ?? 'Preview failed.');
         return;
       }
-      // Guard against out-of-order responses: only apply if this request's slug is still the current selection.
-      // If user clicks another result before this fetch resolves, a stale response could otherwise apply
-      // the wrong site's tokens under a different site's slug.
-      if (slug === selectedSlugRef.current) {
+      // Guard against out-of-order responses: only apply if this is still the most recent
+      // request. Comparing by request id (not slug) also catches a same-slug double-click —
+      // the slug alone wouldn't change between the two requests, but the id does.
+      if (myRequestId === requestIdRef.current) {
         setInspoPreview(body.data);
         setInspoImportName(slug);
       }
     } catch {
       // Same out-of-order guard as the success path: an older, slower
       // request's failure shouldn't show an error for the current selection.
-      if (slug === selectedSlugRef.current) {
+      if (myRequestId === requestIdRef.current) {
         setInspoPreviewError('Could not reach the server.');
       }
     } finally {
       // Same guard: don't let a stale request clear the loading flag while a
-      // newer request for a different selection is still genuinely pending.
-      if (slug === selectedSlugRef.current) {
+      // newer request is still genuinely pending.
+      if (myRequestId === requestIdRef.current) {
         setInspoPreviewLoading(false);
       }
     }
