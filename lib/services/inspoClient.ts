@@ -322,8 +322,10 @@ export async function findComponents(
   const out: InspoComponentResult[] = [];
   for (const r of response.components ?? []) {
     // Minimal sanity guard only — real URL validation (origin/scheme) already
-    // happens downstream in inspoGrounding.ts's resolveAndValidateUrl.
-    if (typeof r.imageUrl !== 'string' || !r.imageUrl) continue;
+    // happens downstream in inspoGrounding.ts's resolveAndValidateUrl. `!r`
+    // guards a null/non-object array item: `typeof r.imageUrl` throws on
+    // property access before `typeof` runs if `r` itself is null/undefined.
+    if (!r || typeof r.imageUrl !== 'string' || !r.imageUrl) continue;
     // Always false: find_components' live response carries no fallback/
     // full-page-thumbnail signal at all, so this is the honest current value,
     // not a placeholder. This makes selectGroundingCandidate's
