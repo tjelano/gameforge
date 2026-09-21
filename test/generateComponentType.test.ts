@@ -74,4 +74,21 @@ describe('POST /api/generate componentType/groundWithInspo threading', () => {
     const options = JSON.parse(job.options);
     expect(options.groundWithInspo).toBe(false);
   });
+
+  it('drops an unrecognized componentType instead of storing it (e.g. Object.prototype keys)', async () => {
+    const { cookieHeader, userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{}' });
+
+    const res = await POST(req({
+      styleId: style.id, assetType: 'component', prompt: 'A widget',
+      outputKind: 'component', options: { componentType: 'constructor' },
+    }, cookieHeader));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+
+    const db = DatabaseConnection.getInstance();
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(body.data.id) as any;
+    const options = JSON.parse(job.options);
+    expect(options.componentType).toBeUndefined();
+  });
 });

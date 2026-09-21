@@ -14,6 +14,10 @@ export const dynamic = 'force-dynamic';
 // a placeholder: rejects before saveReferenceImage() ever touches disk.
 const MAX_REFERENCE_IMAGE_BASE64_LENGTH = 10_000_000;
 
+// Matches app/dashboard/components/page.tsx's COMPONENT_TYPES and
+// lib/services/inspoClient.ts's INSPO_TYPE_FOR_COMPONENT_TYPE keys exactly.
+const ComponentTypeSchema = z.enum(['Button', 'Card', 'Nav Bar', 'Form', 'Other']);
+
 const ReferenceImageSchema = z.object({
   base64: z.string().max(MAX_REFERENCE_IMAGE_BASE64_LENGTH),
   mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
@@ -59,8 +63,14 @@ export async function POST(req: NextRequest) {
 
     const input = GenerateSchema.parse(await req.json());
 
-    const requestedComponentType = typeof (input.options as Record<string, unknown> | undefined)?.componentType === 'string'
-      ? (input.options as Record<string, string>).componentType
+    // Validated against the known enum, not just typeof === 'string' — this value is
+    // later used as an object-lookup key (INSPO_TYPE_FOR_COMPONENT_TYPE[componentType]
+    // in lib/services/inspoGrounding.ts), so an unrecognized string like "constructor"
+    // must not survive. An invalid value is treated exactly like an absent one
+    // (componentType is optional) rather than rejecting the whole request.
+    const rawComponentType = (input.options as Record<string, unknown> | undefined)?.componentType;
+    const requestedComponentType = typeof rawComponentType === 'string' && ComponentTypeSchema.safeParse(rawComponentType).success
+      ? rawComponentType
       : undefined;
 
     if (input.outputKind === 'theme') {
