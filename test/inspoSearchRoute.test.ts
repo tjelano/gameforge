@@ -65,4 +65,46 @@ describe('POST /api/inspo/search', () => {
     expect(body.success).toBe(true);
     expect(body.data.results[0].slug).toBe('acme-corp');
   });
+
+  it('rejects a query over the length cap', async () => {
+    const { cookieHeader } = await seedSession();
+    const { POST } = await import('@/app/api/inspo/search/route');
+    const res = await POST(req({ mode: 'search', query: 'a'.repeat(501) }, cookieHeader));
+    expect(res.status).toBe(400);
+  });
+
+  it('passes a real search_screens field (e.g. color) through to searchScreens', async () => {
+    const { cookieHeader } = await seedSession();
+    const searchScreens = vi.fn().mockResolvedValue({ results: [] });
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return { ...actual, searchScreens };
+    });
+    vi.resetModules();
+    const { POST } = await import('@/app/api/inspo/search/route');
+    const res = await POST(req({ mode: 'search', query: 'editorial', color: 'warm' }, cookieHeader));
+    expect(res.status).toBe(200);
+    expect(searchScreens).toHaveBeenCalledWith(expect.objectContaining({ query: 'editorial', color: 'warm' }));
+  });
+
+  it('rejects an unknown top-level field like a raw filters object', async () => {
+    const { cookieHeader } = await seedSession();
+    const { POST } = await import('@/app/api/inspo/search/route');
+    const res = await POST(req({ mode: 'search', query: 'editorial', filters: { query: 'malicious' } }, cookieHeader));
+    expect(res.status).toBe(400);
+  });
+
+  it('never lets another accepted field override the validated query', async () => {
+    const { cookieHeader } = await seedSession();
+    const searchScreens = vi.fn().mockResolvedValue({ results: [] });
+    vi.doMock('@/lib/services/inspoClient', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/services/inspoClient')>();
+      return { ...actual, searchScreens };
+    });
+    vi.resetModules();
+    const { POST } = await import('@/app/api/inspo/search/route');
+    const res = await POST(req({ mode: 'search', query: 'safe', color: 'malicious', style: 'malicious' }, cookieHeader));
+    expect(res.status).toBe(200);
+    expect(searchScreens).toHaveBeenCalledWith(expect.objectContaining({ query: 'safe' }));
+  });
 });

@@ -153,9 +153,17 @@ export default function StylesPage() {
         setInspoImportName(slug);
       }
     } catch {
-      setInspoPreviewError('Could not reach the server.');
+      // Same out-of-order guard as the success path: an older, slower
+      // request's failure shouldn't show an error for the current selection.
+      if (slug === selectedSlugRef.current) {
+        setInspoPreviewError('Could not reach the server.');
+      }
     } finally {
-      setInspoPreviewLoading(false);
+      // Same guard: don't let a stale request clear the loading flag while a
+      // newer request for a different selection is still genuinely pending.
+      if (slug === selectedSlugRef.current) {
+        setInspoPreviewLoading(false);
+      }
     }
   }
 
