@@ -1,4 +1,7 @@
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  if (!/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
+    throw new TypeError(`hexToRgb: not a 3- or 6-digit hex color: ${JSON.stringify(hex)}`);
+  }
   const clean = hex.replace('#', '');
   const full = clean.length === 3
     ? clean.split('').map(c => c + c).join('')
@@ -45,7 +48,7 @@ function sliceSection(designMd: string, heading: string): string {
   return nextHeadingMatch ? rest.slice(0, nextHeadingMatch.index) : rest;
 }
 
-const COLOR_ROW_RE = /^\|\s*`?(#[0-9a-fA-F]{3,8})`?\s*\|\s*([^|]+?)\s*\|\s*$/gm;
+const COLOR_ROW_RE = /^\|\s*`?(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6})`?\s*\|\s*([^|]+?)\s*\|\s*$/gm;
 
 export function parseColorsSection(designMd: string): DesignMdColorSwatch[] {
   const body = sliceSection(designMd, 'Colors');
@@ -58,8 +61,12 @@ export function parseColorsSection(designMd: string): DesignMdColorSwatch[] {
 }
 
 export function parseHeaderSection(designMd: string): { mode: 'light' | 'dark' | null; capturedAt: string | null } {
-  const modeMatch = /^-\s*\*\*Mode:\*\*\s*(.+)$/m.exec(designMd);
-  const capturedMatch = /^-\s*\*\*Captured:\*\*\s*(.+)$/m.exec(designMd);
+  // Scope to header block: text before the first ## heading (or entire document if no heading)
+  const firstHeadingMatch = /^## /m.exec(designMd);
+  const headerBlock = firstHeadingMatch ? designMd.slice(0, firstHeadingMatch.index) : designMd;
+
+  const modeMatch = /^-\s*\*\*Mode:\*\*\s*(.+)$/m.exec(headerBlock);
+  const capturedMatch = /^-\s*\*\*Captured:\*\*\s*(.+)$/m.exec(headerBlock);
   const rawMode = modeMatch?.[1]?.trim().toLowerCase();
   return {
     mode: rawMode === 'dark' ? 'dark' : rawMode === 'light' ? 'light' : null,

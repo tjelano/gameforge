@@ -13,6 +13,10 @@ describe('contrastRatio', () => {
   it('is symmetric', () => {
     expect(contrastRatio('#111111', '#eeeeee')).toBeCloseTo(contrastRatio('#eeeeee', '#111111'), 5);
   });
+
+  it('throws a clear error for non-hex input', () => {
+    expect(() => contrastRatio('rgb(255, 255, 255)', '#000000')).toThrow(/not a 3- or 6-digit hex color/);
+  });
 });
 
 describe('parseHeaderSection', () => {
@@ -31,6 +35,21 @@ describe('parseHeaderSection', () => {
 
   it('returns nulls when the Header lines are absent', () => {
     expect(parseHeaderSection('## Colors\n')).toEqual({ mode: null, capturedAt: null });
+  });
+
+  it('ignores a Mode line that appears after a ## heading (body section)', () => {
+    const md = [
+      '# DESIGN.md',
+      '- **Source:** https://acme.example',
+      '- **Captured:** 2026-08-01T00:00:00Z',
+      '- **Mode:** dark',
+      '',
+      '## Colors',
+      '- **Mode:** light', // stray mode line in body section
+      '| Hex | Role |',
+    ].join('\n');
+    // Should return the header's real mode (dark), not the stray one (light)
+    expect(parseHeaderSection(md)).toEqual({ mode: 'dark', capturedAt: '2026-08-01T00:00:00Z' });
   });
 });
 
@@ -70,5 +89,23 @@ describe('parseColorsSection', () => {
       '| `#000000` | ink |', // malformed table row that happens to appear after the next heading
     ].join('\n');
     expect(parseColorsSection(md)).toEqual([{ hex: '#ffffff', role: 'surface' }]);
+  });
+
+  it('silently drops color rows with invalid hex lengths (e.g. 4-digit)', () => {
+    const md = [
+      '## Colors',
+      '| Hex | Role (heuristic) |',
+      '|---|---|',
+      '| `#fff` | valid-3digit |',
+      '| `#abcd` | invalid-4digit |',
+      '| `#ffffff` | valid-6digit |',
+      '',
+      '## Typography',
+    ].join('\n');
+    // Only 3-digit and 6-digit hex are captured; 4-digit is silently dropped
+    expect(parseColorsSection(md)).toEqual([
+      { hex: '#fff', role: 'valid-3digit' },
+      { hex: '#ffffff', role: 'valid-6digit' },
+    ]);
   });
 });
