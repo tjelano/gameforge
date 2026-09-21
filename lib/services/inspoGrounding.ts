@@ -102,19 +102,56 @@ const ALLOWED_CROP_CONTENT_TYPES: Record<string, 'image/png' | 'image/jpeg' | 'i
   'image/webp': 'image/webp',
 };
 
+const MAX_CROP_IMAGE_REDIRECTS = 5;
+
+/**
+ * Follows redirects manually (never `fetch`'s default `redirect: 'follow'`)
+ * so every hop's Location header goes back through resolveAndValidateUrl —
+ * the same-origin check the caller already ran on the initial URL means
+ * nothing without a redirect the origin itself would otherwise silently
+ * bypass it and land somewhere unvalidated (loopback, private-network,
+ * cloud metadata). Bounded by MAX_CROP_IMAGE_REDIRECTS; returns null
+ * (never throws) on an invalid target or exceeding the budget, so the
+ * caller's fail-soft contract holds.
+ */
+async function followValidatedRedirects(url: string, signal: AbortSignal): Promise<Response | null> {
+  let currentUrl = url;
+  let redirectCount = 0;
+  while (true) {
+    const res = await fetch(currentUrl, { signal, redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) return res;
+
+    const location = res.headers.get('location');
+    await res.body?.cancel().catch(() => {});
+    redirectCount++;
+    if (!location || redirectCount > MAX_CROP_IMAGE_REDIRECTS) return null;
+
+    const validated = resolveAndValidateUrl(location);
+    if (!validated) return null;
+    currentUrl = validated;
+  }
+}
+
 /**
  * Downloads a crop image with a byte cap and a Content-Type allowlist —
  * rejects (never coerces) anything outside either bound, or a non-2xx
  * response. Returns null on any rejection; the caller treats that as an
- * ordinary grounding-failure case, same as a timeout or a 404.
+ * ordinary grounding-failure case, same as a timeout or a 404. The body is
+ * read incrementally and cancelled the moment MAX_CROP_IMAGE_BYTES is
+ * crossed, so a chunked or Content-Length-lying response can never buffer
+ * past the cap regardless of what the header claims.
  */
 export async function downloadAndValidateCropImage(url: string, deadlineMs: number): Promise<{ base64: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp' } | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), deadlineMs);
-  let res: Response;
+  let res: Response | null;
   try {
-    res = await fetch(url, { signal: controller.signal });
+    res = await followValidatedRedirects(url, controller.signal);
   } catch {
+    clearTimeout(timeout);
+    return null;
+  }
+  if (!res) {
     clearTimeout(timeout);
     return null;
   }
@@ -141,11 +178,28 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
       return null;
     }
 
-    const buffer = await res.arrayBuffer();
+    const reader = res.body?.getReader();
+    if (!reader) {
+      clearTimeout(timeout);
+      return null;
+    }
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_CROP_IMAGE_BYTES) {
+        await reader.cancel().catch(() => {});
+        clearTimeout(timeout);
+        return null;
+      }
+      chunks.push(value);
+    }
     clearTimeout(timeout);
-    if (buffer.byteLength > MAX_CROP_IMAGE_BYTES) return null;
 
-    return { base64: Buffer.from(buffer).toString('base64'), mediaType };
+    const buffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
+    return { base64: buffer.toString('base64'), mediaType };
   } catch {
     clearTimeout(timeout);
     return null;

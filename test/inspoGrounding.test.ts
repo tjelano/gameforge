@@ -181,14 +181,39 @@ describe('selectGroundingCandidate', () => {
 
 describe('downloadAndValidateCropImage', () => {
   const originalFetch = global.fetch;
-  afterEach(() => { global.fetch = originalFetch; });
+  const originalEnv = process.env.INSPO_BASE_URL;
+  beforeEach(() => { process.env.INSPO_BASE_URL = 'https://inspomcp.dev'; });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalEnv === undefined) delete process.env.INSPO_BASE_URL;
+    else process.env.INSPO_BASE_URL = originalEnv;
+  });
+
+  // A body mock whose getReader() streams the given bytes as one chunk,
+  // matching the shape downloadAndValidateCropImage now reads incrementally
+  // instead of calling arrayBuffer().
+  function bodyForBytes(bytes: Uint8Array) {
+    let read = false;
+    return {
+      cancel: vi.fn().mockResolvedValue(undefined),
+      getReader: () => ({
+        read: async () => {
+          if (read) return { done: true, value: undefined };
+          read = true;
+          return { done: false, value: bytes };
+        },
+        cancel: vi.fn().mockResolvedValue(undefined),
+      }),
+    };
+  }
 
   it('returns a valid ReferenceImagePayload-shaped result for an allowed content type under the size cap', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       headers: new Map([['content-type', 'image/png'], ['content-length', '4']]),
-      arrayBuffer: () => Promise.resolve(bytes.buffer),
+      body: bodyForBytes(bytes),
     }) as any;
     const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
     const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
@@ -199,8 +224,9 @@ describe('downloadAndValidateCropImage', () => {
   it('rejects a disallowed content type', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       headers: new Map([['content-type', 'image/avif'], ['content-length', '4']]),
-      arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
+      body: bodyForBytes(new Uint8Array(4)),
     }) as any;
     const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
     const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
@@ -210,8 +236,9 @@ describe('downloadAndValidateCropImage', () => {
   it('rejects a response over the size cap', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       headers: new Map([['content-type', 'image/png'], ['content-length', String(5 * 1024 * 1024)]]),
-      arrayBuffer: () => Promise.resolve(new ArrayBuffer(5 * 1024 * 1024)),
+      body: bodyForBytes(new Uint8Array(5 * 1024 * 1024)),
     }) as any;
     const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
     const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
@@ -219,10 +246,90 @@ describe('downloadAndValidateCropImage', () => {
   });
 
   it('rejects a non-2xx response', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, headers: new Map(), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) }) as any;
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, headers: new Map(), body: bodyForBytes(new Uint8Array(0)) }) as any;
     const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
     const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
     expect(result).toBeNull();
+  });
+
+  it('follows a same-origin redirect through to the final image', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        status: 302,
+        ok: false,
+        headers: new Map([['location', '/api/component/a/2']]),
+        body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'image/png'], ['content-length', '4']]),
+        body: bodyForBytes(bytes),
+      });
+    global.fetch = fetchMock as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result?.mediaType).toBe('image/png');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // both calls must use redirect: 'manual' so fetch never auto-follows
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
+  });
+
+  it('rejects a cross-origin redirect target instead of following it', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      status: 302,
+      ok: false,
+      headers: new Map([['location', 'https://evil.example/x']]),
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    });
+    global.fetch = fetchMock as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // never followed the cross-origin hop
+  });
+
+  it('gives up after exceeding the redirect budget instead of looping forever', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      status: 302,
+      ok: false,
+      headers: new Map([['location', '/api/component/a/next']]),
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    }));
+    global.fetch = fetchMock as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result).toBeNull();
+    // one initial request plus at most MAX_CROP_IMAGE_REDIRECTS (5) retries
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('stops streaming and returns null once accumulated bytes exceed the cap, even with no Content-Length header', async () => {
+    const CHUNK_SIZE = 1024 * 1024; // 1MB per chunk, cap is 4MB -> 5 chunks crosses it
+    let callCount = 0;
+    const reader = {
+      read: async () => {
+        callCount++;
+        if (callCount > 6) return { done: true, value: undefined }; // safety net against an infinite loop bug
+        return { done: false, value: new Uint8Array(CHUNK_SIZE) };
+      },
+      cancel: vi.fn().mockResolvedValue(undefined),
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'image/png']]), // no content-length at all
+      body: { getReader: () => reader, cancel: vi.fn().mockResolvedValue(undefined) },
+    }) as any;
+    const { downloadAndValidateCropImage } = await import('@/lib/services/inspoGrounding');
+    const result = await downloadAndValidateCropImage('https://inspomcp.dev/api/component/a/1', 2000);
+    expect(result).toBeNull();
+    // must have stopped once the running total crossed MAX_CROP_IMAGE_BYTES (4MB / 1MB chunks = 5th chunk),
+    // not after reading everything the mock could produce.
+    expect(callCount).toBeLessThanOrEqual(5);
+    expect(reader.cancel).toHaveBeenCalled();
   });
 });
 
@@ -285,10 +392,22 @@ describe('groundComponent (fail-soft wrapper)', () => {
     });
     vi.resetModules();
     const bytes = new Uint8Array([1, 2, 3]);
+    let read = false;
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       headers: new Map([['content-type', 'image/png'], ['content-length', '3']]),
-      arrayBuffer: () => Promise.resolve(bytes.buffer),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (read) return { done: true, value: undefined };
+            read = true;
+            return { done: false, value: bytes };
+          },
+          cancel: vi.fn().mockResolvedValue(undefined),
+        }),
+        cancel: vi.fn().mockResolvedValue(undefined),
+      },
     }) as any;
     const { groundComponent, lookupCachedReference, hashAccentColor } = await import('@/lib/services/inspoGrounding');
     const { userId } = await seedSession();
