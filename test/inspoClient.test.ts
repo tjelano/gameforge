@@ -1,5 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { isValidInspoSlug, isValidInspoIdx, getDesignMd, InspoHttpError, resetDesignMdCacheForTests } from '@/lib/services/inspoClient';
+import { isValidInspoSlug, isValidInspoIdx, getDesignMd, InspoHttpError, resetDesignMdCacheForTests, deriveThumbnailUrl } from '@/lib/services/inspoClient';
+
+describe('deriveThumbnailUrl', () => {
+  // Real live-verified shape (see app/api/inspo/search/route.ts's ground-truth
+  // fixture): a template with an explanatory tail, not a bare URL.
+  const REAL_TEMPLATE =
+    'https://0nme3pk5am3urwa9.public.blob.vercel-storage.com/captures/<slug>/hero.1440.webp (also full.1440, thumb.384, mobile.384; get_screen returns exact URLs)';
+
+  it('builds the thumb.384.webp URL for a valid template + slug', () => {
+    const url = deriveThumbnailUrl(REAL_TEMPLATE, 'ecologi-com');
+    expect(url).toBe('https://0nme3pk5am3urwa9.public.blob.vercel-storage.com/captures/ecologi-com/thumb.384.webp');
+    // Confirm it actually parses as a well-formed URL, not just a matching string.
+    expect(() => new URL(url as string)).not.toThrow();
+  });
+
+  it('returns null when the template has no /captures/ segment', () => {
+    expect(deriveThumbnailUrl('https://example.com/nope/<slug>/hero.webp', 'ecologi-com')).toBeNull();
+    expect(deriveThumbnailUrl('not a url at all', 'ecologi-com')).toBeNull();
+  });
+
+  it('returns null for a non-string template', () => {
+    expect(deriveThumbnailUrl(undefined, 'ecologi-com')).toBeNull();
+    expect(deriveThumbnailUrl(null, 'ecologi-com')).toBeNull();
+    expect(deriveThumbnailUrl(123, 'ecologi-com')).toBeNull();
+    expect(deriveThumbnailUrl({ url: REAL_TEMPLATE }, 'ecologi-com')).toBeNull();
+  });
+
+  it('returns null for a missing/empty slug', () => {
+    expect(deriveThumbnailUrl(REAL_TEMPLATE, '')).toBeNull();
+  });
+});
 
 describe('isValidInspoSlug', () => {
   it('accepts a plain lowercase-alnum-hyphen slug', () => {

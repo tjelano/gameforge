@@ -1,8 +1,79 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
+import { deriveThumbnailUrl } from '@/lib/services/inspoClient';
+
+interface InspoResultItem {
+  slug: string;
+  title?: string;
+  northstar?: string;
+  palette: string[];
+  thumbnailUrl: string | null;
+}
+
+// Shared shape between search's `results` and recommend's `exemplars` — see
+// app/api/inspo/search/route.ts. Anything else on a raw item (autopsy, tags,
+// fonts, mode, macro, axes) is real but too verbose/irrelevant for a result
+// card, so it's dropped here rather than carried through.
+function toInspoResultItem(raw: any, imagesTemplate: unknown): InspoResultItem {
+  const slug = typeof raw?.slug === 'string' ? raw.slug : '';
+  return {
+    slug,
+    title: typeof raw?.title === 'string' ? raw.title : undefined,
+    northstar: typeof raw?.northstar === 'string' ? raw.northstar : undefined,
+    palette: Array.isArray(raw?.palette) ? raw.palette.filter((c: unknown) => typeof c === 'string') : [],
+    thumbnailUrl: slug ? deriveThumbnailUrl(imagesTemplate, slug) : null,
+  };
+}
+
+// Only the four simplest/most useful filters categories — get_filters returns
+// 13, the rest (color, pageType, device, componentType, tagComponents,
+// paperBand, displayClass, accentHue, macrostructure, macrostructureCoverage)
+// are scope creep for a single-select seed-a-Style-Bible search. `mode`'s
+// options key is Inspo's own field name; `screenMode` is the search request's
+// field name for it (renamed there since `mode` is the schema's discriminator).
+const INSPO_FILTER_CATEGORIES: { optionsKey: 'style' | 'industry' | 'mode' | 'vibe'; selectedKey: 'style' | 'industry' | 'screenMode' | 'vibe'; label: string }[] = [
+  { optionsKey: 'style', selectedKey: 'style', label: 'Style' },
+  { optionsKey: 'industry', selectedKey: 'industry', label: 'Industry' },
+  { optionsKey: 'mode', selectedKey: 'screenMode', label: 'Mode' },
+  { optionsKey: 'vibe', selectedKey: 'vibe', label: 'Vibe' },
+];
+
+function InspoResultCard({ result, onClick }: { result: InspoResultItem; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="btn"
+      onClick={onClick}
+      style={{ textAlign: 'left', display: 'flex', gap: 10, alignItems: 'center', width: '100%' }}
+    >
+      {result.thumbnailUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={result.thumbnailUrl}
+          alt={result.title ?? result.slug}
+          style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--border)', flexShrink: 0 }}
+          onError={e => { e.currentTarget.style.display = 'none'; }}
+        />
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600 }}>{result.title ?? result.slug}</div>
+        {result.northstar && (
+          <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginTop: 2 }}>{result.northstar}</div>
+        )}
+        {result.palette.length > 0 && (
+          <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+            {result.palette.slice(0, 5).map((color, i) => (
+              <div key={i} style={{ width: 14, height: 14, borderRadius: 3, border: '1px solid var(--border)', background: color }} />
+            ))}
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
 
 export default function StylesPage() {
   const { styles, loading, error: stylesError, refresh } = useStyles();
@@ -15,10 +86,28 @@ export default function StylesPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+
+  const [inspoMode, setInspoMode] = useState<'search' | 'recommend'>('search');
+
+  const [inspoFilterOptions, setInspoFilterOptions] = useState<{ style: string[]; industry: string[]; mode: string[]; vibe: string[] } | null>(null);
+  const [inspoSelectedFilters, setInspoSelectedFilters] = useState<{ style: string | null; industry: string | null; screenMode: string | null; vibe: string | null }>({
+    style: null,
+    industry: null,
+    screenMode: null,
+    vibe: null,
+  });
+
   const [inspoQuery, setInspoQuery] = useState('');
-  const [inspoResults, setInspoResults] = useState<{ slug: string; title?: string; host?: string }[]>([]);
+  const [inspoResults, setInspoResults] = useState<InspoResultItem[]>([]);
   const [inspoSearching, setInspoSearching] = useState(false);
   const [inspoSearchError, setInspoSearchError] = useState<string | null>(null);
+
+  const [inspoBrief, setInspoBrief] = useState('');
+  const [inspoRecommending, setInspoRecommending] = useState(false);
+  const [inspoRecommendError, setInspoRecommendError] = useState<string | null>(null);
+  const [inspoRecommendPick, setInspoRecommendPick] = useState<{ label: string; rationale: string } | null>(null);
+  const [inspoExemplars, setInspoExemplars] = useState<InspoResultItem[]>([]);
+
   const [inspoSelectedSlug, setInspoSelectedSlug] = useState<string | null>(null);
   const [inspoPreview, setInspoPreview] = useState<{ tokens: Record<string, string>; provenance: Record<string, string>; lowConfidence: boolean } | null>(null);
   const [inspoPreviewLoading, setInspoPreviewLoading] = useState(false);
@@ -30,6 +119,37 @@ export default function StylesPage() {
   // value: comparing by slug alone lets a stale response win when the SAME slug is clicked
   // twice in a row (double-click / click-away-and-back) and the first request resolves last.
   const requestIdRef = useRef(0);
+  // Separate counter for recommend calls — a user can re-submit a brief before the previous
+  // one resolves. Kept independent from requestIdRef so a recommend call in flight can't
+  // invalidate an unrelated, still-pending preview request (and vice versa).
+  const inspoRecommendRequestIdRef = useRef(0);
+
+  // One-time fetch on mount to populate the filter chip categories. No stale-response guard
+  // needed (unlike search/preview/recommend, this fires exactly once and is never re-triggered
+  // by user action) — just a mount-guard so an unmounted component doesn't get a late setState.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/inspo/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'filters' }),
+        });
+        const body = await res.json();
+        if (cancelled || !body.success) return;
+        setInspoFilterOptions({
+          style: Array.isArray(body.data?.style) ? body.data.style : [],
+          industry: Array.isArray(body.data?.industry) ? body.data.industry : [],
+          mode: Array.isArray(body.data?.mode) ? body.data.mode : [],
+          vibe: Array.isArray(body.data?.vibe) ? body.data.vibe : [],
+        });
+      } catch {
+        // Filter chips are a progressive enhancement — silently degrade to no chips.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -116,18 +236,69 @@ export default function StylesPage() {
       const res = await fetch('/api/inspo/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'search', query: inspoQuery.trim() }),
+        body: JSON.stringify({
+          mode: 'search',
+          query: inspoQuery.trim(),
+          ...(inspoSelectedFilters.style ? { style: inspoSelectedFilters.style } : {}),
+          ...(inspoSelectedFilters.industry ? { industry: inspoSelectedFilters.industry } : {}),
+          ...(inspoSelectedFilters.screenMode ? { screenMode: inspoSelectedFilters.screenMode } : {}),
+          ...(inspoSelectedFilters.vibe ? { vibe: inspoSelectedFilters.vibe } : {}),
+        }),
       });
       const body = await res.json();
       if (!body.success) {
         setInspoSearchError(body.error ?? 'Search failed.');
         return;
       }
-      setInspoResults(body.data.results ?? []);
+      const rawResults = Array.isArray(body.data?.results) ? body.data.results : [];
+      setInspoResults(rawResults.map((r: any) => toInspoResultItem(r, body.data?.images)));
     } catch {
       setInspoSearchError('Could not reach the server.');
     } finally {
       setInspoSearching(false);
+    }
+  }
+
+  async function handleInspoRecommend(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inspoBrief.trim() || inspoRecommending) return;
+    const myRequestId = ++inspoRecommendRequestIdRef.current;
+    setInspoRecommending(true);
+    setInspoRecommendError(null);
+    setInspoRecommendPick(null);
+    setInspoExemplars([]);
+    try {
+      const res = await fetch('/api/inspo/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'recommend', brief: inspoBrief.trim() }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setInspoRecommendError(body.error ?? 'Recommend failed.');
+        return;
+      }
+      // Same out-of-order guard as handleInspoPreview: only apply if this is still the
+      // most recent recommend request (the user can re-submit a brief before this resolves).
+      if (myRequestId === inspoRecommendRequestIdRef.current) {
+        const pick = body.data?.pick;
+        const label = pick?.macrostructure?.label;
+        setInspoRecommendPick(
+          typeof label === 'string'
+            ? { label, rationale: typeof pick?.rationale === 'string' ? pick.rationale : '' }
+            : null
+        );
+        const rawExemplars = Array.isArray(body.data?.exemplars) ? body.data.exemplars : [];
+        setInspoExemplars(rawExemplars.map((r: any) => toInspoResultItem(r, body.data?.images)));
+      }
+    } catch {
+      if (myRequestId === inspoRecommendRequestIdRef.current) {
+        setInspoRecommendError('Could not reach the server.');
+      }
+    } finally {
+      if (myRequestId === inspoRecommendRequestIdRef.current) {
+        setInspoRecommending(false);
+      }
     }
   }
 
@@ -195,7 +366,9 @@ export default function StylesPage() {
       setInspoPreview(null);
       setInspoSelectedSlug(null);
       setInspoResults([]);
+      setInspoExemplars([]);
       setInspoQuery('');
+      setInspoBrief('');
       setInspoImportName('');
       await refresh();
     } catch {
@@ -252,33 +425,100 @@ export default function StylesPage() {
           Search 832 real production sites and seed a new Style Bible from one of their extracted
           design tokens.
         </p>
-        <form onSubmit={handleInspoSearch} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-          <input
-            value={inspoQuery}
-            onChange={e => setInspoQuery(e.target.value)}
-            placeholder="e.g. warm editorial SaaS"
-            style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
-          />
-          <button className="btn btn-primary" type="submit" disabled={inspoSearching || !inspoQuery.trim()}>
-            {inspoSearching ? 'Searching…' : 'Search'}
-          </button>
-        </form>
-        {inspoSearchError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{inspoSearchError}</p>}
 
-        {inspoResults.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-            {inspoResults.map(r => (
-              <button
-                key={r.slug}
-                type="button"
-                className="btn"
-                onClick={() => handleInspoPreview(r.slug)}
-                style={{ textAlign: 'left' }}
-              >
-                {r.title ?? r.slug} {r.host ? `(${r.host})` : ''}
-              </button>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button type="button" className={inspoMode === 'search' ? 'btn btn-primary' : 'btn'} onClick={() => setInspoMode('search')}>
+            Search
+          </button>
+          <button type="button" className={inspoMode === 'recommend' ? 'btn btn-primary' : 'btn'} onClick={() => setInspoMode('recommend')}>
+            Describe what you want
+          </button>
+        </div>
+
+        {inspoFilterOptions && (
+          <div style={{ marginBottom: 12 }}>
+            {INSPO_FILTER_CATEGORIES.map(({ optionsKey, selectedKey, label }) => (
+              <div key={optionsKey} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--ink-faint)', marginBottom: 4 }}>{label}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {inspoFilterOptions[optionsKey].map(value => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={inspoSelectedFilters[selectedKey] === value ? 'btn btn-primary' : 'btn'}
+                      style={{ padding: '4px 10px', fontSize: 12 }}
+                      onClick={() => setInspoSelectedFilters(prev => ({
+                        ...prev,
+                        [selectedKey]: prev[selectedKey] === value ? null : value,
+                      }))}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
+        )}
+
+        {inspoMode === 'search' ? (
+          <>
+            <form onSubmit={handleInspoSearch} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <input
+                value={inspoQuery}
+                onChange={e => setInspoQuery(e.target.value)}
+                placeholder="e.g. warm editorial SaaS"
+                style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
+              />
+              <button className="btn btn-primary" type="submit" disabled={inspoSearching || !inspoQuery.trim()}>
+                {inspoSearching ? 'Searching…' : 'Search'}
+              </button>
+            </form>
+            {inspoSearchError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{inspoSearchError}</p>}
+
+            {inspoResults.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                {inspoResults.map(r => (
+                  <InspoResultCard key={r.slug} result={r} onClick={() => handleInspoPreview(r.slug)} />
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <form onSubmit={handleInspoRecommend} style={{ marginBottom: 12 }}>
+              <div className="field">
+                <label htmlFor="inspoBrief">Describe what you want</label>
+                <textarea
+                  id="inspoBrief"
+                  value={inspoBrief}
+                  onChange={e => setInspoBrief(e.target.value)}
+                  placeholder="e.g. a calm, trustworthy banking landing page hero"
+                  rows={3}
+                  maxLength={5000}
+                />
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={inspoRecommending || !inspoBrief.trim()}>
+                {inspoRecommending ? 'Thinking…' : 'Get recommendation'}
+              </button>
+            </form>
+            {inspoRecommendError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{inspoRecommendError}</p>}
+
+            {inspoRecommendPick && (
+              <p style={{ fontSize: 13, marginBottom: 8 }}>
+                <strong>{inspoRecommendPick.label}</strong>
+                {inspoRecommendPick.rationale ? ` — ${inspoRecommendPick.rationale}` : ''}
+              </p>
+            )}
+
+            {inspoExemplars.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                {inspoExemplars.map(r => (
+                  <InspoResultCard key={r.slug} result={r} onClick={() => handleInspoPreview(r.slug)} />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {inspoPreviewLoading && <p style={{ fontSize: 13, color: 'var(--ink-dim)' }}>Loading preview…</p>}
