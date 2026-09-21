@@ -8,6 +8,11 @@
 // below treats it that way.
 
 import type { ProviderMessageResult } from '@/lib/services/copilotTool';
+// Re-exported here for back-compat -- every existing caller imports this
+// type from this file. Its canonical definition now lives in
+// providerOverride.ts alongside OpenRouterProviderOverride, since it's
+// consumed by every generator class, not just this Ollama-specific one.
+export type { OllamaProviderOverride } from '@/lib/services/providerOverride';
 
 // Local inference (especially CPU-only) is much slower than a cloud API --
 // claudeToolCall.ts's 60s is too tight here.
@@ -20,14 +25,6 @@ const OLLAMA_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_NUM_CTX = 8192;
 
 export const OLLAMA_NO_TOOL_CALL_ERROR_PREFIX = 'Ollama model did not produce structured output';
-
-export interface OllamaProviderOverride {
-  type: 'ollama';
-  host: string;
-  model: string;
-  /** Set by the "Retry with correction" flow (Task 10) to add one corrective instruction. */
-  correctionRequested?: boolean;
-}
 
 export interface OllamaToolCallParams {
   host: string;

@@ -8,7 +8,7 @@ import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { assetService } from '@/lib/services/AssetService';
 import { getComponentGenerator } from '@/lib/services/ComponentGenerator';
 import type { ComponentDeltaResult } from '@/lib/services/ComponentGenerator';
-import type { OllamaProviderOverride } from '@/lib/services/ollamaToolCall';
+import type { ProviderOverride } from '@/lib/services/providerOverride';
 import type { ReferenceImagePayload } from '@/lib/services/referenceImage';
 import { parseComponentHtml, combineComponentHtml, type ComponentTokens } from '@/lib/services/componentDocument';
 import { sanitizeComponentHtml, sanitizeComponentCss, assignElementIds } from '@/lib/services/componentSanitize';
@@ -153,7 +153,7 @@ export async function applyElementPatch(params: {
   instruction: string;
   styleId: string;
   signal?: AbortSignal;
-  providerOverride?: OllamaProviderOverride;
+  providerOverride?: ProviderOverride;
 }): Promise<PatchResult | { ok: false; error: PatchError }> {
   const filePath = path.join(getProjectRoot(), 'storage', 'components', params.filename);
 
@@ -380,7 +380,7 @@ export async function resolveComponentRegeneration(params: {
   componentType?: string;
   referenceImage?: ReferenceImagePayload;
   signal?: AbortSignal;
-  providerOverride?: OllamaProviderOverride;
+  providerOverride?: ProviderOverride;
 }): Promise<RegenerationResult> {
   const startedAt = Date.now();
   const log: RegenerationLogEntry = {

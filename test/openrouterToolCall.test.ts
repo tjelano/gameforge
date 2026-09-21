@@ -1,6 +1,6 @@
 // test/openrouterToolCall.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { callOpenRouterMessage } from '@/lib/services/openrouterToolCall';
+import { callOpenRouterMessage, callOpenRouterTool } from '@/lib/services/openrouterToolCall';
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
   return {
@@ -120,5 +120,75 @@ describe('callOpenRouterMessage', () => {
       choices: [{ message: { content: 'cut off' }, finish_reason: 'length' }],
     }));
     await expect(callOpenRouterMessage(baseParams)).rejects.toThrow('truncated');
+  });
+});
+
+const toolParams = {
+  apiKey: 'sk-or-test-key',
+  model: 'anthropic/claude-sonnet-5',
+  toolName: 'emit_theme',
+  toolDescription: 'Emit a theme',
+  inputSchema: { type: 'object' as const, properties: {}, required: [] as string[] },
+  messages: [{ role: 'user', content: 'hello' }],
+  operationLabel: 'theme generation',
+  truncatedMessage: 'the theme could not be generated',
+};
+
+describe('callOpenRouterTool', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('forces the one tool via tool_choice -- unlike Ollama, OpenRouter supports forcing', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { tool_calls: [{ function: { name: 'emit_theme', arguments: '{"colorBackground":"#000"}' } }] }, finish_reason: 'tool_calls' }],
+    }));
+
+    await callOpenRouterTool(toolParams);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    expect(body.tool_choice).toEqual({ type: 'function', function: { name: 'emit_theme' } });
+  });
+
+  it('returns the parsed tool call arguments', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { tool_calls: [{ function: { name: 'emit_theme', arguments: '{"colorBackground":"#111"}' } }] }, finish_reason: 'tool_calls' }],
+    }));
+    const result = await callOpenRouterTool(toolParams);
+    expect(result).toEqual({ colorBackground: '#111' });
+  });
+
+  it('hard-fails when the model returns no tool call at all -- forced tool_choice means this is a real error, not an expected case like Ollama', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: 'Sure, here is a theme...' }, finish_reason: 'stop' }],
+    }));
+    await expect(callOpenRouterTool(toolParams)).rejects.toThrow(/no tool call/);
+  });
+
+  it('hard-fails when the tool call arguments are malformed JSON', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { tool_calls: [{ function: { name: 'emit_theme', arguments: '{"colorBackground":' } }] }, finish_reason: 'tool_calls' }],
+    }));
+    await expect(callOpenRouterTool(toolParams)).rejects.toThrow(/malformed/);
+  });
+
+  it('throws a specific error on an HTTP failure', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'model not found' }, false, 404));
+    await expect(callOpenRouterTool(toolParams)).rejects.toThrow(/theme generation failed \(404\)/);
+  });
+
+  it('treats finish_reason "length" as truncation', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: 'cut off' }, finish_reason: 'length' }],
+    }));
+    await expect(callOpenRouterTool(toolParams)).rejects.toThrow('truncated');
   });
 });

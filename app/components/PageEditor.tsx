@@ -30,7 +30,8 @@ export function PageEditor({
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const { models: ollamaModels, host: ollamaHost } = useOllamaModels();
-  const [provider, setProvider] = useState<'claude' | string>('claude');
+  const [provider, setProvider] = useState<'claude' | 'openrouter' | string>('claude');
+  const [openrouterModel, setOpenrouterModel] = useState('anthropic/claude-sonnet-5');
 
   function toggleComponent(assetId: string) {
     setComponentAssetIds(ids =>
@@ -69,6 +70,7 @@ export function PageEditor({
 
   async function handleSuggestLayout() {
     if (suggesting || !name.trim() || availableComponents.length === 0) return;
+    if (provider === 'openrouter' && !openrouterModel.trim()) return;
     setSuggesting(true);
     setSuggestError(null);
     try {
@@ -77,7 +79,11 @@ export function PageEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pageName: name.trim(),
-          ...(provider !== 'claude' ? { provider: 'ollama', model: provider, ollamaHost } : {}),
+          ...(provider === 'openrouter'
+            ? { provider: 'openrouter', model: openrouterModel.trim() }
+            : provider !== 'claude'
+              ? { provider: 'ollama', model: provider, ollamaHost }
+              : {}),
         }),
       });
       const body = await res.json();
@@ -107,7 +113,7 @@ export function PageEditor({
           type="button"
           className="btn"
           onClick={handleSuggestLayout}
-          disabled={suggesting || !name.trim() || availableComponents.length === 0}
+          disabled={suggesting || !name.trim() || availableComponents.length === 0 || (provider === 'openrouter' && !openrouterModel.trim())}
         >
           {suggesting ? 'Suggesting…' : 'Suggest layout'}
         </button>
@@ -121,8 +127,18 @@ export function PageEditor({
         <label htmlFor="layout-provider">Model</label>
         <select id="layout-provider" value={provider} onChange={e => setProvider(e.target.value)}>
           <option value="claude">Claude</option>
+          <option value="openrouter">OpenRouter</option>
           {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
         </select>
+        {provider === 'openrouter' && (
+          <input
+            aria-label="OpenRouter model"
+            value={openrouterModel}
+            onChange={e => setOpenrouterModel(e.target.value)}
+            placeholder="anthropic/claude-sonnet-5"
+            style={{ marginTop: 8 }}
+          />
+        )}
       </div>
 
       <div>
