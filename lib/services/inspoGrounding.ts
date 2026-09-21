@@ -122,6 +122,7 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
   try {
     if (!res.ok) {
       await res.body?.cancel().catch(() => {});
+      clearTimeout(timeout);
       return null;
     }
 
@@ -129,12 +130,14 @@ export async function downloadAndValidateCropImage(url: string, deadlineMs: numb
     const mediaType = ALLOWED_CROP_CONTENT_TYPES[contentType];
     if (!mediaType) {
       await res.body?.cancel().catch(() => {});
+      clearTimeout(timeout);
       return null;
     }
 
     const contentLength = Number(res.headers.get('content-length') ?? '0');
     if (contentLength > MAX_CROP_IMAGE_BYTES) {
       await res.body?.cancel().catch(() => {});
+      clearTimeout(timeout);
       return null;
     }
 
