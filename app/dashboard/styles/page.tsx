@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
 
@@ -26,6 +26,7 @@ export default function StylesPage() {
   const [inspoImportName, setInspoImportName] = useState('');
   const [inspoImporting, setInspoImporting] = useState(false);
   const [inspoImportError, setInspoImportError] = useState<string | null>(null);
+  const selectedSlugRef = useRef<string | null>(null); // Guard against out-of-order preview responses
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -129,6 +130,7 @@ export default function StylesPage() {
 
   async function handleInspoPreview(slug: string) {
     setInspoSelectedSlug(slug);
+    selectedSlugRef.current = slug;
     setInspoPreview(null);
     setInspoPreviewError(null);
     setInspoPreviewLoading(true);
@@ -143,8 +145,13 @@ export default function StylesPage() {
         setInspoPreviewError(body.error ?? 'Preview failed.');
         return;
       }
-      setInspoPreview(body.data);
-      setInspoImportName(slug);
+      // Guard against out-of-order responses: only apply if this request's slug is still the current selection.
+      // If user clicks another result before this fetch resolves, a stale response could otherwise apply
+      // the wrong site's tokens under a different site's slug.
+      if (slug === selectedSlugRef.current) {
+        setInspoPreview(body.data);
+        setInspoImportName(slug);
+      }
     } catch {
       setInspoPreviewError('Could not reach the server.');
     } finally {
