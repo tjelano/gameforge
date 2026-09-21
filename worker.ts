@@ -151,6 +151,7 @@ export async function processJob(job: any): Promise<void> {
   const referenceStrength = typeof options.referenceStrength === 'number' ? options.referenceStrength : undefined;
   const width = typeof options.width === 'number' ? options.width : undefined;
   const height = typeof options.height === 'number' ? options.height : undefined;
+  const componentType = typeof options.componentType === 'string' ? options.componentType : undefined;
 
   try {
     let result: { path: string };
@@ -170,13 +171,14 @@ export async function processJob(job: any): Promise<void> {
             basedOnContent,
             instruction: job.prompt,
             styleId: job.style_id,
+            componentType,
             referenceImage: referenceImage ?? undefined,
             providerOverride,
           });
           if (!resolved.ok) throw new Error(resolved.message);
           result = { path: resolved.filename };
         } else {
-          result = await getComponentGenerator().generate(job.prompt, job.style_id, undefined, referenceImage ?? undefined, basedOnContent, undefined, providerOverride) as { path: string };
+          result = await getComponentGenerator().generate(job.prompt, job.style_id, componentType, referenceImage ?? undefined, basedOnContent, undefined, providerOverride) as { path: string };
         }
         break;
       }

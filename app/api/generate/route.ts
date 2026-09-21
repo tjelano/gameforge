@@ -5,6 +5,7 @@ import { jobService } from '@/lib/services/JobService';
 import { DatabaseConnection } from '@/lib/database';
 import { getCurrentUser } from '@/lib/utils/session';
 import { saveReferenceImage } from '@/lib/services/referenceImage';
+import { styleService } from '@/lib/services/StyleService';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +48,7 @@ const GenerateSchema = z.object({
 // otherwise inject a raw referenceImageFilename/referenceStrength/
 // basedOnAssetId directly into options and bypass ReferenceImageSchema's
 // size/type checks and basedOnAssetId's uuid format check entirely.
-const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested'] as const;
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested', 'componentType', 'groundWithInspo'] as const;
 
 export async function POST(req: NextRequest) {
   try {
@@ -57,6 +58,10 @@ export async function POST(req: NextRequest) {
     }
 
     const input = GenerateSchema.parse(await req.json());
+
+    const requestedComponentType = typeof (input.options as Record<string, unknown> | undefined)?.componentType === 'string'
+      ? (input.options as Record<string, string>).componentType
+      : undefined;
 
     if (input.outputKind === 'theme') {
       const pieces = (input.options as { pieces?: unknown } | undefined)?.pieces;
@@ -103,6 +108,13 @@ export async function POST(req: NextRequest) {
       mergedOptions.provider = input.provider;
       mergedOptions.model = input.model;
       mergedOptions.ollamaHost = input.ollamaHost;
+    }
+    if (input.outputKind === 'component') {
+      if (requestedComponentType !== undefined) {
+        mergedOptions.componentType = requestedComponentType;
+      }
+      const targetStyle = await styleService.getById(input.styleId);
+      mergedOptions.groundWithInspo = !!targetStyle?.ground_with_inspo;
     }
 
     const jobInput = {
