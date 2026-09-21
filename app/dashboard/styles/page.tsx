@@ -139,10 +139,10 @@ export default function StylesPage() {
         const body = await res.json();
         if (cancelled || !body.success) return;
         setInspoFilterOptions({
-          style: Array.isArray(body.data?.style) ? body.data.style : [],
-          industry: Array.isArray(body.data?.industry) ? body.data.industry : [],
-          mode: Array.isArray(body.data?.mode) ? body.data.mode : [],
-          vibe: Array.isArray(body.data?.vibe) ? body.data.vibe : [],
+          style: Array.isArray(body.data?.style) ? body.data.style.filter((v: unknown) => typeof v === 'string') : [],
+          industry: Array.isArray(body.data?.industry) ? body.data.industry.filter((v: unknown) => typeof v === 'string') : [],
+          mode: Array.isArray(body.data?.mode) ? body.data.mode.filter((v: unknown) => typeof v === 'string') : [],
+          vibe: Array.isArray(body.data?.vibe) ? body.data.vibe.filter((v: unknown) => typeof v === 'string') : [],
         });
       } catch {
         // Filter chips are a progressive enhancement — silently degrade to no chips.
