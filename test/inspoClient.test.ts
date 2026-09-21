@@ -152,7 +152,7 @@ describe('callMcpTool', () => {
   });
 
   it('reconnects once and retries after a session-invalid error, then succeeds', async () => {
-    const sessionError = new Error('Session invalid or expired');
+    const sessionError = new FakeStreamableHTTPError(404, 'Session invalid or expired');
     const firstClient = {
       callTool: vi.fn().mockRejectedValue(sessionError),
       connect: vi.fn().mockResolvedValue(undefined),
@@ -182,7 +182,7 @@ describe('callMcpTool', () => {
   });
 
   it('does not loop when the post-reconnect retry also fails with a session-invalid error', async () => {
-    const firstError = new Error('Session invalid or expired');
+    const firstError = new FakeStreamableHTTPError(404, 'Session invalid or expired');
     const secondError = new Error('Session invalid or expired (again)');
     const firstClient = {
       callTool: vi.fn().mockRejectedValue(firstError),
