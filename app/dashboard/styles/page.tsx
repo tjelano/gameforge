@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
 
@@ -15,6 +15,18 @@ export default function StylesPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [inspoQuery, setInspoQuery] = useState('');
+  const [inspoResults, setInspoResults] = useState<{ slug: string; title?: string; host?: string }[]>([]);
+  const [inspoSearching, setInspoSearching] = useState(false);
+  const [inspoSearchError, setInspoSearchError] = useState<string | null>(null);
+  const [inspoSelectedSlug, setInspoSelectedSlug] = useState<string | null>(null);
+  const [inspoPreview, setInspoPreview] = useState<{ tokens: Record<string, string>; provenance: Record<string, string>; lowConfidence: boolean } | null>(null);
+  const [inspoPreviewLoading, setInspoPreviewLoading] = useState(false);
+  const [inspoPreviewError, setInspoPreviewError] = useState<string | null>(null);
+  const [inspoImportName, setInspoImportName] = useState('');
+  const [inspoImporting, setInspoImporting] = useState(false);
+  const [inspoImportError, setInspoImportError] = useState<string | null>(null);
+  const selectedSlugRef = useRef<string | null>(null); // Guard against out-of-order preview responses
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -91,6 +103,97 @@ export default function StylesPage() {
     }
   }
 
+  async function handleInspoSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inspoQuery.trim() || inspoSearching) return;
+    setInspoSearching(true);
+    setInspoSearchError(null);
+    setInspoResults([]);
+    try {
+      const res = await fetch('/api/inspo/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'search', query: inspoQuery.trim() }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setInspoSearchError(body.error ?? 'Search failed.');
+        return;
+      }
+      setInspoResults(body.data.results ?? []);
+    } catch {
+      setInspoSearchError('Could not reach the server.');
+    } finally {
+      setInspoSearching(false);
+    }
+  }
+
+  async function handleInspoPreview(slug: string) {
+    setInspoSelectedSlug(slug);
+    selectedSlugRef.current = slug;
+    setInspoPreview(null);
+    setInspoPreviewError(null);
+    setInspoPreviewLoading(true);
+    try {
+      const res = await fetch('/api/inspo/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setInspoPreviewError(body.error ?? 'Preview failed.');
+        return;
+      }
+      // Guard against out-of-order responses: only apply if this request's slug is still the current selection.
+      // If user clicks another result before this fetch resolves, a stale response could otherwise apply
+      // the wrong site's tokens under a different site's slug.
+      if (slug === selectedSlugRef.current) {
+        setInspoPreview(body.data);
+        setInspoImportName(slug);
+      }
+    } catch {
+      setInspoPreviewError('Could not reach the server.');
+    } finally {
+      setInspoPreviewLoading(false);
+    }
+  }
+
+  async function handleInspoImport(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inspoImportName.trim() || !inspoPreview || !inspoSelectedSlug || inspoImporting) return;
+    setInspoImporting(true);
+    setInspoImportError(null);
+    try {
+      const res = await fetch('/api/styles/import-inspo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: inspoImportName.trim(),
+          slug: inspoSelectedSlug,
+          tokens: inspoPreview.tokens,
+          provenance: inspoPreview.provenance,
+          lowConfidence: inspoPreview.lowConfidence,
+        }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setInspoImportError(body.error ?? 'Import failed.');
+        return;
+      }
+      setInspoPreview(null);
+      setInspoSelectedSlug(null);
+      setInspoResults([]);
+      setInspoQuery('');
+      setInspoImportName('');
+      await refresh();
+    } catch {
+      setInspoImportError('Could not reach the server.');
+    } finally {
+      setInspoImporting(false);
+    }
+  }
+
   return (
     <>
       <h1 className="page-title">Style Bibles</h1>
@@ -131,6 +234,81 @@ export default function StylesPage() {
           {importing ? 'Importing…' : 'Import'}
         </button>
       </form>
+
+      <div className="card" style={{ marginBottom: 32, maxWidth: 480 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Import from Inspo</div>
+        <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
+          Search 832 real production sites and seed a new Style Bible from one of their extracted
+          design tokens.
+        </p>
+        <form onSubmit={handleInspoSearch} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <input
+            value={inspoQuery}
+            onChange={e => setInspoQuery(e.target.value)}
+            placeholder="e.g. warm editorial SaaS"
+            style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
+          />
+          <button className="btn btn-primary" type="submit" disabled={inspoSearching || !inspoQuery.trim()}>
+            {inspoSearching ? 'Searching…' : 'Search'}
+          </button>
+        </form>
+        {inspoSearchError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{inspoSearchError}</p>}
+
+        {inspoResults.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+            {inspoResults.map(r => (
+              <button
+                key={r.slug}
+                type="button"
+                className="btn"
+                onClick={() => handleInspoPreview(r.slug)}
+                style={{ textAlign: 'left' }}
+              >
+                {r.title ?? r.slug} {r.host ? `(${r.host})` : ''}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {inspoPreviewLoading && <p style={{ fontSize: 13, color: 'var(--ink-dim)' }}>Loading preview…</p>}
+        {inspoPreviewError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{inspoPreviewError}</p>}
+
+        {inspoPreview && (
+          <div style={{ marginTop: 8 }}>
+            {inspoPreview.lowConfidence && (
+              <p style={{ color: 'var(--reject)', fontSize: 12, marginBottom: 8 }}>
+                Low-confidence import — most fields fell back to defaults. Check the swatches below.
+              </p>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              {Object.entries(inspoPreview.tokens).map(([field, value]) => (
+                <div key={field} style={{ fontSize: 11 }}>
+                  <div
+                    style={{
+                      width: 28, height: 28, borderRadius: 4, border: '1px solid var(--border)',
+                      background: field.startsWith('color') ? value : 'var(--bg)',
+                    }}
+                    title={`${field}: ${value} (${inspoPreview.provenance[field] ?? 'unknown'})`}
+                  />
+                  <div style={{ color: 'var(--ink-faint)' }}>{field}</div>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleInspoImport} style={{ display: 'flex', gap: 10 }}>
+              <input
+                value={inspoImportName}
+                onChange={e => setInspoImportName(e.target.value)}
+                placeholder="New Style Bible name"
+                style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
+              />
+              <button className="btn btn-primary" type="submit" disabled={inspoImporting || !inspoImportName.trim()}>
+                {inspoImporting ? 'Importing…' : 'Confirm Import'}
+              </button>
+            </form>
+            {inspoImportError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 8 }}>{inspoImportError}</p>}
+          </div>
+        )}
+      </div>
 
       {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
       {forkError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{forkError}</p>}

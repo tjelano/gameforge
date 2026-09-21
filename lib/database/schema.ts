@@ -20,6 +20,7 @@ export const StyleSchema = z.object({
   is_deleted: z.union([z.literal(0), z.literal(1)]),
   created_at: z.number().int(),
   updated_at: z.number().int(),
+  ground_with_inspo: z.union([z.literal(0), z.literal(1)]).default(0),
 });
 export type Style = z.infer<typeof StyleSchema>;
 
@@ -127,3 +128,15 @@ export const CopilotMessageSchema = z.object({
   created_at: z.number().int(),
 });
 export type CopilotMessage = z.infer<typeof CopilotMessageSchema>;
+
+export const InspoReferenceCacheSchema = z.object({
+  id: z.string().uuid(),
+  style_id: z.string().uuid(),
+  component_type: z.string().min(1),
+  accent_hash: z.string().min(1),
+  image_url: z.string().min(1),
+  is_fallback: z.union([z.literal(0), z.literal(1)]),
+  is_color_matched: z.union([z.literal(0), z.literal(1)]),
+  fetched_at: z.number().int(),
+});
+export type InspoReferenceCache = z.infer<typeof InspoReferenceCacheSchema>;

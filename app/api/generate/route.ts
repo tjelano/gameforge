@@ -5,6 +5,7 @@ import { jobService } from '@/lib/services/JobService';
 import { DatabaseConnection } from '@/lib/database';
 import { getCurrentUser } from '@/lib/utils/session';
 import { saveReferenceImage } from '@/lib/services/referenceImage';
+import { styleService } from '@/lib/services/StyleService';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,10 @@ export const dynamic = 'force-dynamic';
 // for a single screenshot/photo reference, still bounded. Real ceiling, not
 // a placeholder: rejects before saveReferenceImage() ever touches disk.
 const MAX_REFERENCE_IMAGE_BASE64_LENGTH = 10_000_000;
+
+// Matches app/dashboard/components/page.tsx's COMPONENT_TYPES and
+// lib/services/inspoClient.ts's INSPO_TYPE_FOR_COMPONENT_TYPE keys exactly.
+const ComponentTypeSchema = z.enum(['Button', 'Card', 'Nav Bar', 'Form', 'Other']);
 
 const ReferenceImageSchema = z.object({
   base64: z.string().max(MAX_REFERENCE_IMAGE_BASE64_LENGTH),
@@ -47,7 +52,12 @@ const GenerateSchema = z.object({
 // otherwise inject a raw referenceImageFilename/referenceStrength/
 // basedOnAssetId directly into options and bypass ReferenceImageSchema's
 // size/type checks and basedOnAssetId's uuid format check entirely.
-const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested'] as const;
+// grounded/groundedReason/referenceIsFallbackThumbnail/colorMatched are
+// computed by worker.ts and written onto a job's options on completion -
+// stripped here too so a forged value at job creation can't survive into
+// the completed job's options for a job where grounding never actually
+// runs (worker.ts only overwrites these fields when grounding fires).
+const RESERVED_OPTION_KEYS = ['referenceImageFilename', 'referenceStrength', 'basedOnAssetId', 'width', 'height', 'provider', 'model', 'ollamaHost', 'ollamaCorrectionRequested', 'componentType', 'groundWithInspo', 'grounded', 'groundedReason', 'referenceIsFallbackThumbnail', 'colorMatched'] as const;
 
 export async function POST(req: NextRequest) {
   try {
@@ -57,6 +67,16 @@ export async function POST(req: NextRequest) {
     }
 
     const input = GenerateSchema.parse(await req.json());
+
+    // Validated against the known enum, not just typeof === 'string' — this value is
+    // later used as an object-lookup key (INSPO_TYPE_FOR_COMPONENT_TYPE[componentType]
+    // in lib/services/inspoGrounding.ts), so an unrecognized string like "constructor"
+    // must not survive. An invalid value is treated exactly like an absent one
+    // (componentType is optional) rather than rejecting the whole request.
+    const rawComponentType = (input.options as Record<string, unknown> | undefined)?.componentType;
+    const requestedComponentType = typeof rawComponentType === 'string' && ComponentTypeSchema.safeParse(rawComponentType).success
+      ? rawComponentType
+      : undefined;
 
     if (input.outputKind === 'theme') {
       const pieces = (input.options as { pieces?: unknown } | undefined)?.pieces;
@@ -103,6 +123,13 @@ export async function POST(req: NextRequest) {
       mergedOptions.provider = input.provider;
       mergedOptions.model = input.model;
       mergedOptions.ollamaHost = input.ollamaHost;
+    }
+    if (input.outputKind === 'component') {
+      if (requestedComponentType !== undefined) {
+        mergedOptions.componentType = requestedComponentType;
+      }
+      const targetStyle = await styleService.getById(input.styleId);
+      mergedOptions.groundWithInspo = !!targetStyle?.ground_with_inspo;
     }
 
     const jobInput = {

@@ -78,6 +78,7 @@ export default function ComponentsPage() {
           assetType: 'component',
           prompt: `${componentType}: ${prompt.trim()}`,
           outputKind: 'component',
+          options: { componentType },
           ...(referenceImage ? { referenceImage } : {}),
           ...(provider !== 'claude' && !referenceImage
             ? { provider: 'ollama', model: provider, ollamaHost: ollamaHost }
