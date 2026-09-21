@@ -19,9 +19,10 @@ export function hashAccentColor(colorAccent: string): string {
  * INSPO_BASE_URL's origin exactly.
  */
 export function resolveAndValidateUrl(url: string): string | null {
-  const base = new URL(getInspoBaseUrl());
+  let base: URL;
   let resolved: URL;
   try {
+    base = new URL(getInspoBaseUrl());
     resolved = new URL(url, base);
   } catch {
     return null;

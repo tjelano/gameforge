@@ -60,6 +60,12 @@ describe('resolveAndValidateUrl', () => {
     const { resolveAndValidateUrl } = await import('@/lib/services/inspoGrounding');
     expect(resolveAndValidateUrl('file:///etc/passwd')).toBeNull();
   });
+
+  it('fails closed (returns null, does not throw) when INSPO_BASE_URL itself is malformed', async () => {
+    process.env.INSPO_BASE_URL = 'not a valid url';
+    const { resolveAndValidateUrl } = await import('@/lib/services/inspoGrounding');
+    expect(resolveAndValidateUrl('/api/component/acme-corp/1')).toBeNull();
+  });
 });
 
 describe('lookupCachedReference', () => {
