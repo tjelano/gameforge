@@ -322,9 +322,12 @@ export function getFilters(): Promise<unknown> {
 // listed size. `imagesTemplate` is API-returned data, not a hardcoded
 // constant, so this validates defensively rather than trusting the shape:
 // fails soft (null) on anything that isn't a string containing the literal
-// `/captures/` segment, or that fails to parse as a well-formed https URL.
+// `/captures/` segment, that fails to parse as a well-formed https URL, or
+// (the slug, also API data) that doesn't match this file's own
+// isValidInspoSlug guard — the same one getDesignMd() and
+// app/api/inspo/preview/route.ts already use before a slug crosses into a URL.
 export function deriveThumbnailUrl(imagesTemplate: unknown, slug: string): string | null {
-  if (typeof imagesTemplate !== 'string' || !slug) return null;
+  if (typeof imagesTemplate !== 'string' || !isValidInspoSlug(slug)) return null;
   const marker = '/captures/';
   const markerIdx = imagesTemplate.indexOf(marker);
   if (markerIdx === -1) return null;

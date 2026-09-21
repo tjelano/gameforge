@@ -29,6 +29,16 @@ describe('deriveThumbnailUrl', () => {
   it('returns null for a missing/empty slug', () => {
     expect(deriveThumbnailUrl(REAL_TEMPLATE, '')).toBeNull();
   });
+
+  it('returns null for an invalid-shaped slug, even with an otherwise-valid template', () => {
+    expect(deriveThumbnailUrl(REAL_TEMPLATE, '../etc/passwd')).toBeNull();
+    expect(deriveThumbnailUrl(REAL_TEMPLATE, 'foo/bar')).toBeNull();
+    expect(deriveThumbnailUrl(REAL_TEMPLATE, 'foo#bar')).toBeNull();
+  });
+
+  it('returns null for a non-https template (the https-only guard)', () => {
+    expect(deriveThumbnailUrl('http://0nme3pk5am3urwa9.public.blob.vercel-storage.com/captures/<slug>/hero.1440.webp', 'ecologi-com')).toBeNull();
+  });
 });
 
 describe('isValidInspoSlug', () => {
