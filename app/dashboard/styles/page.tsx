@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useStyles } from '@/lib/hooks/useStyles';
-import { deriveThumbnailUrl } from '@/lib/services/inspoClient';
+import { deriveThumbnailUrl, isValidInspoSlug } from '@/lib/services/inspoClient';
 
 interface InspoResultItem {
   slug: string;
@@ -251,7 +251,11 @@ export default function StylesPage() {
         return;
       }
       const rawResults = Array.isArray(body.data?.results) ? body.data.results : [];
-      setInspoResults(rawResults.map((r: any) => toInspoResultItem(r, body.data?.images)));
+      setInspoResults(
+        rawResults
+          .map((r: any) => toInspoResultItem(r, body.data?.images))
+          .filter((item: InspoResultItem) => isValidInspoSlug(item.slug))
+      );
     } catch {
       setInspoSearchError('Could not reach the server.');
     } finally {
@@ -289,7 +293,11 @@ export default function StylesPage() {
             : null
         );
         const rawExemplars = Array.isArray(body.data?.exemplars) ? body.data.exemplars : [];
-        setInspoExemplars(rawExemplars.map((r: any) => toInspoResultItem(r, body.data?.images)));
+        setInspoExemplars(
+          rawExemplars
+            .map((r: any) => toInspoResultItem(r, body.data?.images))
+            .filter((item: InspoResultItem) => isValidInspoSlug(item.slug))
+        );
       }
     } catch {
       if (myRequestId === inspoRecommendRequestIdRef.current) {
@@ -370,6 +378,12 @@ export default function StylesPage() {
       setInspoQuery('');
       setInspoBrief('');
       setInspoImportName('');
+      // Invalidate any recommend request still in flight, same as requestIdRef guards
+      // preview — otherwise its late response could repopulate the pick/exemplars right
+      // after the user just completed an import and the panel was supposed to be clean.
+      ++inspoRecommendRequestIdRef.current;
+      setInspoRecommendPick(null);
+      setInspoRecommendError(null);
       await refresh();
     } catch {
       setInspoImportError('Could not reach the server.');
@@ -435,7 +449,7 @@ export default function StylesPage() {
           </button>
         </div>
 
-        {inspoFilterOptions && (
+        {inspoMode === 'search' && inspoFilterOptions && (
           <div style={{ marginBottom: 12 }}>
             {INSPO_FILTER_CATEGORIES.map(({ optionsKey, selectedKey, label }) => (
               <div key={optionsKey} style={{ marginBottom: 8 }}>
