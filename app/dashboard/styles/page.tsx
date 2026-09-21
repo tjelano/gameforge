@@ -159,8 +159,7 @@ export default function StylesPage() {
     }
   }
 
-  async function handleInspoImport(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleInspoImport() {
     if (!inspoImportName.trim() || !inspoPreview || !inspoSelectedSlug || inspoImporting) return;
     setInspoImporting(true);
     setInspoImportError(null);
@@ -294,17 +293,17 @@ export default function StylesPage() {
                 </div>
               ))}
             </div>
-            <form onSubmit={handleInspoImport} style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10 }}>
               <input
                 value={inspoImportName}
                 onChange={e => setInspoImportName(e.target.value)}
                 placeholder="New Style Bible name"
                 style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
               />
-              <button className="btn btn-primary" type="submit" disabled={inspoImporting || !inspoImportName.trim()}>
+              <button className="btn btn-primary" type="button" onClick={handleInspoImport} disabled={inspoImporting || !inspoImportName.trim()}>
                 {inspoImporting ? 'Importing…' : 'Confirm Import'}
               </button>
-            </form>
+            </div>
             {inspoImportError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 8 }}>{inspoImportError}</p>}
           </div>
         )}
