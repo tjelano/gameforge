@@ -30,6 +30,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.doUnmock('@/lib/services/inspoGrounding');
   vi.doUnmock('@/lib/services/ComponentGenerator');
+  vi.doUnmock('@/lib/services/StyleService');
   if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
@@ -174,5 +175,41 @@ describe('worker.ts grounding integration', () => {
     await processJob(row);
 
     expect(groundComponentMock).not.toHaveBeenCalled();
+  });
+
+  it('completes the job (grounded:false, groundedReason:error) instead of stranding it when the grounding pre-check itself throws', async () => {
+    // styleService.getById() and JSON.parse(style.parameters) both run before
+    // processJob()'s own try/catch (which calls markJobFailed()) -- if either
+    // threw uncaught, the job would stay stuck in 'processing' forever, silently
+    // (processJobs()'s Promise.allSettled swallows a rejected processJob() with
+    // no logging). This proves the grounding pre-check's own try/catch degrades
+    // to a normal grounded:false completion instead of propagating.
+    vi.doMock('@/lib/services/StyleService', () => ({
+      styleService: { getById: vi.fn().mockRejectedValue(new Error('db exploded')) },
+    }));
+    vi.doMock('@/lib/services/ComponentGenerator', () => ({
+      getComponentGenerator: () => ({ generate: vi.fn().mockResolvedValue({ path: 'out.html' }) }),
+    }));
+    vi.resetModules();
+    const { processJob } = await import('@/worker');
+
+    const { userId } = await seedSession();
+    const style = await styleService.create({ name: 'X', createdBy: userId, parameters: '{"colorAccent":"#3b82f6"}' });
+    await styleService.update(style.id, userId, { groundWithInspo: true });
+    const job = await jobService.create({
+      styleId: style.id, assetType: 'component', prompt: 'A button', outputKind: 'component',
+      options: { componentType: 'Button', groundWithInspo: true },
+      createdBy: userId,
+    });
+
+    const db = DatabaseConnection.getInstance();
+    const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id);
+    await expect(processJob(row)).resolves.not.toThrow();
+
+    const updated = db.prepare('SELECT * FROM jobs WHERE id = ?').get(job.id) as any;
+    expect(updated.status).toBe('complete');
+    const options = JSON.parse(updated.options);
+    expect(options.grounded).toBe(false);
+    expect(options.groundedReason).toBe('error');
   });
 });

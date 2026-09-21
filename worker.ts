@@ -165,18 +165,23 @@ export async function processJob(job: any): Promise<void> {
     typeof componentType === 'string';
 
   if (shouldAttemptGrounding) {
-    const style = await styleService.getById(job.style_id);
-    const colorAccent = style ? (JSON.parse(style.parameters || '{}').colorAccent as string | undefined) : undefined;
-    if (colorAccent) {
-      const outcome = await groundComponent({ styleId: job.style_id, componentType: componentType!, colorAccent });
-      if (outcome.grounded) {
-        groundedReferenceImage = outcome.referenceImage;
-        groundingResult = { grounded: true, referenceIsFallbackThumbnail: outcome.referenceIsFallbackThumbnail, colorMatched: outcome.colorMatched };
+    try {
+      const style = await styleService.getById(job.style_id);
+      const colorAccent = style ? (JSON.parse(style.parameters || '{}').colorAccent as string | undefined) : undefined;
+      if (colorAccent) {
+        const outcome = await groundComponent({ styleId: job.style_id, componentType: componentType!, colorAccent });
+        if (outcome.grounded) {
+          groundedReferenceImage = outcome.referenceImage;
+          groundingResult = { grounded: true, referenceIsFallbackThumbnail: outcome.referenceIsFallbackThumbnail, colorMatched: outcome.colorMatched };
+        } else {
+          groundingResult = { grounded: false, groundedReason: outcome.groundedReason };
+        }
       } else {
-        groundingResult = { grounded: false, groundedReason: outcome.groundedReason };
+        groundingResult = { grounded: false, groundedReason: 'no-accent-color' };
       }
-    } else {
-      groundingResult = { grounded: false, groundedReason: 'no-accent-color' };
+    } catch (error) {
+      console.error(`Grounding pre-check failed for job ${job.id}:`, error);
+      groundingResult = { grounded: false, groundedReason: 'error' };
     }
   }
 
