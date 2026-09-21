@@ -8,7 +8,7 @@ class CopilotMessageServiceImpl {
     role: 'user' | 'assistant';
     content: string;
     toolCall?: { name: string; input: unknown };
-    provider?: 'claude' | 'ollama';
+    provider?: 'claude' | 'ollama' | 'openrouter';
     model?: string;
   }): Promise<CopilotMessage> {
     const db = DatabaseConnection.getInstance();

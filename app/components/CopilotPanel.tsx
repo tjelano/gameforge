@@ -28,7 +28,11 @@ export function CopilotPanel() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [input, setInput] = useState('');
-  const [provider, setProvider] = useState<'claude' | string>('claude');
+  // null = no explicit pick yet -- falls back to the first available Ollama
+  // model (free/local) over Claude/OpenRouter (both paid) via
+  // selectedProvider below. A real user pick always wins once made.
+  const [pickedProvider, setPickedProvider] = useState<'claude' | 'openrouter' | string | null>(null);
+  const selectedProvider = pickedProvider ?? (ollamaModels.length > 0 ? ollamaModels[0] : 'claude');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<ConversationSummary[]>([]);
@@ -96,7 +100,11 @@ export function CopilotPanel() {
         body: JSON.stringify({
           ...(conversationId ? { conversationId } : {}),
           text,
-          ...(provider !== 'claude' ? { provider: 'ollama', model: provider, ollamaHost } : {}),
+          ...(selectedProvider === 'openrouter'
+            ? { provider: 'openrouter' }
+            : selectedProvider !== 'claude'
+              ? { provider: 'ollama', model: selectedProvider, ollamaHost }
+              : {}),
         }),
       });
       const body = await res.json();
@@ -163,8 +171,9 @@ export function CopilotPanel() {
               {error && <p style={{ color: 'var(--reject)', fontSize: 13, padding: '0 12px' }}>{error}</p>}
 
               <form className="copilot-input-row" onSubmit={handleSend}>
-                <select value={provider} onChange={e => setProvider(e.target.value)} disabled={sending}>
+                <select value={selectedProvider} onChange={e => setPickedProvider(e.target.value)} disabled={sending}>
                   <option value="claude">Claude</option>
+                  <option value="openrouter">OpenRouter</option>
                   {ollamaModels.map(m => <option key={m} value={m}>{m} (local)</option>)}
                 </select>
                 <input
