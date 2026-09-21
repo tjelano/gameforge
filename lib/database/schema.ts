@@ -123,7 +123,7 @@ export const CopilotMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
   tool_call: z.string().nullable(), // JSON-serialized {name, input}
-  provider: z.enum(['claude', 'ollama']).nullable(),
+  provider: z.enum(['claude', 'ollama', 'openrouter']).nullable(),
   model: z.string().nullable(),
   created_at: z.number().int(),
 });
