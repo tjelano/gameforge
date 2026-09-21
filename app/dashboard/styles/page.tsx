@@ -159,7 +159,8 @@ export default function StylesPage() {
     }
   }
 
-  async function handleInspoImport() {
+  async function handleInspoImport(e: React.FormEvent) {
+    e.preventDefault();
     if (!inspoImportName.trim() || !inspoPreview || !inspoSelectedSlug || inspoImporting) return;
     setInspoImporting(true);
     setInspoImportError(null);
@@ -234,13 +235,13 @@ export default function StylesPage() {
         </button>
       </form>
 
-      <form className="card" onSubmit={handleInspoSearch} style={{ marginBottom: 32, maxWidth: 480 }}>
+      <div className="card" style={{ marginBottom: 32, maxWidth: 480 }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Import from Inspo</div>
         <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
           Search 832 real production sites and seed a new Style Bible from one of their extracted
           design tokens.
         </p>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+        <form onSubmit={handleInspoSearch} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
           <input
             value={inspoQuery}
             onChange={e => setInspoQuery(e.target.value)}
@@ -250,7 +251,7 @@ export default function StylesPage() {
           <button className="btn btn-primary" type="submit" disabled={inspoSearching || !inspoQuery.trim()}>
             {inspoSearching ? 'Searching…' : 'Search'}
           </button>
-        </div>
+        </form>
         {inspoSearchError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{inspoSearchError}</p>}
 
         {inspoResults.length > 0 && (
@@ -293,21 +294,21 @@ export default function StylesPage() {
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <form onSubmit={handleInspoImport} style={{ display: 'flex', gap: 10 }}>
               <input
                 value={inspoImportName}
                 onChange={e => setInspoImportName(e.target.value)}
                 placeholder="New Style Bible name"
                 style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '9px 11px' }}
               />
-              <button className="btn btn-primary" type="button" onClick={handleInspoImport} disabled={inspoImporting || !inspoImportName.trim()}>
+              <button className="btn btn-primary" type="submit" disabled={inspoImporting || !inspoImportName.trim()}>
                 {inspoImporting ? 'Importing…' : 'Confirm Import'}
               </button>
-            </div>
+            </form>
             {inspoImportError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 8 }}>{inspoImportError}</p>}
           </div>
         )}
-      </form>
+      </div>
 
       {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{stylesError}</p>}
       {forkError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{forkError}</p>}
