@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useOllamaModels } from '@/lib/hooks/useOllamaModels';
 
@@ -21,6 +21,7 @@ interface ConversationSummary {
 export function CopilotPanel() {
   const { user } = useCurrentUser();
   const router = useRouter();
+  const pathname = usePathname();
   const { models: ollamaModels, host: ollamaHost } = useOllamaModels(!!user);
 
   const [open, setOpen] = useState(false);
@@ -43,7 +44,7 @@ export function CopilotPanel() {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
 
-  if (!user) return null;
+  if (!user || pathname === '/login') return null;
 
   async function handleOpenHistory() {
     setMode('history');
