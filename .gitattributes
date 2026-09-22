@@ -7,3 +7,4 @@
 # a CRLF shebang line ("#!/bin/sh\r") breaks execution on a real Unix
 # checkout.
 .githooks/* text eol=lf
+.claude/skills/deepseek-review/scripts/*.mjs text eol=lf
