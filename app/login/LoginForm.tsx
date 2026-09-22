@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface UserOption {
   id: string;
@@ -10,6 +10,8 @@ interface UserOption {
 
 export function LoginForm({ users }: { users: UserOption[] }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const expired = searchParams.get('reason') === 'expired';
   const [pulling, setPulling] = useState(false);
   const [pulled, setPulled] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
@@ -83,6 +85,11 @@ export function LoginForm({ users }: { users: UserOption[] }) {
   if (users.length > 0) {
     return (
       <div>
+        {expired && (
+          <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
+            Your session expired — pick your name again.
+          </p>
+        )}
         {users.map(u => (
           <button key={u.id} className="btn" style={{ display: 'block', width: '100%', marginBottom: 8 }} onClick={() => loginAs(u.id)} disabled={submitting}>
             {u.name}
