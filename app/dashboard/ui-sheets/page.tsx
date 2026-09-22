@@ -5,7 +5,7 @@ import { useStyles } from '@/lib/hooks/useStyles';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { useJobStore } from '@/lib/store/useJobStore';
 import { JobCard } from '@/app/components/JobCard';
-import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
+import { useDraggableBoxes, boxKeyboardDelta } from '@/lib/hooks/useDraggableBoxes';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 import {
   PIECE_PRESETS,
@@ -162,6 +162,9 @@ export default function UiSheetsPage() {
             {boxes.map(box => (
               <div
                 key={box.id}
+                tabIndex={0}
+                role="group"
+                aria-label={`Piece: ${box.label || 'unlabeled'}`}
                 style={{
                   position: 'absolute',
                   left: box.x,
@@ -171,13 +174,23 @@ export default function UiSheetsPage() {
                   border: '1px solid var(--accent)',
                   borderRadius: box.kind === 'circle' ? '50%' : 4,
                   cursor: 'move',
+                  outline: 'none',
                 }}
                 onMouseDown={e => startDrag(box.id, 'move', e.clientX, e.clientY)}
+                onKeyDown={e => {
+                  const patch = boxKeyboardDelta(e.key, e.shiftKey, box);
+                  if (!patch) return;
+                  updateBox(box.id, patch);
+                  e.preventDefault();
+                }}
+                onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
+                onBlur={e => { e.currentTarget.style.outline = 'none'; }}
               >
                 <input
                   value={box.label}
                   onChange={e => updateBox(box.id, { label: e.target.value })}
                   onMouseDown={e => e.stopPropagation()}
+                  onKeyDown={e => e.stopPropagation()}
                   placeholder="label"
                   style={{ width: '90%', fontSize: 11, background: 'transparent', border: 'none', color: 'var(--ink)' }}
                 />

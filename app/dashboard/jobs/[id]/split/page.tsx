@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use as usePromise } from 'react';
 import { useRouter } from 'next/navigation';
-import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
+import { useDraggableBoxes, boxKeyboardDelta } from '@/lib/hooks/useDraggableBoxes';
 import type { PlacedPiece } from '@/lib/utils/pieceShapes';
 import type { Job } from '@/lib/database/schema';
 
@@ -173,6 +173,9 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
         {draggable.boxes.map(box => (
           <div
             key={box.id}
+            tabIndex={0}
+            role="group"
+            aria-label={`Piece: ${box.label || 'unlabeled'}`}
             style={{
               position: 'absolute',
               left: box.x,
@@ -182,13 +185,23 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
               border: `1px solid ${box.included ? 'var(--accent)' : 'var(--ink-faint)'}`,
               opacity: box.included ? 1 : 0.4,
               cursor: 'move',
+              outline: 'none',
             }}
             onMouseDown={e => draggable.startDrag(box.id, 'move', e.clientX, e.clientY)}
+            onKeyDown={e => {
+              const patch = boxKeyboardDelta(e.key, e.shiftKey, box);
+              if (!patch) return;
+              draggable.updateBox(box.id, patch);
+              e.preventDefault();
+            }}
+            onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
+            onBlur={e => { e.currentTarget.style.outline = 'none'; }}
           >
             <input
               value={box.label}
               onChange={e => draggable.updateBox(box.id, { label: e.target.value })}
               onMouseDown={e => e.stopPropagation()}
+              onKeyDown={e => e.stopPropagation()}
               placeholder="label (required)"
               style={{ width: '90%', fontSize: 11, background: 'rgba(0,0,0,0.6)', border: 'none', color: 'var(--ink)' }}
             />
