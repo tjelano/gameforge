@@ -10,20 +10,27 @@ To bring the same technique to a different project: the core idea is a plain cha
 
 "You are an adversarial reviewer. Your mandate is to kill this [plan/diff], not improve it -- it only survives if you genuinely can't find a way to break it. You have no filesystem access; everything you need will be pasted to you. Attack from three angles: (1) what would a naive read-through miss? (2) does it actually do what it claims? (3) does it cross a hard boundary -- security, data loss, concurrency? One finding per line: what's wrong, why it matters, a one-line fix."
 
-...then paste the diff/plan/relevant code directly into the message (the model can't fetch it itself), and treat every finding as a claim to verify against the real code yourself, not a fact -- expect roughly 1 in 5 "important" findings to actually hold up. The value is in the one that's real, not blind trust in all five.`;
+...then paste the diff/plan/relevant code directly into the message (the model can't fetch it itself), and treat every finding as a claim to verify against the real code yourself, not a fact -- expect roughly 1 in 5 "important" findings to actually hold up. The value is in the one that's real, not blind trust in all five.
+
+Worth being explicit about: this pastes real source code into a third-party API. That's a conscious tradeoff to make per-project, not a default to enable without thinking about it.`;
+
+type CopyState = 'idle' | 'copied' | 'failed';
 
 export default function DeepSeekReviewSettingsPage() {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>('idle');
 
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(QUICK_START);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopyState('copied');
     } catch {
       // Clipboard access can fail (permissions, insecure context) -- the
-      // text is still fully visible and selectable below, so this is a
-      // convenience feature, not the only way to get the content.
+      // text is still fully visible and selectable below as a fallback,
+      // but say so explicitly rather than leaving the button unchanged,
+      // which could read as "nothing happened" rather than "it failed."
+      setCopyState('failed');
+    } finally {
+      setTimeout(() => setCopyState('idle'), 2000);
     }
   }
 
@@ -51,6 +58,11 @@ export default function DeepSeekReviewSettingsPage() {
           </a>
           ).
         </p>
+        <p style={{ color: 'var(--ink-dim)', fontSize: 13 }}>
+          Worth knowing: this pastes real source code and diffs into a third-party API (OpenRouter).
+          That&apos;s a conscious tradeoff to make per-project, not a default to enable without
+          thinking about it.
+        </p>
 
         <div className="field" style={{ marginTop: 16 }}>
           <label htmlFor="quick-start">
@@ -67,7 +79,7 @@ export default function DeepSeekReviewSettingsPage() {
           />
         </div>
         <button className="btn btn-primary" onClick={handleCopy} style={{ marginTop: 12 }}>
-          {copied ? 'Copied!' : 'Copy prompt'}
+          {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed — select the text above' : 'Copy prompt'}
         </button>
       </div>
     </>

@@ -68,9 +68,28 @@ async function main() {
     ? [model, OPENROUTER_FALLBACK_MODEL]
     : undefined;
 
+  // --system is only meaningful for a fresh Round 1. If historyFile already
+  // exists, a caller passing --system almost always means a stale file
+  // wasn't deleted first (SKILL.md's own "delete before Round 1" rule) --
+  // silently ignoring --system in that case would run the critic with no
+  // adversarial mandate at all, no sign anything went wrong. Stop instead.
+  if (flag === "--system" && systemFile && existsSync(historyFile)) {
+    console.error(`${historyFile} already exists, but --system was passed. Delete it first for a fresh Round 1, or omit --system to resume the existing thread.`);
+    process.exitCode = 2;
+    return;
+  }
+
   let history = [];
   if (existsSync(historyFile)) {
-    history = JSON.parse(readFileSync(historyFile, "utf8"));
+    let historyText;
+    try {
+      historyText = readFileSync(historyFile, "utf8");
+      history = JSON.parse(historyText);
+    } catch (e) {
+      console.error(`${historyFile} exists but could not be read as valid JSON (${e.message}). Delete it to start a fresh review, or restore it from a backup.`);
+      process.exitCode = 2;
+      return;
+    }
   } else if (flag === "--system" && systemFile) {
     history.push({ role: "system", content: readFileSync(systemFile, "utf8") });
   }
@@ -118,6 +137,13 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+
+  // To stderr, not stdout -- stdout is the critic's reply itself, meant to
+  // be captured verbatim. Printed even on the non-fallback path so it's
+  // always visible which model actually answered, not just when the
+  // `models` fallback silently kicks in (see SKILL.md's "Known quirk" note
+  // on trusting this field over the model's own self-report).
+  console.error(`(model: ${data.model ?? "unknown"})`);
 
   history.push({ role: "assistant", content: reply });
   writeFileSync(historyFile, JSON.stringify(history, null, 2));

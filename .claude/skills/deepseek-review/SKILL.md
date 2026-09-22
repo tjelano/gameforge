@@ -11,6 +11,8 @@ Same doctrine as claudex-loop's `codex-review`: one model builds, a different mo
 
 **Why this matters, not just doctrine:** an adversarial review catches *reasoning* errors, not *empirical* ones — a critic (any critic, cross-model or not) can be unanimously, confidently wrong. Published multi-agent review research documents a case where 80 independent review agents all endorsed a vulnerability that didn't exist; it was only killed by actually running the code. That's the whole reason Claude stays final arbiter on every finding below, not a formality — check every finding against the real code before acting on it, never against how convincing it sounds.
 
+**Data egress, worth being explicit about:** this skill pastes real source code, diffs, and plans into a third-party API (OpenRouter, or CheaperInference on the fallback path) — that content leaves this machine and this repo. If this skill is committed into a shared project (as it is here) rather than kept in a personal, user-level `~/.claude/skills/` directory, that's true for every contributor who invokes it, not just whoever set it up. Proprietary or sensitive code shouldn't go through this without that being a conscious choice, not a default nobody noticed.
+
 ## Setup
 
 **OpenRouter is the default provider** (CheaperInference, a Claude-proxy some projects also use, has had repeated real flakiness; OpenRouter has been reliable in every real call so far):
