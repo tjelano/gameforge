@@ -1,0 +1,36 @@
+#!/bin/sh
+# Mirrors CI's three required gates (.github/workflows/ci.yml: Typecheck,
+# Lint, Test) so a broken push gets caught here instead of after CI runs.
+# This has been skipped by hand before (see AGENTS.md's "Start here" #5) --
+# a hook that runs automatically on every push closes that gap instead of
+# relying on remembering to run it.
+#
+# One-time setup after cloning: git config core.hooksPath .githooks
+
+# Git sets GIT_DIR (and friends) in a hook's own environment so the hook
+# itself always targets the right repo -- but that means every CHILD
+# process this script spawns inherits it too. Several tests here (git-sync
+# tests, resolveConflicts, cleanupOrphanedImages -- see AGENTS.md's
+# Testing note) build and operate on their own REAL temp git repos via
+# simple-git; without clearing GIT_DIR first, their nested git subprocess
+# calls ignore their intended temp cwd and silently target THIS repo's
+# real .git dir instead. Confirmed the hard way: an earlier version of
+# this hook without this line corrupted real branch history (test-fixture
+# commits landing on top of real work, core.bare flipped to true) --
+# surfaced only inside a real `git push`, never when running vitest
+# directly from a plain shell, which has no GIT_DIR to begin with.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+set -e
+
+echo "pre-push: npx tsc --noEmit"
+npx tsc --noEmit
+
+echo "pre-push: npx eslint app lib worker.ts"
+# Not `npm run lint` (bare `eslint .`) -- on this machine that also sweeps
+# .claude/worktrees/ (sibling worktrees) and .next build output, neither of
+# which eslint.config.mjs ignores, producing thousands of irrelevant hits.
+npx eslint app lib worker.ts
+
+echo "pre-push: npx vitest run"
+npx vitest run
