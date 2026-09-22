@@ -68,12 +68,23 @@ async function main() {
     ? [model, OPENROUTER_FALLBACK_MODEL]
     : undefined;
 
+  // A --system flag with no path after it (dropped or misplaced argument)
+  // must not fall through silently: without this check neither branch below
+  // fires, history stays empty, and the call proceeds with no system prompt
+  // at all -- an "adversarial review" indistinguishable from one that ran
+  // with no mandate, and no error to say so.
+  if (flag === "--system" && !systemFile) {
+    console.error("--system requires a system-file path argument.");
+    process.exitCode = 2;
+    return;
+  }
+
   // --system is only meaningful for a fresh Round 1. If historyFile already
   // exists, a caller passing --system almost always means a stale file
   // wasn't deleted first (SKILL.md's own "delete before Round 1" rule) --
   // silently ignoring --system in that case would run the critic with no
   // adversarial mandate at all, no sign anything went wrong. Stop instead.
-  if (flag === "--system" && systemFile && existsSync(historyFile)) {
+  if (flag === "--system" && existsSync(historyFile)) {
     console.error(`${historyFile} already exists, but --system was passed. Delete it first for a fresh Round 1, or omit --system to resume the existing thread.`);
     process.exitCode = 2;
     return;
