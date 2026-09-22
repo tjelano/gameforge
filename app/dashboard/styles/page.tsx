@@ -413,7 +413,7 @@ export default function StylesPage() {
       </form>
       {createError && (
         <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -16, marginBottom: 16 }}>
-          {createError} <Link href="/login">Log in again</Link>
+          {createError} {createError === 'Not logged in' && <Link href="/login?reason=expired">Log in again</Link>}
         </p>
       )}
 
