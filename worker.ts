@@ -13,11 +13,10 @@ import { loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referen
 import { groundComponent } from '@/lib/services/inspoGrounding';
 import { styleService } from '@/lib/services/StyleService';
 import { settingsService } from '@/lib/services/SettingsService';
-import { WORKER_BATCH_SIZE, WORKER_LAST_SEEN_SETTING_KEY } from '@/lib/config';
+import { WORKER_BATCH_SIZE, WORKER_LAST_SEEN_SETTING_KEY, POLL_INTERVAL_MS } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 import type { ProviderOverride } from '@/lib/services/providerOverride';
 
-const POLL_INTERVAL_MS = 2000;
 const LOCK_FILE = path.join(getProjectRoot(), '.worker.lock');
 
 function isProcessAlive(pid: number): boolean {
@@ -295,12 +294,15 @@ function scheduleNext(): void {
 // note above Task 6's worker.ts changes in the plan this came from: a
 // heartbeat gated behind a slow job's completion would falsely read "dead"
 // while the worker is busy with real, long-running work.
+function writeHeartbeat(): void {
+  settingsService.set(WORKER_LAST_SEEN_SETTING_KEY, String(Date.now())).catch(error => {
+    console.error('❌ Worker heartbeat write failed:', error);
+  });
+}
+
 function startHeartbeat(): void {
-  setInterval(() => {
-    settingsService.set(WORKER_LAST_SEEN_SETTING_KEY, String(Date.now())).catch(error => {
-      console.error('❌ Worker heartbeat write failed:', error);
-    });
-  }, POLL_INTERVAL_MS);
+  writeHeartbeat();
+  setInterval(writeHeartbeat, POLL_INTERVAL_MS);
 }
 
 // Only run the actual worker loop (lock file, signal handlers, polling)

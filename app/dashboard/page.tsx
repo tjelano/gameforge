@@ -15,18 +15,21 @@ export default function OverviewPage() {
     let ignore = false;
     (async () => {
       try {
-        const [contextRes, activityRes, workerRes] = await Promise.all([
-          fetch('/api/context'),
-          fetch('/api/dashboard/activity'),
-          fetch('/api/dashboard/worker-status'),
+        const [contextResult, activityResult, workerResult] = await Promise.allSettled([
+          fetch('/api/context').then(r => r.json()),
+          fetch('/api/dashboard/activity').then(r => r.json()),
+          fetch('/api/dashboard/worker-status').then(r => r.json()),
         ]);
-        const contextBody = await contextRes.json();
-        const activityBody = await activityRes.json();
-        const workerBody = await workerRes.json();
         if (!ignore) {
-          if (contextBody.success) setContext(contextBody.data);
-          if (activityBody.success) setActivity(activityBody.data);
-          if (workerBody.success) setWorkerAlive(workerBody.data.alive);
+          if (contextResult.status === 'fulfilled' && contextResult.value.success) {
+            setContext(contextResult.value.data);
+          }
+          if (activityResult.status === 'fulfilled' && activityResult.value.success) {
+            setActivity(activityResult.value.data);
+          }
+          if (workerResult.status === 'fulfilled' && workerResult.value.success) {
+            setWorkerAlive(workerResult.value.data.alive);
+          }
         }
       } catch {
         // Non-fatal -- the page just shows zeros/an empty activity list.
