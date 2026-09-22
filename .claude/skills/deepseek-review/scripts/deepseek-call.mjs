@@ -55,6 +55,16 @@ async function main() {
     ? (process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4.1-flash")
     : (process.env.CHEAPERINFERENCE_MODEL || "deepseek-v4-flash");
 
+  // The API key rides in an Authorization header on every call -- a plain-http
+  // baseUrl (only reachable via a misconfigured OPENROUTER_BASE_URL /
+  // CHEAPERINFERENCE_BASE_URL override, the defaults above are both https)
+  // would send it in cleartext. Check before it's ever used.
+  if (!/^https:\/\//i.test(baseUrl)) {
+    console.error(`Refusing to send the API key to a non-HTTPS URL: ${baseUrl}. Check ${useOpenRouter ? "OPENROUTER_BASE_URL" : "CHEAPERINFERENCE_BASE_URL"}.`);
+    process.exitCode = 2;
+    return;
+  }
+
   // OpenRouter-only: a `models` array (replaces the singular `model` field
   // entirely -- that's OpenRouter's own documented shape for this) makes
   // OpenRouter automatically try the next entry if the first errors, no
@@ -67,6 +77,17 @@ async function main() {
   const models = useOpenRouter && model !== OPENROUTER_FALLBACK_MODEL
     ? [model, OPENROUTER_FALLBACK_MODEL]
     : undefined;
+
+  // Any 3rd argument other than exactly "--system" (a typo like --sytem, or
+  // a stray value) has the same silent-failure shape as the check below: the
+  // system-prompt branch further down only matches the literal string
+  // "--system", so anything else silently drops systemFile on the floor with
+  // no system prompt attached and no error.
+  if (flag !== undefined && flag !== "--system") {
+    console.error(`Unrecognized third argument "${flag}" -- only --system is supported.`);
+    process.exitCode = 2;
+    return;
+  }
 
   // A --system flag with no path after it (dropped or misplaced argument)
   // must not fall through silently: without this check neither branch below
@@ -95,7 +116,11 @@ async function main() {
     let historyText;
     try {
       historyText = readFileSync(historyFile, "utf8");
-      history = JSON.parse(historyText);
+      const parsed = JSON.parse(historyText);
+      if (!Array.isArray(parsed)) {
+        throw new Error("history file's JSON root is not an array");
+      }
+      history = parsed;
     } catch (e) {
       console.error(`${historyFile} exists but could not be read as valid JSON (${e.message}). Delete it to start a fresh review, or restore it from a backup.`);
       process.exitCode = 2;
@@ -107,23 +132,40 @@ async function main() {
 
   history.push({ role: "user", content: readFileSync(messageFile, "utf8") });
 
-  const res = await fetch(baseUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      ...(useOpenRouter ? { "HTTP-Referer": "https://github.com/tjelano/gameforge", "X-Title": "GameForge deepseek-review" } : {}),
-    },
-    body: JSON.stringify({
-      ...(models ? { models } : { model }),
-      messages: history,
-      // Explicit, not left to whatever OpenRouter's per-model default
-      // happens to be: DeepSeek V4.1 Flash's own API defaults its thinking
-      // mode to high effort, but that's not guaranteed to survive
-      // OpenRouter's pass-through unless asked for directly.
-      ...(useOpenRouter ? { reasoning: { effort: "high" } } : {}),
-    }),
-  });
+  // 5 minutes: generous for a high-effort reasoning call on a large diff/plan,
+  // but bounded so a hung connection doesn't stall the whole review session
+  // indefinitely with no feedback.
+  const PROVIDER_TIMEOUT_MS = 5 * 60 * 1000;
+
+  let res;
+  try {
+    res = await fetch(baseUrl, {
+      method: "POST",
+      // A redirect response would otherwise be followed automatically
+      // (fetch's default), silently carrying the Authorization header's API
+      // key to whatever host the redirect points at -- refuse instead.
+      redirect: "error",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        ...(useOpenRouter ? { "HTTP-Referer": "https://github.com/tjelano/gameforge", "X-Title": "GameForge deepseek-review" } : {}),
+      },
+      body: JSON.stringify({
+        ...(models ? { models } : { model }),
+        messages: history,
+        // Explicit, not left to whatever OpenRouter's per-model default
+        // happens to be: DeepSeek V4.1 Flash's own API defaults its thinking
+        // mode to high effort, but that's not guaranteed to survive
+        // OpenRouter's pass-through unless asked for directly.
+        ...(useOpenRouter ? { reasoning: { effort: "high" } } : {}),
+      }),
+    });
+  } catch (e) {
+    console.error(`DeepSeek call failed: ${e.name === "TimeoutError" ? `no response after ${PROVIDER_TIMEOUT_MS / 1000}s` : e.message}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const bodyText = await res.text();
 

@@ -16,6 +16,24 @@ Worth being explicit about: this pastes real source code into a third-party API.
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
+const VISUALLY_HIDDEN = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0,0,0,0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+} as const;
+
+function copyStatusMessage(state: CopyState) {
+  if (state === 'copied') return 'Copied to clipboard.';
+  if (state === 'failed') return 'Copy failed. Select the text above instead.';
+  return '';
+}
+
 export default function DeepSeekReviewSettingsPage() {
   const [copyState, setCopyState] = useState<CopyState>('idle');
 
@@ -81,6 +99,9 @@ export default function DeepSeekReviewSettingsPage() {
         <button className="btn btn-primary" onClick={handleCopy} style={{ marginTop: 12 }}>
           {copyState === 'copied' ? 'Copied!' : copyState === 'failed' ? 'Copy failed — select the text above' : 'Copy prompt'}
         </button>
+        <span role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
+          {copyStatusMessage(copyState)}
+        </span>
       </div>
     </>
   );
