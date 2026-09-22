@@ -26,6 +26,14 @@ describe('boxKeyboardDelta', () => {
     expect(boxKeyboardDelta('ArrowLeft', true, { x: 0, y: 0, w: 10, h: 20 })).toEqual({ w: MIN_SIZE });
   });
 
+  it('grows height by 4px on Shift+ArrowDown (absolute new h)', () => {
+    expect(boxKeyboardDelta('ArrowDown', true, box)).toEqual({ h: 24 });
+  });
+
+  it('shrinks height on Shift+ArrowUp, floored at MIN_SIZE', () => {
+    expect(boxKeyboardDelta('ArrowUp', true, { x: 0, y: 0, w: 20, h: 10 })).toEqual({ h: MIN_SIZE });
+  });
+
   it('returns null for an unhandled key', () => {
     expect(boxKeyboardDelta('Enter', false, box)).toBeNull();
   });

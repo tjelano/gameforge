@@ -162,9 +162,11 @@ export default function UiSheetsPage() {
             {boxes.map(box => (
               <div
                 key={box.id}
+                className="crop-box"
                 tabIndex={0}
                 role="group"
                 aria-label={`Piece: ${box.label || 'unlabeled'}`}
+                aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight"
                 style={{
                   position: 'absolute',
                   left: box.x,
@@ -174,7 +176,6 @@ export default function UiSheetsPage() {
                   border: '1px solid var(--accent)',
                   borderRadius: box.kind === 'circle' ? '50%' : 4,
                   cursor: 'move',
-                  outline: 'none',
                 }}
                 onMouseDown={e => startDrag(box.id, 'move', e.clientX, e.clientY)}
                 onKeyDown={e => {
@@ -183,8 +184,6 @@ export default function UiSheetsPage() {
                   updateBox(box.id, patch);
                   e.preventDefault();
                 }}
-                onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
-                onBlur={e => { e.currentTarget.style.outline = 'none'; }}
               >
                 <input
                   value={box.label}

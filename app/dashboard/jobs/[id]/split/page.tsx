@@ -173,9 +173,11 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
         {draggable.boxes.map(box => (
           <div
             key={box.id}
+            className="crop-box"
             tabIndex={0}
             role="group"
             aria-label={`Piece: ${box.label || 'unlabeled'}`}
+            aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight"
             style={{
               position: 'absolute',
               left: box.x,
@@ -185,7 +187,6 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
               border: `1px solid ${box.included ? 'var(--accent)' : 'var(--ink-faint)'}`,
               opacity: box.included ? 1 : 0.4,
               cursor: 'move',
-              outline: 'none',
             }}
             onMouseDown={e => draggable.startDrag(box.id, 'move', e.clientX, e.clientY)}
             onKeyDown={e => {
@@ -194,8 +195,6 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
               draggable.updateBox(box.id, patch);
               e.preventDefault();
             }}
-            onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
-            onBlur={e => { e.currentTarget.style.outline = 'none'; }}
           >
             <input
               value={box.label}
