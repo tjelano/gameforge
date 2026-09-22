@@ -111,6 +111,20 @@ async function main() {
     return;
   }
 
+  // The inverse of the above, and just as silent: omitting --system only
+  // makes sense to RESUME an existing thread. If historyFile doesn't exist
+  // either, this is neither a valid fresh Round 1 (no --system given) nor a
+  // valid resume (nothing to resume) -- almost always a caller re-running a
+  // failed Round 1 call without re-adding --system, mistaking it for a
+  // resume. Caught for real: a DeepSeek call timed out before ever writing
+  // history, and a bare retry of the same command would have silently sent
+  // no system prompt at all with no error.
+  if (flag !== "--system" && !existsSync(historyFile)) {
+    console.error(`${historyFile} doesn't exist yet and no --system flag was given -- nothing to resume. Pass --system <system-file> for a fresh Round 1, or check the history-file path if you meant to resume.`);
+    process.exitCode = 2;
+    return;
+  }
+
   let history = [];
   if (existsSync(historyFile)) {
     let historyText;
