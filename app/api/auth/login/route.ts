@@ -16,6 +16,10 @@ const LoginSchema = z.union([
   // is_admin from its own fresh COUNT(*) at insert time, independent of
   // this flag, and that count is guaranteed non-zero whenever force is
   // actually honored (existing.length > 0 is the only case it applies to).
+  // That "guaranteed non-zero" claim also assumes no concurrent user
+  // deletion between the `existing.length` check below and create()'s own
+  // COUNT(*) -- true today because no user-deletion route/feature exists
+  // anywhere in this app; revisit this comment if one is ever added.
   // Not an oversight -- see this task's own notes in the audit-fixes-2 plan
   // for the full reasoning.
   z.object({ name: z.string().min(1), force: z.boolean().optional() }),

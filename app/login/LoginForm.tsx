@@ -20,6 +20,12 @@ export function LoginForm({ users }: { users: UserOption[] }) {
   const [error, setError] = useState<string | null>(null);
   const [addingAccount, setAddingAccount] = useState(false);
 
+  const expiredBanner = expired && (
+    <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
+      Your session expired — pick your name again.
+    </p>
+  );
+
   async function loginAs(userId: string) {
     if (submitting) return;
     setSubmitting(true);
@@ -54,6 +60,11 @@ export function LoginForm({ users }: { users: UserOption[] }) {
         return;
       }
       setPulled(true);
+      // Land back on the (now-refreshed) account list instead of leaving the
+      // create form mounted and submittable -- otherwise a successful pull
+      // that brings in the account the user was looking for still lets them
+      // click Create and make a duplicate without ever seeing the updated list.
+      setAddingAccount(false);
       router.refresh();
     } finally {
       setPulling(false);
@@ -100,11 +111,7 @@ export function LoginForm({ users }: { users: UserOption[] }) {
   if (users.length > 0) {
     return (
       <div>
-        {expired && (
-          <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
-            Your session expired — pick your name again.
-          </p>
-        )}
+        {expiredBanner}
         {users.map(u => (
           <button key={u.id} className="btn" style={{ display: 'block', width: '100%', marginBottom: 8 }} onClick={() => loginAs(u.id)} disabled={submitting}>
             {u.name}
@@ -136,6 +143,7 @@ export function LoginForm({ users }: { users: UserOption[] }) {
 
   return (
     <div>
+      {expiredBanner}
       <p className="page-subtitle">No accounts found on this machine yet.</p>
       <button className="btn" onClick={handlePull} disabled={pulling} style={{ marginBottom: 16 }}>
         {pulling ? 'Pulling…' : 'Pull from git first'}

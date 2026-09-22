@@ -5,15 +5,25 @@ import { LoginForm } from '@/app/login/LoginForm';
 
 let currentSearch = '';
 
+// Next's real useRouter() returns a referentially stable object across
+// renders -- a mock that returns a new object on every call would be less
+// faithful than the real thing (see the same fix in useCurrentUser.test.tsx).
+const pushMock = vi.fn();
+const refreshMock = vi.fn();
+const routerMock = { push: pushMock, refresh: refreshMock };
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => routerMock,
   useSearchParams: () => new URLSearchParams(currentSearch),
 }));
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   currentSearch = '';
+  pushMock.mockClear();
+  refreshMock.mockClear();
 });
 
 describe('LoginForm expired-session banner', () => {
@@ -47,5 +57,21 @@ describe('LoginForm add-account flow', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/auth/login', expect.objectContaining({
       body: JSON.stringify({ name: 'Bob', force: true }),
     })));
+  });
+
+  it('closes the add-account panel after a successful pull, instead of leaving the create form open', async () => {
+    currentSearch = '';
+    const fetchMock = vi.fn().mockResolvedValue({ json: () => Promise.resolve({ success: true }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<LoginForm users={[{ id: 'u1', name: 'Alice' }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add another account' }));
+    expect(screen.getByPlaceholderText('Your name')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /pull from git first/i }));
+
+    await waitFor(() => expect(screen.queryByPlaceholderText('Your name')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Create' })).toBeNull();
   });
 });
