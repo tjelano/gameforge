@@ -7,6 +7,20 @@
 #
 # One-time setup after cloning: git config core.hooksPath .githooks
 
+# Git sets GIT_DIR (and friends) in a hook's own environment so the hook
+# itself always targets the right repo -- but that means every CHILD
+# process this script spawns inherits it too. Several tests here (git-sync
+# tests, resolveConflicts, cleanupOrphanedImages -- see AGENTS.md's
+# Testing note) build and operate on their own REAL temp git repos via
+# simple-git; without clearing GIT_DIR first, their nested git subprocess
+# calls ignore their intended temp cwd and silently target THIS repo's
+# real .git dir instead. Confirmed the hard way: an earlier version of
+# this hook without this line corrupted real branch history (test-fixture
+# commits landing on top of real work, core.bare flipped to true) --
+# surfaced only inside a real `git push`, never when running vitest
+# directly from a plain shell, which has no GIT_DIR to begin with.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 set -e
 
 echo "pre-push: npx tsc --noEmit"
