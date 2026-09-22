@@ -35,9 +35,14 @@ const KNOWN_CHECK_MAPPINGS: Array<{ table: string; column: string; zodValues: re
 ];
 
 // Matches `<col> TEXT ... CHECK (<col> IN ('a', 'b', ...))` -- the exact
-// shape every migration in this project uses for an enum-like column.
+// shape every migration in this project uses for an enum-like column
+// (verified against every current migration: 001, 008, 010, 016, 019).
 // `[^,]` (not `.`) between TEXT and CHECK so it still matches across the
-// newlines SQLite preserves verbatim in sqlite_master.sql.
+// newlines SQLite preserves verbatim in sqlite_master.sql. Known gap: a
+// table-level constraint written as a separate `CHECK (col IN (...))`
+// clause after a comma (rather than inline on the column's own
+// definition) wouldn't match this pattern and would silently pass rather
+// than failing loud -- no migration uses that form today.
 const CHECK_PATTERN = /(\w+)\s+TEXT[^,]*?\bCHECK\s*\(\s*\1\s+IN\s*\(([^)]+)\)\)/gi;
 
 function extractCheckedColumns(createTableSql: string): Map<string, string[]> {
