@@ -6,7 +6,13 @@
 error handling, missing empty/loading states, and accessibility gaps.
 
 **Architecture:** Four independent clusters (A: auth-session UX, B: error handling, C: empty/loading
-states, D: consistency/accessibility). Each cluster's tasks touch disjoint files except where noted.
+states, D: consistency/accessibility). Tasks within and across clusters are meant to run strictly
+sequentially, one subagent at a time (`subagent-driven-development`'s own rule — never dispatch
+implementers in parallel), NOT as independently-parallelizable units. Three files are each touched by
+more than one task, and correctness depends on that sequential order: `app/login/LoginForm.tsx`
+(Tasks 1, 3, 9 — in that order), `app/dashboard/styles/page.tsx` (Tasks 2, 9 — in that order), and
+`app/dashboard/page.tsx` (Tasks 6, 8, 12 — in that order, each scoped to a disjoint part of the file so
+their diffs stay individually reviewable). Every other file is touched by exactly one task.
 
 **Tech Stack:** Next.js 16 App Router, React 19, TypeScript, Zod, better-sqlite3, Vitest +
 @testing-library/react.
@@ -273,9 +279,65 @@ Add the banner as the first child of the `users.length > 0` branch's returned `<
         {users.map(u => (
 ```
 
-- [ ] **Step 6: Write a component test for the banner**
+- [ ] **Step 6: Wrap LoginForm in a Suspense boundary (required by `useSearchParams`)**
 
-Add to `test/useCurrentUser.test.tsx` is wrong file — create a new one, `test/loginForm.test.tsx`:
+Next.js's App Router requires any client component calling `useSearchParams()` to be wrapped in
+`<Suspense>` — without this, `next build` fails with "useSearchParams() should be wrapped in a
+suspense boundary at page /login". `app/login/page.tsx` currently renders `<LoginForm>` directly with
+no Suspense boundary anywhere in its tree. `tsc`/`eslint`/`vitest` do not catch this (the LoginForm
+test mocks `useSearchParams` entirely) — only `next build` does, so this step is required even though
+no test will fail without it.
+
+Current `app/login/page.tsx` (full file):
+```tsx
+import { userService } from '@/lib/services/UserService';
+import { LoginForm } from './LoginForm';
+
+export const dynamic = 'force-dynamic';
+
+export default async function LoginPage() {
+  const users = await userService.getAll();
+  return (
+    <div className="card" style={{ maxWidth: 420 }}>
+      <h1 className="page-title">Who are you?</h1>
+      <LoginForm users={users.map(u => ({ id: u.id, name: u.name }))} />
+    </div>
+  );
+}
+```
+
+Replace with:
+```tsx
+import { Suspense } from 'react';
+import { userService } from '@/lib/services/UserService';
+import { LoginForm } from './LoginForm';
+
+export const dynamic = 'force-dynamic';
+
+export default async function LoginPage() {
+  const users = await userService.getAll();
+  return (
+    <div className="card" style={{ maxWidth: 420 }}>
+      <h1 className="page-title">Who are you?</h1>
+      <Suspense fallback={null}>
+        <LoginForm users={users.map(u => ({ id: u.id, name: u.name }))} />
+      </Suspense>
+    </div>
+  );
+}
+```
+(`fallback={null}` is fine here: `users` is already resolved server-side before `LoginForm` renders at
+all, so `useSearchParams()`'s own client-side hydration is the only thing Suspense is guarding — there
+is no meaningful loading state to show.)
+
+Run: `npx tsc --noEmit` (confirms the file still typechecks; the actual Suspense-boundary requirement
+itself is only enforced by `next build`, which is not part of this plan's per-task gate but is worth
+running once manually — `npx next build` — after this step to confirm no build-time error, since a
+missing Suspense boundary here would otherwise ship silently past every task's automated checks).
+
+- [ ] **Step 7: Write a component test for the banner**
+
+Create `test/loginForm.test.tsx`:
 ```tsx
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -300,23 +362,26 @@ describe('LoginForm expired-session banner', () => {
 });
 ```
 
-- [ ] **Step 7: Run all new tests, then the full suite**
+- [ ] **Step 8: Run all new tests, then the full suite**
 
 Run: `npx vitest run test/useCurrentUser.test.tsx test/loginForm.test.tsx`
 Expected: PASS (4 tests total)
 Run: `npx tsc --noEmit && npx eslint app lib worker.ts && npx vitest run`
 Expected: all clean, no regressions.
 
-- [ ] **Step 8: Manual browser verification**
+- [ ] **Step 9: Manual browser verification**
 
 Start `npm run dev` in this worktree (if not already running), delete/expire a session cookie value in
 devtools while `/dashboard` is open in another tab, navigate, and confirm the redirect to
-`/login?reason=expired` with the banner visible.
+`/login?reason=expired` with the banner visible. Also run `npx next build` once to confirm the Suspense
+boundary added in Step 6 satisfies the build (this is the only point in the plan that actually exercises
+`next build` — worth doing here since Step 6 exists specifically because the per-task automated gate
+can't catch a missing Suspense boundary).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add lib/hooks/useCurrentUser.ts app/login/LoginForm.tsx test/useCurrentUser.test.tsx test/loginForm.test.tsx
+git add lib/hooks/useCurrentUser.ts app/login/LoginForm.tsx app/login/page.tsx test/useCurrentUser.test.tsx test/loginForm.test.tsx
 git commit -m "fix: redirect to /login on a stale session instead of silently degrading"
 ```
 
@@ -1394,26 +1459,70 @@ export const WORKER_LAST_SEEN_SETTING_KEY = 'worker_last_seen';
 export const WORKER_ALIVE_THRESHOLD_MS = 6000;
 ```
 
+**Do not piggyback the heartbeat write on `scheduleNext`/`processJobs`.** `scheduleNext` only
+reschedules itself in its `finally`, AFTER `processJobs()` resolves — so writing the heartbeat at the
+start of that same tick and then awaiting a possibly-long `processJobs()` call would leave the
+heartbeat stale for the entire duration of any job that takes longer than
+`WORKER_ALIVE_THRESHOLD_MS` (6000ms), falsely reporting "not detected" while the worker is actively,
+correctly busy — real generation jobs (Pixellab/Claude API calls) routinely take far longer than 6
+seconds. The heartbeat needs its own timer, independent of how long any individual job takes.
+
 Add to `worker.ts`, near the top imports:
 ```ts
 import { settingsService } from '@/lib/services/SettingsService';
 import { WORKER_LAST_SEEN_SETTING_KEY } from '@/lib/config';
 ```
-Change `scheduleNext`:
+
+Leave `scheduleNext` itself completely unchanged. Instead, add a separate heartbeat function and start
+it alongside `scheduleNext()` in the `isMainModule` block. Current `worker.ts` end (lines 293-305):
 ```ts
-function scheduleNext(): void {
-  setTimeout(async () => {
-    try {
-      await settingsService.set(WORKER_LAST_SEEN_SETTING_KEY, String(Date.now()));
-      await processJobs();
-    } catch (error) {
-      console.error('❌ Worker tick failed:', error);
-    } finally {
-      scheduleNext();
-    }
-  }, POLL_INTERVAL_MS);
+// Only run the actual worker loop (lock file, signal handlers, polling)
+// when this file is the process entry point (`tsx worker.ts`) — not when
+// a test imports processJob() to exercise it directly.
+const isMainModule = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) {
+  acquireLock();
+  process.on('exit', releaseLock);
+  process.on('SIGINT', () => { releaseLock(); process.exit(0); });
+  process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
+
+  console.log(`🚀 GameForge worker started (pid ${process.pid}, batch size ${WORKER_BATCH_SIZE}).`);
+  scheduleNext();
 }
 ```
+Replace with:
+```ts
+// Independent of scheduleNext/processJobs on purpose -- see the heartbeat
+// note above Task 6's worker.ts changes in the plan this came from: a
+// heartbeat gated behind a slow job's completion would falsely read "dead"
+// while the worker is busy with real, long-running work.
+function startHeartbeat(): void {
+  setInterval(() => {
+    settingsService.set(WORKER_LAST_SEEN_SETTING_KEY, String(Date.now())).catch(error => {
+      console.error('❌ Worker heartbeat write failed:', error);
+    });
+  }, POLL_INTERVAL_MS);
+}
+
+// Only run the actual worker loop (lock file, signal handlers, polling)
+// when this file is the process entry point (`tsx worker.ts`) — not when
+// a test imports processJob() to exercise it directly.
+const isMainModule = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) {
+  acquireLock();
+  process.on('exit', releaseLock);
+  process.on('SIGINT', () => { releaseLock(); process.exit(0); });
+  process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
+
+  console.log(`🚀 GameForge worker started (pid ${process.pid}, batch size ${WORKER_BATCH_SIZE}).`);
+  startHeartbeat();
+  scheduleNext();
+}
+```
+(The heartbeat's own `.catch()` means a transient `settings` write failure never affects job
+processing — the two are now fully independent, which also resolves the original design's other flaw:
+a heartbeat-write failure no longer aborts that tick's `processJobs()` call, since they're not in the
+same try/catch anymore.)
 
 Create `app/api/dashboard/worker-status/route.ts` (matching `app/api/dashboard/activity/route.ts`'s
 sibling shape — no auth check, same as that file):
@@ -1618,40 +1727,89 @@ Expected: FAIL — the form renders unconditionally today, so `queryByRole` find
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `app/dashboard/export/page.tsx`, replace:
+Replace `app/dashboard/export/page.tsx` in full:
 ```tsx
+'use client';
+
+import { useState } from 'react';
+import { useStyles } from '@/lib/hooks/useStyles';
+import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
+
+export default function ExportPage() {
+  const { styles, loading: stylesLoading, error: stylesError } = useStyles();
+  const [selectedStyleId, setSelectedStyleId] = useState('');
+  const styleId = selectedStyleId || styles[0]?.id || '';
+  const [subdir, setSubdir] = useState('godot');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ exported: number; skipped: number; targetDir: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleExport(e: React.FormEvent) {
+    e.preventDefault();
+    if (running || !styleId || !subdir.trim()) return;
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ styleId, subdir: subdir.trim() }),
+      });
+      const body = await res.json();
+      if (body.success) {
+        setResult(body.data);
+      } else {
+        setError(body.error ?? 'Export failed.');
+      }
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <>
+      <h1 className="page-title">Export</h1>
+      <p className="page-subtitle">
+        Copy one Style Bible&apos;s active asset images into <code>storage/exports/</code> for your Godot
+        project (2D only for V1).
+      </p>
+
+      {!stylesLoading && !stylesError && styles.length === 0 ? (
+        <div className="empty-state">
+          No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page before exporting.
+        </div>
+      ) : (
         <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
           <StyleBiblePicker styles={styles} value={styleId} onChange={setSelectedStyleId} />
-```
-with:
-```tsx
-        {!stylesLoading && !stylesError && styles.length === 0 ? (
-          <div className="empty-state">
-            No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page before exporting.
+
+          {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{stylesError}</p>}
+
+          <div className="field">
+            <label htmlFor="subdir">Export folder name</label>
+            <input id="subdir" value={subdir} onChange={e => setSubdir(e.target.value)} placeholder="godot" />
           </div>
-        ) : (
-        <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
-          <StyleBiblePicker styles={styles} value={styleId} onChange={setSelectedStyleId} />
-```
-and close the added conditional right after the existing form's closing `</form>` tag, changing:
-```tsx
-        )}
-      </form>
+
+          <button className="btn btn-primary" type="submit" disabled={running || !styleId || !subdir.trim() || stylesLoading}>
+            {running ? 'Exporting…' : 'Export to Godot'}
+          </button>
+
+          {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{error}</p>}
+
+          {result && (
+            <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 14 }}>
+              Exported {result.exported} asset{result.exported === 1 ? '' : 's'}
+              {result.skipped > 0 ? ` (${result.skipped} skipped)` : ''} to <code>{result.targetDir}</code>.
+            </p>
+          )}
+        </form>
+      )}
     </>
   );
 }
 ```
-to:
-```tsx
-        )}
-      </form>
-        )}
-    </>
-  );
-}
-```
-(Match indentation to the rest of the file when actually editing — the key structural change is
-wrapping the existing `<form>...</form>` block in the new ternary's else-branch parens.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1810,21 +1968,28 @@ afterEach(() => {
 });
 
 describe('Input labeling', () => {
-  it('New Style Bible name input has an accessible name', async () => {
+  // getByLabelText, not getByRole('textbox', {name}) -- Testing Library's
+  // accessible-name computation falls back to the placeholder attribute for
+  // an unlabeled text input, so a getByRole name-match could pass BEFORE
+  // the fix (a false-green RED step). getByLabelText specifically requires
+  // a real <label> association (htmlFor, aria-labelledby, or wrapping) and
+  // does not fall back to placeholder, so it only passes once the label
+  // actually exists.
+  it('New Style Bible name input has a real label', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: () => Promise.resolve({ success: true, data: [] }) }));
     render(<StylesPage />);
-    expect(await screen.findByRole('textbox', { name: /new style bible name/i })).toBeTruthy();
+    expect(await screen.findByLabelText('New Style Bible name')).toBeTruthy();
   });
 
-  it('Inspo search input has an accessible name', async () => {
+  it('Inspo search input has a real label', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: () => Promise.resolve({ success: true, data: [] }) }));
     render(<StylesPage />);
-    expect(await screen.findByRole('textbox', { name: 'Inspo search' })).toBeTruthy();
+    expect(await screen.findByLabelText('Inspo search')).toBeTruthy();
   });
 
-  it('LoginForm "Your name" input has an accessible name', () => {
+  it('LoginForm "Your name" input has a real label', () => {
     render(<LoginForm users={[]} />);
-    expect(screen.getByRole('textbox', { name: /your name/i })).toBeTruthy();
+    expect(screen.getByLabelText('Your name')).toBeTruthy();
   });
 });
 ```
@@ -1832,9 +1997,8 @@ describe('Input labeling', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run test/inputLabels.test.tsx`
-Expected: FAIL on the first two assertions (`getByRole('textbox', {name: ...})` finds nothing since
-these inputs currently have no accessible name — placeholder text isn't a reliable accessible-name
-source across Testing Library's role queries).
+Expected: FAIL on all 3 — `getByLabelText(...)` finds nothing since none of these three inputs has a
+real `<label>` yet.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -2098,9 +2262,11 @@ Expected: all clean.
 
 - [ ] **Step 6: Manual browser verification**
 
-Open the apply-preset modal, confirm focus lands on Cancel, press Tab a few times (should not escape
-into the page behind), press Escape (modal closes, focus returns to the Apply button that opened it).
-Repeat for Drive's move-file modal.
+Open the apply-preset modal, confirm focus lands on Cancel, press Escape (modal closes, focus returns
+to the Apply button that opened it). This fix adds initial-focus placement, `role="dialog"`, and
+Escape-to-close — it does NOT add a full focus trap, so Tab can still reach elements behind the modal;
+that's consistent with the spec's actual scope, not a gap to check for here. Repeat for Drive's
+move-file modal.
 
 - [ ] **Step 7: Commit**
 
@@ -2114,96 +2280,231 @@ git commit -m "fix: add dialog semantics, Escape-to-close, and focus management 
 ### Task 11: Keyboard support for the sprite-sheet crop-box editor
 
 **Files:**
+- Modify: `lib/hooks/useDraggableBoxes.ts`
 - Modify: `app/dashboard/jobs/[id]/split/page.tsx`
 - Modify: `app/dashboard/ui-sheets/page.tsx`
 - Test: `test/draggableBoxKeyboard.test.tsx` (create)
 
 **Interfaces:**
-- Consumes: `useDraggableBoxes`'s `updateBox(id, patch)` (existing, unchanged — `lib/hooks/useDraggableBoxes.ts` itself is not modified by this task).
-- Produces: nothing later tasks depend on.
+- Consumes: nothing new.
+- Produces: `boxKeyboardDelta(key: string, shiftKey: boolean, box: {w:number,h:number}) =>
+  Partial<{x,y,w,h}> | null` and `MIN_SIZE` (both newly exported from `lib/hooks/useDraggableBoxes.ts`)
+  — both real consumer pages import and call this exact function from their `onKeyDown` handlers, and
+  the test exercises this same exported function directly, not a reimplementation of it. This is a
+  deliberate change from treating this as pointer-vs-keyboard-are-separate-concerns: a keyboard input
+  handler is real interaction logic, not static JSX, and this codebase's own bar for extracting a
+  shared helper ("on sight for safety-critical logic," `AGENTS.md`) is better served by one tested
+  function than by two hand-copied `onKeyDown` blocks that could silently drift apart.
+
+Current `lib/hooks/useDraggableBoxes.ts` (full file):
+```ts
+'use client';
+
+import { useCallback, useRef, useState } from 'react';
+
+interface Box {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const MIN_SIZE = 8;
+
+export function useDraggableBoxes<T extends Box>(initial: T[]) {
+  const [boxes, setBoxes] = useState<T[]>(initial);
+  const dragState = useRef<{ id: string; mode: 'move' | 'resize'; startX: number; startY: number; startBox: Box } | null>(null);
+
+  const updateBox = useCallback((id: string, patch: Partial<T>) => {
+    setBoxes(prev => prev.map(b => (b.id === id ? { ...b, ...patch } : b)));
+  }, []);
+
+  const addBox = useCallback((box: T) => {
+    setBoxes(prev => [...prev, box]);
+  }, []);
+
+  const removeBox = useCallback((id: string) => {
+    setBoxes(prev => prev.filter(b => b.id !== id));
+  }, []);
+
+  const startDrag = useCallback((id: string, mode: 'move' | 'resize', clientX: number, clientY: number) => {
+    const box = boxes.find(b => b.id === id);
+    if (!box) return;
+    dragState.current = { id, mode, startX: clientX, startY: clientY, startBox: { ...box } };
+
+    function onMove(e: MouseEvent) {
+      const state = dragState.current;
+      if (!state) return;
+      const dx = e.clientX - state.startX;
+      const dy = e.clientY - state.startY;
+
+      if (state.mode === 'move') {
+        updateBox(state.id, { x: state.startBox.x + dx, y: state.startBox.y + dy } as Partial<T>);
+      } else {
+        updateBox(state.id, {
+          w: Math.max(MIN_SIZE, state.startBox.w + dx),
+          h: Math.max(MIN_SIZE, state.startBox.h + dy),
+        } as Partial<T>);
+      }
+    }
+
+    function onUp() {
+      dragState.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [boxes, updateBox]);
+
+  return { boxes, addBox, updateBox, removeBox, startDrag };
+}
+```
 
 - [ ] **Step 1: Write the failing test**
 
 Create `test/draggableBoxKeyboard.test.tsx`:
 ```tsx
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { renderHook, act } from '@testing-library/react';
-import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
+import { describe, it, expect } from 'vitest';
+import { boxKeyboardDelta, MIN_SIZE } from '@/lib/hooks/useDraggableBoxes';
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
-
-// Testing the keyboard behavior through a minimal harness rather than the full
-// split/page.tsx or ui-sheets/page.tsx (both need heavy image-loading mocks
-// unrelated to this fix) — this harness renders exactly the JSX shape both
-// pages use for a single box, wired to the real hook.
-function BoxHarness() {
-  const { boxes, addBox, updateBox } = useDraggableBoxes<{ id: string; x: number; y: number; w: number; h: number; label: string }>([
-    { id: 'b1', x: 10, y: 10, w: 20, h: 20, label: 'piece' },
-  ]);
-  const box = boxes[0];
-  return (
-    <div
-      tabIndex={0}
-      role="group"
-      aria-label={`Piece: ${box.label}`}
-      data-testid="box"
-      onKeyDown={e => {
-        const step = 4;
-        if (e.key === 'ArrowRight') updateBox(box.id, e.shiftKey ? { w: Math.max(8, box.w + step) } as any : { x: box.x + step } as any);
-        if (e.key === 'ArrowLeft') updateBox(box.id, e.shiftKey ? { w: Math.max(8, box.w - step) } as any : { x: box.x - step } as any);
-        if (e.key === 'ArrowDown') updateBox(box.id, e.shiftKey ? { h: Math.max(8, box.h + step) } as any : { y: box.y + step } as any);
-        if (e.key === 'ArrowUp') updateBox(box.id, e.shiftKey ? { h: Math.max(8, box.h - step) } as any : { y: box.y - step } as any);
-      }}
-      style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
-    />
-  );
-}
-
-describe('Draggable box keyboard support', () => {
-  it('is focusable via tabIndex and has a group role with a label', () => {
-    render(<BoxHarness />);
-    const box = screen.getByTestId('box');
-    expect(box.getAttribute('tabindex')).toBe('0');
-    expect(box.getAttribute('role')).toBe('group');
-    expect(box.getAttribute('aria-label')).toBe('Piece: piece');
-  });
+describe('boxKeyboardDelta', () => {
+  const box = { w: 20, h: 20 };
 
   it('moves right by 4px on ArrowRight', () => {
-    render(<BoxHarness />);
-    const box = screen.getByTestId('box');
-    fireEvent.keyDown(box, { key: 'ArrowRight' });
-    expect(box.style.left).toBe('14px');
+    expect(boxKeyboardDelta('ArrowRight', false, box)).toEqual({ x: 4 });
+  });
+
+  it('moves left by 4px on ArrowLeft', () => {
+    expect(boxKeyboardDelta('ArrowLeft', false, box)).toEqual({ x: -4 });
+  });
+
+  it('moves down/up by 4px on ArrowDown/ArrowUp', () => {
+    expect(boxKeyboardDelta('ArrowDown', false, box)).toEqual({ y: 4 });
+    expect(boxKeyboardDelta('ArrowUp', false, box)).toEqual({ y: -4 });
   });
 
   it('grows width by 4px on Shift+ArrowRight', () => {
-    render(<BoxHarness />);
-    const box = screen.getByTestId('box');
-    fireEvent.keyDown(box, { key: 'ArrowRight', shiftKey: true });
-    expect(box.style.width).toBe('24px');
+    expect(boxKeyboardDelta('ArrowRight', true, box)).toEqual({ w: 24 });
+  });
+
+  it('shrinks width on Shift+ArrowLeft, floored at MIN_SIZE', () => {
+    expect(boxKeyboardDelta('ArrowLeft', true, { w: 10, h: 20 })).toEqual({ w: MIN_SIZE });
+  });
+
+  it('returns null for an unhandled key', () => {
+    expect(boxKeyboardDelta('Enter', false, box)).toBeNull();
   });
 });
 ```
-(This harness proves the interaction shape works against the real hook; Step 3 applies the identical
-`onKeyDown` logic verbatim into both real consumer pages, which is where the manual browser check in
-Step 5 provides the end-to-end confirmation the harness can't.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run test/draggableBoxKeyboard.test.tsx`
-Expected: FAIL — `BoxHarness` as scaffolded above already includes the fix, so intentionally strip the
-`tabIndex`/`role`/`aria-label`/`onKeyDown` props from `BoxHarness` first (leave only the bare
-`style={{...}}` div), confirm all 3 tests fail, THEN restore them in Step 3 to make it pass. (This
-inverts the usual RED step slightly since the harness IS the implementation for test purposes — the
-important thing is watching the assertions fail against the un-fixed shape first.)
+Expected: FAIL — `boxKeyboardDelta` and the exported `MIN_SIZE` don't exist yet (import error).
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `app/dashboard/jobs/[id]/split/page.tsx`, replace the box wrapper `<div>`:
+Replace `lib/hooks/useDraggableBoxes.ts` in full:
+```ts
+'use client';
+
+import { useCallback, useRef, useState } from 'react';
+
+interface Box {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export const MIN_SIZE = 8;
+const KEYBOARD_STEP = 4;
+
+// Pure and exported so both real consumer pages (split/page.tsx,
+// ui-sheets/page.tsx) call this exact function from their onKeyDown
+// handlers instead of each hand-copying the same logic, and so a test can
+// exercise the real behavior directly rather than a reimplementation of it.
+export function boxKeyboardDelta(
+  key: string,
+  shiftKey: boolean,
+  box: { w: number; h: number },
+): { x: number } | { y: number } | { w: number } | { h: number } | null {
+  if (key === 'ArrowRight') return shiftKey ? { w: Math.max(MIN_SIZE, box.w + KEYBOARD_STEP) } : { x: KEYBOARD_STEP };
+  if (key === 'ArrowLeft') return shiftKey ? { w: Math.max(MIN_SIZE, box.w - KEYBOARD_STEP) } : { x: -KEYBOARD_STEP };
+  if (key === 'ArrowDown') return shiftKey ? { h: Math.max(MIN_SIZE, box.h + KEYBOARD_STEP) } : { y: KEYBOARD_STEP };
+  if (key === 'ArrowUp') return shiftKey ? { h: Math.max(MIN_SIZE, box.h - KEYBOARD_STEP) } : { y: -KEYBOARD_STEP };
+  return null;
+}
+
+export function useDraggableBoxes<T extends Box>(initial: T[]) {
+  const [boxes, setBoxes] = useState<T[]>(initial);
+  const dragState = useRef<{ id: string; mode: 'move' | 'resize'; startX: number; startY: number; startBox: Box } | null>(null);
+
+  const updateBox = useCallback((id: string, patch: Partial<T>) => {
+    setBoxes(prev => prev.map(b => (b.id === id ? { ...b, ...patch } : b)));
+  }, []);
+
+  const addBox = useCallback((box: T) => {
+    setBoxes(prev => [...prev, box]);
+  }, []);
+
+  const removeBox = useCallback((id: string) => {
+    setBoxes(prev => prev.filter(b => b.id !== id));
+  }, []);
+
+  const startDrag = useCallback((id: string, mode: 'move' | 'resize', clientX: number, clientY: number) => {
+    const box = boxes.find(b => b.id === id);
+    if (!box) return;
+    dragState.current = { id, mode, startX: clientX, startY: clientY, startBox: { ...box } };
+
+    function onMove(e: MouseEvent) {
+      const state = dragState.current;
+      if (!state) return;
+      const dx = e.clientX - state.startX;
+      const dy = e.clientY - state.startY;
+
+      if (state.mode === 'move') {
+        updateBox(state.id, { x: state.startBox.x + dx, y: state.startBox.y + dy } as Partial<T>);
+      } else {
+        updateBox(state.id, {
+          w: Math.max(MIN_SIZE, state.startBox.w + dx),
+          h: Math.max(MIN_SIZE, state.startBox.h + dy),
+        } as Partial<T>);
+      }
+    }
+
+    function onUp() {
+      dragState.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [boxes, updateBox]);
+
+  return { boxes, addBox, updateBox, removeBox, startDrag };
+}
+```
+Note: `boxKeyboardDelta`'s ArrowRight/Down "move" branches return a fixed `+KEYBOARD_STEP` delta, not
+`box.x + KEYBOARD_STEP` — the caller (Step 4 below) applies it as `x: box.x + delta.x`, keeping the
+pure function's contract as "how far and which direction," independent of the box's current absolute
+position. This matters for the test above: `{ x: 4 }` is the delta, not the new absolute x.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run test/draggableBoxKeyboard.test.tsx`
+Expected: PASS (6 tests)
+
+- [ ] **Step 5: Wire the real function into both consumer pages**
+
+In `app/dashboard/jobs/[id]/split/page.tsx`, add `boxKeyboardDelta` to the existing
+`useDraggableBoxes` import, then replace the box wrapper `<div>`:
 ```tsx
             <div
               key={box.id}
@@ -2240,13 +2541,11 @@ with:
               }}
               onMouseDown={e => draggable.startDrag(box.id, 'move', e.clientX, e.clientY)}
               onKeyDown={e => {
-                const step = 4;
-                const MIN = 8;
-                if (e.key === 'ArrowRight') draggable.updateBox(box.id, e.shiftKey ? { w: Math.max(MIN, box.w + step) } : { x: box.x + step });
-                else if (e.key === 'ArrowLeft') draggable.updateBox(box.id, e.shiftKey ? { w: Math.max(MIN, box.w - step) } : { x: box.x - step });
-                else if (e.key === 'ArrowDown') draggable.updateBox(box.id, e.shiftKey ? { h: Math.max(MIN, box.h + step) } : { y: box.y + step });
-                else if (e.key === 'ArrowUp') draggable.updateBox(box.id, e.shiftKey ? { h: Math.max(MIN, box.h - step) } : { y: box.y - step });
-                else return;
+                const delta = boxKeyboardDelta(e.key, e.shiftKey, box);
+                if (!delta) return;
+                if ('x' in delta) draggable.updateBox(box.id, { x: box.x + delta.x });
+                else if ('y' in delta) draggable.updateBox(box.id, { y: box.y + delta.y });
+                else draggable.updateBox(box.id, delta);
                 e.preventDefault();
               }}
               onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
@@ -2254,8 +2553,9 @@ with:
             >
 ```
 
-In `app/dashboard/ui-sheets/page.tsx`, apply the identical shape (this file destructures `updateBox`
-directly, not via a `draggable.` object):
+In `app/dashboard/ui-sheets/page.tsx`, add `boxKeyboardDelta` to its existing `useDraggableBoxes`
+import (this file destructures `updateBox` directly, not via a `draggable.` object), then apply the
+identical shape:
 ```tsx
                 <div
                   key={box.id}
@@ -2275,13 +2575,11 @@ directly, not via a `draggable.` object):
                   }}
                   onMouseDown={e => startDrag(box.id, 'move', e.clientX, e.clientY)}
                   onKeyDown={e => {
-                    const step = 4;
-                    const MIN = 8;
-                    if (e.key === 'ArrowRight') updateBox(box.id, e.shiftKey ? { w: Math.max(MIN, box.w + step) } : { x: box.x + step });
-                    else if (e.key === 'ArrowLeft') updateBox(box.id, e.shiftKey ? { w: Math.max(MIN, box.w - step) } : { x: box.x - step });
-                    else if (e.key === 'ArrowDown') updateBox(box.id, e.shiftKey ? { h: Math.max(MIN, box.h + step) } : { y: box.y + step });
-                    else if (e.key === 'ArrowUp') updateBox(box.id, e.shiftKey ? { h: Math.max(MIN, box.h - step) } : { y: box.y - step });
-                    else return;
+                    const delta = boxKeyboardDelta(e.key, e.shiftKey, box);
+                    if (!delta) return;
+                    if ('x' in delta) updateBox(box.id, { x: box.x + delta.x });
+                    else if ('y' in delta) updateBox(box.id, { y: box.y + delta.y });
+                    else updateBox(box.id, delta);
                     e.preventDefault();
                   }}
                   onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
@@ -2289,27 +2587,22 @@ directly, not via a `draggable.` object):
                 >
 ```
 
-Then restore the harness in the test file to match (Step 2's temporarily-stripped version, put back to
-its originally-written form).
+- [ ] **Step 6: Run full suite**
 
-- [ ] **Step 4: Run test to verify it passes, then full suite**
-
-Run: `npx vitest run test/draggableBoxKeyboard.test.tsx`
-Expected: PASS (3 tests)
 Run: `npx tsc --noEmit && npx eslint app lib worker.ts && npx vitest run`
 Expected: all clean, no regressions in `test/pieceShapes.test.ts` or other split/ui-sheets-adjacent
 tests.
 
-- [ ] **Step 5: Manual browser verification**
+- [ ] **Step 7: Manual browser verification**
 
 On the "Split into elements" page, Tab to a piece box, confirm a visible focus outline appears, use
 arrow keys to move it and Shift+arrow keys to resize it, confirm the label input and resize handle
 inside the box still work with mouse as before. Repeat on the UI Sheets page.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add "app/dashboard/jobs/[id]/split/page.tsx" app/dashboard/ui-sheets/page.tsx test/draggableBoxKeyboard.test.tsx
+git add lib/hooks/useDraggableBoxes.ts "app/dashboard/jobs/[id]/split/page.tsx" app/dashboard/ui-sheets/page.tsx test/draggableBoxKeyboard.test.tsx
 git commit -m "fix: add keyboard move/resize support to the sprite-sheet crop-box editor"
 ```
 
@@ -2353,7 +2646,15 @@ describe('Overview activity row links', () => {
           ],
         }) });
       }
-      return Promise.resolve({ json: () => Promise.resolve({ success: true, data: {} }) });
+      // Covers both /api/context and /api/dashboard/worker-status with one
+      // shape that satisfies both consumers -- context?.styles.length (etc.)
+      // in the real component would throw on {} here, since {}.styles is
+      // undefined; this must be a realistic ProjectContextSummary-shaped
+      // object, not an empty one.
+      return Promise.resolve({ json: () => Promise.resolve({
+        success: true,
+        data: { styles: [], totalActiveAssets: 0, inFlightJobs: 0, alive: false },
+      }) });
     }));
 
     render(<OverviewPage />);
