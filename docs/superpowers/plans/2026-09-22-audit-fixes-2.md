@@ -106,7 +106,7 @@ Create `test/useCurrentUser.test.tsx`:
 ```tsx
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 const pushMock = vi.fn();
@@ -337,25 +337,33 @@ missing Suspense boundary here would otherwise ship silently past every task's a
 
 - [ ] **Step 7: Write a component test for the banner**
 
-Create `test/loginForm.test.tsx`:
+Create `test/loginForm.test.tsx`. `useSearchParams` is mocked as a mutable per-test value (not a fixed
+`'reason=expired'` literal) — Task 3 extends this same file with a test that needs `expired === false`
+so the "+Add another account" button renders at all, so a hardcoded module-level `'reason=expired'`
+would break that later test by hiding the exact button it clicks (mirrors how Task 4's test file already
+handles `usePathname` as a mutable `let` for the same reason):
 ```tsx
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { LoginForm } from '@/app/login/LoginForm';
 
+let currentSearch = '';
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams('reason=expired'),
+  useSearchParams: () => new URLSearchParams(currentSearch),
 }));
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  currentSearch = '';
 });
 
 describe('LoginForm expired-session banner', () => {
   it('shows the expired banner when ?reason=expired is present and accounts exist', () => {
+    currentSearch = 'reason=expired';
     render(<LoginForm users={[{ id: 'u1', name: 'Alice' }]} />);
     expect(screen.getByText(/your session expired/i)).toBeTruthy();
   });
@@ -733,6 +741,16 @@ In `app/api/auth/login/route.ts`, change the schema:
 ```ts
 const LoginSchema = z.union([
   z.object({ userId: z.string().min(1) }),
+  // force is a deliberate, UI-mediated bypass of the 403 below -- only the
+  // "+Add another account" flow (LoginForm, reachable only once real
+  // accounts already exist and are visible on screen) sends it, and only
+  // after offering the same "Pull from git first" choice the guard exists
+  // to encourage. It cannot grant admin: UserService.create() derives
+  // is_admin from its own fresh COUNT(*) at insert time, independent of
+  // this flag, and that count is guaranteed non-zero whenever force is
+  // actually honored (existing.length > 0 is the only case it applies to).
+  // Not an oversight -- see this task's own notes in the audit-fixes-2 plan
+  // for the full reasoning.
   z.object({ name: z.string().min(1), force: z.boolean().optional() }),
 ]);
 ```
@@ -930,6 +948,8 @@ this doesn't produce a lint/type issue with `error` being read but not always di
 Add to `test/loginForm.test.tsx` (from Task 1):
 ```tsx
   it('reveals an add-account form when "+ Add another account" is clicked, and force:true is sent', async () => {
+    currentSearch = ''; // explicit, not relying on afterEach's reset -- this test needs
+    // expired === false so the button it clicks actually renders (see this file's mock above).
     const fetchMock = vi.fn().mockResolvedValue({ json: () => Promise.resolve({ success: true, data: { id: 'u2', name: 'Bob', isAdmin: false } }) });
     vi.stubGlobal('fetch', fetchMock);
 
