@@ -22,4 +22,10 @@ describe('LoginForm expired-session banner', () => {
     render(<LoginForm users={[{ id: 'u1', name: 'Alice' }]} />);
     expect(screen.getByText(/your session expired/i)).toBeTruthy();
   });
+
+  it('does not show the expired banner when reason=expired is absent', () => {
+    currentSearch = '';
+    render(<LoginForm users={[{ id: 'u1', name: 'Alice' }]} />);
+    expect(screen.queryByText(/your session expired/i)).toBeNull();
+  });
 });

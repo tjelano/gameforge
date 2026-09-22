@@ -82,14 +82,16 @@ export function LoginForm({ users }: { users: UserOption[] }) {
     }
   }
 
+  const expiredBanner = expired && (
+    <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
+      Your session expired — pick your name again.
+    </p>
+  );
+
   if (users.length > 0) {
     return (
       <div>
-        {expired && (
-          <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 12 }}>
-            Your session expired — pick your name again.
-          </p>
-        )}
+        {expiredBanner}
         {users.map(u => (
           <button key={u.id} className="btn" style={{ display: 'block', width: '100%', marginBottom: 8 }} onClick={() => loginAs(u.id)} disabled={submitting}>
             {u.name}
@@ -102,6 +104,7 @@ export function LoginForm({ users }: { users: UserOption[] }) {
 
   return (
     <div>
+      {expiredBanner}
       <p className="page-subtitle">No accounts found on this machine yet.</p>
       <button className="btn" onClick={handlePull} disabled={pulling} style={{ marginBottom: 16 }}>
         {pulling ? 'Pulling…' : 'Pull from git first'}

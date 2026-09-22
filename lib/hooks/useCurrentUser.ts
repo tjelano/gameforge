@@ -26,14 +26,21 @@ export function useCurrentUser() {
         if (ignore) return;
         if (body.success && body.data) {
           setUser(body.data);
-        } else if (pathname.startsWith('/dashboard')) {
+        } else if (body.success && body.data === null && pathname.startsWith('/dashboard')) {
           // A session cookie can pass proxy.ts's presence-only check but still
           // fail to resolve to a real user (expired, or the user was deleted) —
           // proxy.ts deliberately never validates against the DB (see its own
           // header comment), so this is the one place that gap gets closed.
           // /login itself is excluded: a null user there is the normal,
           // expected state, not a session that went stale.
-          router.push('/login?reason=expired');
+          //
+          // Only `success: true, data: null` counts as that definitive "no user"
+          // signal. `success: false` is the route's catch-block response for a
+          // transient server error (see app/api/auth/me/route.ts) — not proof the
+          // session is stale, so it must not bounce a possibly-still-valid user
+          // to the login screen. Same non-redirect treatment as a thrown fetch
+          // error below.
+          router.replace('/login?reason=expired');
         }
       } catch {
         // Purely informational — a failed fetch just means no identity shows.
