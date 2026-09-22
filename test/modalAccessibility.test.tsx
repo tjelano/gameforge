@@ -29,8 +29,11 @@ describe('Apply-preset modal accessibility', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Apply preset' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    expect(document.activeElement).toBe(cancelButton);
 
-    fireEvent.keyDown(dialog, { key: 'Escape' });
+    fireEvent.keyDown(cancelButton, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(applyButton);
   });
 });

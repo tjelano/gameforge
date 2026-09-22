@@ -25,8 +25,10 @@ export default function PresetsPage() {
 
   useEffect(() => {
     if (applyingId) {
-      applyTriggerRef.current = document.activeElement as HTMLElement;
       cancelButtonRef.current?.focus();
+      const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setApplyingId(null); };
+      document.addEventListener('keydown', onKeyDown);
+      return () => document.removeEventListener('keydown', onKeyDown);
     } else {
       applyTriggerRef.current?.focus();
     }
@@ -143,7 +145,8 @@ export default function PresetsPage() {
     };
   }
 
-  function openApply(presetId: string) {
+  function openApply(presetId: string, trigger: HTMLElement) {
+    applyTriggerRef.current = trigger;
     setApplyingId(presetId);
     setApplyMode('new');
     setApplyNewName('');
@@ -227,7 +230,7 @@ export default function PresetsPage() {
                   <span className="badge">{components.length} component{components.length === 1 ? '' : 's'}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-primary" onClick={() => openApply(preset.id)}>Apply</button>
+                  <button className="btn btn-primary" onClick={e => openApply(preset.id, e.currentTarget)}>Apply</button>
                   <button className="btn" onClick={() => setEditingId(preset.id)}>Edit</button>
                   <button
                     className="btn"
@@ -248,7 +251,6 @@ export default function PresetsPage() {
           role="dialog"
           aria-modal="true"
           aria-label="Apply preset"
-          onKeyDown={e => { if (e.key === 'Escape') setApplyingId(null); }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
         >
           <div className="card" style={{ width: 420 }}>

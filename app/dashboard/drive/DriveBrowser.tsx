@@ -50,10 +50,15 @@ export function DriveBrowser({
 
   useEffect(() => {
     if (movingItem) {
-      moveTriggerRef.current = document.activeElement as HTMLElement;
       moveCancelButtonRef.current?.focus();
+      const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setMovingItem(null); };
+      document.addEventListener('keydown', onKeyDown);
+      return () => document.removeEventListener('keydown', onKeyDown);
     } else {
-      moveTriggerRef.current?.focus();
+      if (moveTriggerRef.current?.isConnected) {
+        moveTriggerRef.current.focus();
+      }
+      moveTriggerRef.current = null;
     }
   }, [movingItem]);
 
@@ -327,7 +332,7 @@ export function DriveBrowser({
                     <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} disabled={isBusy} onClick={() => { setRenamingId(item.id); setRenameValue(item.name); }}>
                       Rename
                     </button>
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} disabled={isBusy} onClick={() => setMovingItem(item)}>
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} disabled={isBusy} onClick={e => { moveTriggerRef.current = e.currentTarget; setMovingItem(item); }}>
                       Move
                     </button>
                     <button className="btn" style={{ fontSize: 11, padding: '2px 6px', color: 'var(--reject)' }} disabled={isBusy} onClick={() => handleTrash(item.id)}>
@@ -346,7 +351,6 @@ export function DriveBrowser({
           role="dialog"
           aria-modal="true"
           aria-label={`Move ${movingItem.name}`}
-          onKeyDown={e => { if (e.key === 'Escape') setMovingItem(null); }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
         >
           <div className="card" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
