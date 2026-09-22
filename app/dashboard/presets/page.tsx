@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Preset, Style } from '@/lib/database/schema';
 import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
@@ -20,6 +20,17 @@ export default function PresetsPage() {
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [styles, setStyles] = useState<Style[]>([]);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const applyTriggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (applyingId) {
+      applyTriggerRef.current = document.activeElement as HTMLElement;
+      cancelButtonRef.current?.focus();
+    } else {
+      applyTriggerRef.current?.focus();
+    }
+  }, [applyingId]);
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/presets');
@@ -233,11 +244,17 @@ export default function PresetsPage() {
       )}
 
       {applyingId && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Apply preset"
+          onKeyDown={e => { if (e.key === 'Escape') setApplyingId(null); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+        >
           <div className="card" style={{ width: 420 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <strong>Apply preset</strong>
-              <button className="btn" onClick={() => setApplyingId(null)}>Cancel</button>
+              <button className="btn" ref={cancelButtonRef} onClick={() => setApplyingId(null)}>Cancel</button>
             </div>
             <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
               <label>

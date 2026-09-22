@@ -45,6 +45,17 @@ export function DriveBrowser({
   const [movingItem, setMovingItem] = useState<DriveFile | null>(null);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const moveCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const moveTriggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (movingItem) {
+      moveTriggerRef.current = document.activeElement as HTMLElement;
+      moveCancelButtonRef.current?.focus();
+    } else {
+      moveTriggerRef.current?.focus();
+    }
+  }, [movingItem]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -331,11 +342,17 @@ export function DriveBrowser({
       )}
 
       {movingItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Move ${movingItem.name}`}
+          onKeyDown={e => { if (e.key === 'Escape') setMovingItem(null); }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+        >
           <div className="card" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <strong>Move &quot;{movingItem.name}&quot;</strong>
-              <button className="btn" onClick={() => setMovingItem(null)}>Cancel</button>
+              <button className="btn" ref={moveCancelButtonRef} onClick={() => setMovingItem(null)}>Cancel</button>
             </div>
             <DriveBrowser selectMode onSelectFolder={handleMoveHere} selectBusy={busyItemId !== null} />
           </div>
