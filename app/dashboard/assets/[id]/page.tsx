@@ -571,7 +571,8 @@ export default function AssetDetailPage({ params }: { params: Promise<{ id: stri
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <input value={newState} onChange={e => setNewState(e.target.value)} placeholder="hover" onKeyDown={e => e.key === 'Enter' && addState()} />
+              <label htmlFor="newStateName" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>New state name</label>
+              <input id="newStateName" value={newState} onChange={e => setNewState(e.target.value)} placeholder="hover" onKeyDown={e => e.key === 'Enter' && addState()} />
               <button className="btn" onClick={addState}>Add</button>
             </div>
           </div>

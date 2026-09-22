@@ -98,7 +98,8 @@ export function LoginForm({ users }: { users: UserOption[] }) {
     return (
       <>
         <form onSubmit={e => handleCreateAccount(e, force)} style={{ display: 'flex', gap: 8 }}>
-          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Your name" />
+          <label htmlFor="newAccountName" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>Your name</label>
+          <input id="newAccountName" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Your name" />
           <button className="btn btn-primary" type="submit" disabled={submitting || !newName.trim()}>
             Create
           </button>

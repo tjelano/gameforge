@@ -401,7 +401,9 @@ export default function StylesPage() {
       </p>
 
       <form className="card" onSubmit={handleCreate} style={{ marginBottom: 32, maxWidth: 420, display: 'flex', gap: 10 }}>
+        <label htmlFor="newStyleName" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>New Style Bible name</label>
         <input
+          id="newStyleName"
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="New Style Bible name"
@@ -424,7 +426,7 @@ export default function StylesPage() {
           Style Bible from an existing design system.
         </p>
         <div className="field">
-          <label htmlFor="importName">New Style Bible name</label>
+          <label htmlFor="importName">Imported Style Bible name</label>
           <input id="importName" value={importName} onChange={e => setImportName(e.target.value)} placeholder="Imported design" />
         </div>
         <div className="field">
@@ -482,7 +484,9 @@ export default function StylesPage() {
         {inspoMode === 'search' ? (
           <>
             <form onSubmit={handleInspoSearch} style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <label htmlFor="inspoSearch" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap' }}>Inspo search</label>
               <input
+                id="inspoSearch"
                 value={inspoQuery}
                 onChange={e => setInspoQuery(e.target.value)}
                 placeholder="e.g. warm editorial SaaS"
