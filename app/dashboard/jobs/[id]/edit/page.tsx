@@ -38,20 +38,24 @@ export default function EditThemePage({ params }: { params: Promise<{ id: string
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const res = await fetch(`/api/jobs/${id}`);
-      const body = await res.json();
-      if (ignore) return;
-      if (!body.success) {
-        setError(body.error ?? 'Could not load this job.');
-        return;
-      }
-      setJob(body.data);
       try {
-        const css = await (await fetch(`/api/themes/${body.data.result_path}`)).text();
+        const res = await fetch(`/api/jobs/${id}`);
+        const body = await res.json();
         if (ignore) return;
-        setTokens(parseThemeCss(css));
+        if (!body.success) {
+          setError(body.error ?? 'Could not load this job.');
+          return;
+        }
+        setJob(body.data);
+        try {
+          const css = await (await fetch(`/api/themes/${body.data.result_path}`)).text();
+          if (ignore) return;
+          setTokens(parseThemeCss(css));
+        } catch {
+          if (!ignore) setError('Could not read this theme\'s current values.');
+        }
       } catch {
-        if (!ignore) setError('Could not read this theme\'s current values.');
+        if (!ignore) setError('Could not reach the server.');
       }
     })();
     return () => { ignore = true; };

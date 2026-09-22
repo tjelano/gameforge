@@ -25,20 +25,24 @@ export default function EditComponentPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const res = await fetch(`/api/jobs/${id}`);
-      const body = await res.json();
-      if (ignore) return;
-      if (!body.success) {
-        setError(body.error ?? 'Could not load this job.');
-        return;
-      }
-      setJob(body.data);
       try {
-        const document = await (await fetch(`/api/components/${body.data.result_path}`)).text();
+        const res = await fetch(`/api/jobs/${id}`);
+        const body = await res.json();
         if (ignore) return;
-        setTokens(parseComponentHtml(document));
+        if (!body.success) {
+          setError(body.error ?? 'Could not load this job.');
+          return;
+        }
+        setJob(body.data);
+        try {
+          const document = await (await fetch(`/api/components/${body.data.result_path}`)).text();
+          if (ignore) return;
+          setTokens(parseComponentHtml(document));
+        } catch {
+          if (!ignore) setError('Could not read this component\'s current values.');
+        }
       } catch {
-        if (!ignore) setError('Could not read this component\'s current values.');
+        if (!ignore) setError('Could not reach the server.');
       }
     })();
     return () => { ignore = true; };
