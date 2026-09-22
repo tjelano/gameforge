@@ -2,3 +2,8 @@
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.glb filter=lfs diff=lfs merge=lfs -text
 *.gltf filter=lfs diff=lfs merge=lfs -text
+
+# Shell scripts need real LF line endings regardless of core.autocrlf --
+# a CRLF shebang line ("#!/bin/sh\r") breaks execution on a real Unix
+# checkout.
+.githooks/* text eol=lf

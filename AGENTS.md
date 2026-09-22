@@ -44,6 +44,11 @@ A session has no memory of prior sessions unless it checks for one. Do this firs
    the same reason a clean test run is worth having even when you expected it to pass. Verify every
    finding from either mode against the actual code/plan text yourself before acting — you are the
    final arbiter, not DeepSeek; expect roughly 1-in-5 "Important" findings to hold up, not more.
+   **Make this a literal item on every task's own todo list, not a paragraph to recall from memory
+   N tasks later** — this mandate has already been written down once before and still got skipped
+   mid-execution (followed at the plan level only, not per-task) in a real session. A task is not
+   done until its diff has gone through DeepSeek Mode 2, the same status as "tests pass," not a
+   separate pass to remember afterward.
 5. **Run `npm run lint` as a standard part of every task's own verification, not just `npx vitest
    run && npx tsc --noEmit`.** CI (`.github/workflows/ci.yml`) runs Typecheck, Lint, and Test as 3
    separate required steps — a plan whose tasks/reviewers only ever ran the first and third will
@@ -53,7 +58,11 @@ A session has no memory of prior sessions unless it checks for one. Do this firs
    fresh `set-state-in-effect` in a brand-new effect, caught only after the PR was already open).
    Lint locally before pushing, not after CI fails — `npx eslint app lib worker.ts` (scoping to the
    real source tree; a bare `npx eslint .` also sweeps other git worktrees and `.next` build
-   artifacts on this machine and produces thousands of irrelevant hits).
+   artifacts on this machine and produces thousands of irrelevant hits). A `.githooks/pre-push` hook
+   now runs all three (`tsc`, the scoped `eslint`, `vitest run`) automatically and blocks the push on
+   failure — one-time setup per checkout: `git config core.hooksPath .githooks`. This backstops the
+   rule above rather than replacing it; a hook that's bypassed with `--no-verify` or never configured
+   on a fresh checkout still leaves the manual discipline as the real gate.
 
 ## Shipped Features (chronological, by merged PR — see `git log --merges --oneline main` for the
 authoritative, up-to-date list; this is a snapshot as of PR #22)
