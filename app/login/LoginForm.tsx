@@ -132,7 +132,6 @@ export function LoginForm({ users }: { users: UserOption[] }) {
               {pulling ? 'Pulling…' : 'Pull from git first'}
             </button>
             {pullError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{pullError} You can still create the account below.</p>}
-            {pulled && <p style={{ fontSize: 13, marginBottom: 12 }}>Pull finished — refreshing…</p>}
             {createAccountForm(true)}
           </div>
         )}
