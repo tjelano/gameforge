@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
-      return NextResponse.json({ success: false, error: 'Not logged in' }, { status: 401 });
+      return NextResponse.redirect(new URL('/login?reason=expired', req.url));
     }
     try {
       return NextResponse.redirect(driveService.getAuthUrl());

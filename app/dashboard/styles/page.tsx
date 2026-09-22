@@ -411,7 +411,11 @@ export default function StylesPage() {
           {creating ? 'Creating…' : 'Create'}
         </button>
       </form>
-      {createError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -16, marginBottom: 16 }}>{createError}</p>}
+      {createError && (
+        <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: -16, marginBottom: 16 }}>
+          {createError} <Link href="/login">Log in again</Link>
+        </p>
+      )}
 
       <form className="card" onSubmit={handleImport} style={{ marginBottom: 32, maxWidth: 420 }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Import from design tokens</div>

@@ -42,11 +42,12 @@ describe('GET /api/drive/connect', () => {
     expect(res.headers.get('location')).toContain('accounts.google.com');
   });
 
-  it('401s when not logged in', async () => {
+  it('redirects to /login?reason=expired when not logged in', async () => {
     const { GET } = await import('@/app/api/drive/connect/route');
     const req = new NextRequest('http://localhost/api/drive/connect');
     const res = await GET(req);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/login?reason=expired');
   });
 
   it('redirects with an error indicator instead of crashing when the session lookup throws', async () => {
