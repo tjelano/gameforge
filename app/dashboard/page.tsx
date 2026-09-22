@@ -9,20 +9,24 @@ export default function OverviewPage() {
   const [context, setContext] = useState<ProjectContextSummary | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [workerAlive, setWorkerAlive] = useState<boolean | null>(null);
 
   useEffect(() => {
     let ignore = false;
     (async () => {
       try {
-        const [contextRes, activityRes] = await Promise.all([
+        const [contextRes, activityRes, workerRes] = await Promise.all([
           fetch('/api/context'),
           fetch('/api/dashboard/activity'),
+          fetch('/api/dashboard/worker-status'),
         ]);
         const contextBody = await contextRes.json();
         const activityBody = await activityRes.json();
+        const workerBody = await workerRes.json();
         if (!ignore) {
           if (contextBody.success) setContext(contextBody.data);
           if (activityBody.success) setActivity(activityBody.data);
+          if (workerBody.success) setWorkerAlive(workerBody.data.alive);
         }
       } catch {
         // Non-fatal -- the page just shows zeros/an empty activity list.
@@ -50,6 +54,16 @@ export default function OverviewPage() {
         <div className="card" style={{ flex: 1, minWidth: 140 }}>
           <div className="stat-card-label">Jobs in flight</div>
           <div className="stat-card-value">{loading ? '—' : context?.inFlightJobs ?? 0}</div>
+        </div>
+        <div className="card" style={{ flex: 1, minWidth: 140 }}>
+          <div className="stat-card-label">Worker</div>
+          <div className="stat-card-value" style={{ fontSize: 15 }}>
+            {loading || workerAlive === null
+              ? '—'
+              : workerAlive
+                ? <span style={{ color: '#3fb950' }}>● running</span>
+                : <span style={{ color: 'var(--reject)' }}>○ not detected</span>}
+          </div>
         </div>
       </div>
 
