@@ -570,13 +570,34 @@ git commit -m "fix: surface a login link on stale-session errors instead of a de
 - Consumes: `LoginForm`'s existing `handleCreateFirst` shape from Task 1 (unmodified by that task).
 - Produces: `POST /api/auth/login` accepts an optional `force: boolean` field on the `{name}` variant.
 
-**Important — read before writing code:** `app/api/auth/login/route.ts` currently 403s any `{name}`
-POST once `userService.getAll()` returns existing users, UNCONDITIONALLY. `test/loginPullRace.test.ts`
-asserts this 403 for its own scenario (an unpulled git sync could be hiding a real existing admin — the
-403 forces the user to pull first rather than risk creating a conflicting account). That test's
-scenario must keep passing unchanged. This task adds a `force` flag that ONLY the new "add another
-account" UI path sets — the original bootstrap flow (Task-1-untouched `handleCreateFirst`, used only in
-the zero-users branch) never sends it, so `loginPullRace.test.ts`'s exact scenario is unaffected.
+**Important — read before writing code, this reasoning was corrected mid-review:** `app/api/auth/login/route.ts` currently 403s any `{name}` POST whenever `userService.getAll()` returns at least
+one existing user (`existing.length > 0`) — note the direction: the guard fires when the table is
+NON-empty, never when it's empty. `test/loginPullRace.test.ts` exercises exactly this: users already
+exist locally, but an unpulled git sync might hold more/different ones, so the guard forces a
+reconcile-before-create rather than risk creating a conflicting local account. That's also precisely
+the state "+Add another account" operates in (it's only reachable once `users.length > 0`), so this
+task's `force` flag is a real, deliberate bypass of that guard in the one state it actually protects —
+not a no-op in some other state. Two things justify doing it anyway, both worth keeping in mind while
+implementing:
+1. **Admin escalation is structurally impossible either way.** `UserService.create()` sets
+   `isAdmin = existingCount === 0 ? 1 : 0` from its own fresh `COUNT(*)` at insert time, not from
+   anything the client sends. Since `force` only ever matters when `existing.length > 0` in that same
+   request, `existingCount` inside `create()` is guaranteed non-zero on that call too — a force-created
+   account can never become admin, regardless of this flag.
+2. **A duplicate account (by name) is already an explicitly tolerated outcome in this app's design** —
+   `UserService.getByName()`'s own comment states names have no uniqueness constraint specifically so
+   two collaborators on different machines can pick the same display name without breaking git sync.
+   So the remaining "harm" `force` allows — creating a same-named or simply additional local account
+   without pulling first — is the same class of outcome this app already accepts by design elsewhere,
+   not a new kind of damage.
+That said, the ORIGINAL empty-state flow gives the user a "Pull from git first" option before creating
+an account, and "+Add another account" should offer the same opportunity rather than silently skipping
+it — Step 5 below adds that.
+
+`test/loginPullRace.test.ts`'s own scenario must keep passing unchanged. This task's `force` flag is
+only ever sent by the new "add another account" UI path — the original bootstrap flow
+(Task-1-untouched `handleCreateFirst`, used only in the zero-users branch) never sends it, so
+`loginPullRace.test.ts`'s exact request shape (`{name}`, no `force`) is unaffected.
 
 Current `app/api/auth/login/route.ts` (full file):
 ```ts
@@ -865,7 +886,15 @@ export function LoginForm({ users }: { users: UserOption[] }) {
         )}
         {addingAccount && (
           <div style={{ marginTop: 12 }}>
-            <p className="page-subtitle">Create a new account on this machine:</p>
+            <p className="page-subtitle">
+              If another account was created elsewhere and hasn&apos;t synced here yet, pull first —
+              otherwise create a new account below.
+            </p>
+            <button className="btn" onClick={handlePull} disabled={pulling} style={{ marginBottom: 12 }}>
+              {pulling ? 'Pulling…' : 'Pull from git first'}
+            </button>
+            {pullError && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 12 }}>{pullError} You can still create the account below.</p>}
+            {pulled && <p style={{ fontSize: 13, marginBottom: 12 }}>Pull finished — refreshing…</p>}
             {createAccountForm(true)}
           </div>
         )}
@@ -1375,15 +1404,21 @@ function scheduleNext(): void {
 
 - [ ] **Step 1: Write the failing test**
 
-Create `test/workerStatusRoute.test.ts`:
+Create `test/workerStatusRoute.test.ts`, matching `test/settingsService.test.ts`'s exact real
+temp-DB setup verbatim (confirmed by reading that file directly: it creates a `package.json` in the
+temp root and copies the real migration files into `<tempRoot>/lib/database/migrations/` before
+`DatabaseConnection.resetForTests()` — `DatabaseConnection.getInstance()` reads migrations from the
+project root's own migrations directory, which for a fresh temp root doesn't exist until copied there.
+That same file also confirms a plain static top-level `import { settingsService } from
+'@/lib/services/SettingsService'` is safe here — `SettingsService`'s methods call
+`DatabaseConnection.getInstance()` lazily, at call time inside `get`/`set`, not at module-import time):
 ```ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { NextRequest } from 'next/server';
-import * as fsPromises from 'node:fs/promises';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import { DatabaseConnection } from '@/lib/database';
+import fsPromises from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { setProjectRootForTests } from '@/lib/utils/projectRoot';
+import { DatabaseConnection } from '@/lib/database';
 import { settingsService } from '@/lib/services/SettingsService';
 import { WORKER_LAST_SEEN_SETTING_KEY } from '@/lib/config';
 
@@ -1391,15 +1426,23 @@ let tempRoot: string;
 
 beforeEach(async () => {
   tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'gameforge-workerstatus-'));
+  await fsPromises.writeFile(path.join(tempRoot, 'package.json'), JSON.stringify({ name: 'gameforge-test' }));
+
+  const realMigrationsDir = path.resolve(__dirname, '..', 'lib', 'database', 'migrations');
+  const tempMigrationsDir = path.join(tempRoot, 'lib', 'database', 'migrations');
+  await fsPromises.mkdir(tempMigrationsDir, { recursive: true });
+  for (const file of await fsPromises.readdir(realMigrationsDir)) {
+    await fsPromises.copyFile(path.join(realMigrationsDir, file), path.join(tempMigrationsDir, file));
+  }
+
   setProjectRootForTests(tempRoot);
   DatabaseConnection.resetForTests();
-  DatabaseConnection.getInstance(); // runs migrations
 });
 
 afterEach(async () => {
   DatabaseConnection.resetForTests();
   setProjectRootForTests(undefined);
-  await fsPromises.rm(tempRoot, { recursive: true, force: true });
+  if (tempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
 });
 
 describe('GET /api/dashboard/worker-status', () => {
@@ -1433,9 +1476,6 @@ describe('GET /api/dashboard/worker-status', () => {
   });
 });
 ```
-(If `setProjectRootForTests`/`DatabaseConnection.resetForTests()` live at different import paths than
-guessed above, check `test/settingsService.test.ts` — mentioned by name in the research — for this
-repo's actual real-temp-DB test setup and match its exact imports instead.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -2287,14 +2327,16 @@ git commit -m "fix: add dialog semantics, Escape-to-close, and focus management 
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `boxKeyboardDelta(key: string, shiftKey: boolean, box: {w:number,h:number}) =>
-  Partial<{x,y,w,h}> | null` and `MIN_SIZE` (both newly exported from `lib/hooks/useDraggableBoxes.ts`)
-  — both real consumer pages import and call this exact function from their `onKeyDown` handlers, and
-  the test exercises this same exported function directly, not a reimplementation of it. This is a
-  deliberate change from treating this as pointer-vs-keyboard-are-separate-concerns: a keyboard input
-  handler is real interaction logic, not static JSX, and this codebase's own bar for extracting a
-  shared helper ("on sight for safety-critical logic," `AGENTS.md`) is better served by one tested
-  function than by two hand-copied `onKeyDown` blocks that could silently drift apart.
+- Produces: `boxKeyboardDelta(key: string, shiftKey: boolean, box: {x:number,y:number,w:number,h:number})
+  => Partial<{x,y,w,h}> | null` and `MIN_SIZE` (both newly exported from
+  `lib/hooks/useDraggableBoxes.ts`). The function returns the FINAL absolute patch to apply — not a
+  relative delta — specifically so both call sites reduce to `const patch =
+  boxKeyboardDelta(e.key, e.shiftKey, box); if (patch) updateBox(box.id, patch);` with no branching
+  left for either page to get wrong. (An earlier version of this design returned a relative delta and
+  left each page responsible for applying it to the box's current position/size — that shape left room
+  for one page to apply it correctly and the other not to, with only the pure function under test and
+  the actual call sites untested; this version removes that gap by leaving no call-site logic to test.)
+  Both real consumer pages import and call this exact function from their `onKeyDown` handlers.
 
 Current `lib/hooks/useDraggableBoxes.ts` (full file):
 ```ts
@@ -2372,27 +2414,27 @@ import { describe, it, expect } from 'vitest';
 import { boxKeyboardDelta, MIN_SIZE } from '@/lib/hooks/useDraggableBoxes';
 
 describe('boxKeyboardDelta', () => {
-  const box = { w: 20, h: 20 };
+  const box = { x: 10, y: 10, w: 20, h: 20 };
 
-  it('moves right by 4px on ArrowRight', () => {
-    expect(boxKeyboardDelta('ArrowRight', false, box)).toEqual({ x: 4 });
+  it('moves right by 4px on ArrowRight (absolute new x)', () => {
+    expect(boxKeyboardDelta('ArrowRight', false, box)).toEqual({ x: 14 });
   });
 
-  it('moves left by 4px on ArrowLeft', () => {
-    expect(boxKeyboardDelta('ArrowLeft', false, box)).toEqual({ x: -4 });
+  it('moves left by 4px on ArrowLeft (absolute new x)', () => {
+    expect(boxKeyboardDelta('ArrowLeft', false, box)).toEqual({ x: 6 });
   });
 
-  it('moves down/up by 4px on ArrowDown/ArrowUp', () => {
-    expect(boxKeyboardDelta('ArrowDown', false, box)).toEqual({ y: 4 });
-    expect(boxKeyboardDelta('ArrowUp', false, box)).toEqual({ y: -4 });
+  it('moves down/up by 4px on ArrowDown/ArrowUp (absolute new y)', () => {
+    expect(boxKeyboardDelta('ArrowDown', false, box)).toEqual({ y: 14 });
+    expect(boxKeyboardDelta('ArrowUp', false, box)).toEqual({ y: 6 });
   });
 
-  it('grows width by 4px on Shift+ArrowRight', () => {
+  it('grows width by 4px on Shift+ArrowRight (absolute new w)', () => {
     expect(boxKeyboardDelta('ArrowRight', true, box)).toEqual({ w: 24 });
   });
 
   it('shrinks width on Shift+ArrowLeft, floored at MIN_SIZE', () => {
-    expect(boxKeyboardDelta('ArrowLeft', true, { w: 10, h: 20 })).toEqual({ w: MIN_SIZE });
+    expect(boxKeyboardDelta('ArrowLeft', true, { x: 0, y: 0, w: 10, h: 20 })).toEqual({ w: MIN_SIZE });
   });
 
   it('returns null for an unhandled key', () => {
@@ -2429,15 +2471,18 @@ const KEYBOARD_STEP = 4;
 // ui-sheets/page.tsx) call this exact function from their onKeyDown
 // handlers instead of each hand-copying the same logic, and so a test can
 // exercise the real behavior directly rather than a reimplementation of it.
+// Returns the FINAL absolute patch (not a relative delta) so the call site
+// is always just `const patch = boxKeyboardDelta(...); if (patch)
+// updateBox(box.id, patch);` -- no per-page branching left to get wrong.
 export function boxKeyboardDelta(
   key: string,
   shiftKey: boolean,
-  box: { w: number; h: number },
+  box: { x: number; y: number; w: number; h: number },
 ): { x: number } | { y: number } | { w: number } | { h: number } | null {
-  if (key === 'ArrowRight') return shiftKey ? { w: Math.max(MIN_SIZE, box.w + KEYBOARD_STEP) } : { x: KEYBOARD_STEP };
-  if (key === 'ArrowLeft') return shiftKey ? { w: Math.max(MIN_SIZE, box.w - KEYBOARD_STEP) } : { x: -KEYBOARD_STEP };
-  if (key === 'ArrowDown') return shiftKey ? { h: Math.max(MIN_SIZE, box.h + KEYBOARD_STEP) } : { y: KEYBOARD_STEP };
-  if (key === 'ArrowUp') return shiftKey ? { h: Math.max(MIN_SIZE, box.h - KEYBOARD_STEP) } : { y: -KEYBOARD_STEP };
+  if (key === 'ArrowRight') return shiftKey ? { w: Math.max(MIN_SIZE, box.w + KEYBOARD_STEP) } : { x: box.x + KEYBOARD_STEP };
+  if (key === 'ArrowLeft') return shiftKey ? { w: Math.max(MIN_SIZE, box.w - KEYBOARD_STEP) } : { x: box.x - KEYBOARD_STEP };
+  if (key === 'ArrowDown') return shiftKey ? { h: Math.max(MIN_SIZE, box.h + KEYBOARD_STEP) } : { y: box.y + KEYBOARD_STEP };
+  if (key === 'ArrowUp') return shiftKey ? { h: Math.max(MIN_SIZE, box.h - KEYBOARD_STEP) } : { y: box.y - KEYBOARD_STEP };
   return null;
 }
 
@@ -2491,11 +2536,6 @@ export function useDraggableBoxes<T extends Box>(initial: T[]) {
   return { boxes, addBox, updateBox, removeBox, startDrag };
 }
 ```
-Note: `boxKeyboardDelta`'s ArrowRight/Down "move" branches return a fixed `+KEYBOARD_STEP` delta, not
-`box.x + KEYBOARD_STEP` — the caller (Step 4 below) applies it as `x: box.x + delta.x`, keeping the
-pure function's contract as "how far and which direction," independent of the box's current absolute
-position. This matters for the test above: `{ x: 4 }` is the delta, not the new absolute x.
-
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/draggableBoxKeyboard.test.tsx`
@@ -2541,11 +2581,9 @@ with:
               }}
               onMouseDown={e => draggable.startDrag(box.id, 'move', e.clientX, e.clientY)}
               onKeyDown={e => {
-                const delta = boxKeyboardDelta(e.key, e.shiftKey, box);
-                if (!delta) return;
-                if ('x' in delta) draggable.updateBox(box.id, { x: box.x + delta.x });
-                else if ('y' in delta) draggable.updateBox(box.id, { y: box.y + delta.y });
-                else draggable.updateBox(box.id, delta);
+                const patch = boxKeyboardDelta(e.key, e.shiftKey, box);
+                if (!patch) return;
+                draggable.updateBox(box.id, patch);
                 e.preventDefault();
               }}
               onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
@@ -2575,11 +2613,9 @@ identical shape:
                   }}
                   onMouseDown={e => startDrag(box.id, 'move', e.clientX, e.clientY)}
                   onKeyDown={e => {
-                    const delta = boxKeyboardDelta(e.key, e.shiftKey, box);
-                    if (!delta) return;
-                    if ('x' in delta) updateBox(box.id, { x: box.x + delta.x });
-                    else if ('y' in delta) updateBox(box.id, { y: box.y + delta.y });
-                    else updateBox(box.id, delta);
+                    const patch = boxKeyboardDelta(e.key, e.shiftKey, box);
+                    if (!patch) return;
+                    updateBox(box.id, patch);
                     e.preventDefault();
                   }}
                   onFocus={e => { e.currentTarget.style.outline = '2px solid var(--accent)'; }}
@@ -2627,6 +2663,15 @@ Create `test/overviewActivityLinks.test.tsx`:
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import OverviewPage from '@/app/dashboard/page';
+
+// OverviewPage renders next/link's <Link> (Quick Actions, and now the
+// activity rows this task adds) -- under jsdom that needs a router context
+// or it throws "invariant expected app router to be mounted," same as
+// Tasks 2 and 9's mocks for pages containing <Link>.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/dashboard',
+}));
 
 afterEach(() => {
   cleanup();
