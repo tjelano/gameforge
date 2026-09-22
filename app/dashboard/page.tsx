@@ -85,10 +85,14 @@ export default function OverviewPage() {
       ) : (
         <div>
           {activity.map(item => (
-            <div key={item.id} className="activity-row">
+            <Link
+              key={item.id}
+              href={item.kind === 'job' ? '/dashboard/jobs' : `/dashboard/styles/${item.id}`}
+              className="activity-row"
+            >
               <div>{item.label}</div>
               <div className="activity-row-meta">{new Date(item.timestamp).toLocaleString()}</div>
-            </div>
+            </Link>
           ))}
         </div>
       )}
