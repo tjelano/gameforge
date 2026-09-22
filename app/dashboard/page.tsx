@@ -78,7 +78,9 @@ export default function OverviewPage() {
       </div>
 
       <h2 className="frame-label" style={{ marginBottom: 12 }}>Recent activity</h2>
-      {!loading && activity.length === 0 ? (
+      {loading ? (
+        <p className="page-subtitle">Loading…</p>
+      ) : activity.length === 0 ? (
         <div className="empty-state">No recent activity yet. Generate something to see it here.</div>
       ) : (
         <div>
