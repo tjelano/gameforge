@@ -45,6 +45,12 @@ const KNOWN_CHECK_MAPPINGS: Array<{ table: string; column: string; zodValues: re
 // than failing loud -- no migration uses that form today.
 const CHECK_PATTERN = /(\w+)\s+TEXT[^,]*?\bCHECK\s*\(\s*\1\s+IN\s*\(([^)]+)\)\)/gi;
 
+// Known gap (flagged by review, not fixed -- no current CHECK-constrained
+// enum needs it): a plain `.split(',')` would misparse a value containing
+// a literal comma or a SQL-escaped quote (`''`). None of today's 5 real
+// CHECK-constrained columns use either, so this hasn't been worth a real
+// SQL-string-literal parser -- if a future one legitimately needs a comma
+// or apostrophe in an enum value, revisit this function first.
 function extractCheckedColumns(createTableSql: string): Map<string, string[]> {
   const found = new Map<string, string[]>();
   for (const match of createTableSql.matchAll(CHECK_PATTERN)) {
