@@ -3,7 +3,13 @@
 *.glb filter=lfs diff=lfs merge=lfs -text
 *.gltf filter=lfs diff=lfs merge=lfs -text
 
-# Shell scripts need real LF line endings regardless of core.autocrlf --
-# a CRLF shebang line ("#!/bin/sh\r") breaks execution on a real Unix
-# checkout.
+# Git executes hook files directly (via their shebang), so a CRLF shebang
+# line ("#!/bin/sh\r") would break execution on a real Unix checkout.
 .githooks/* text eol=lf
+
+# This script is only ever invoked as `node .claude/skills/deepseek-review/
+# scripts/deepseek-call.mjs ...` (see SKILL.md), never executed directly, so
+# its own shebang line is never actually read -- LF is kept here anyway for
+# consistency with the rest of the repo's scripts and in case that ever
+# changes, not because CRLF would currently break anything.
+.claude/skills/deepseek-review/scripts/*.mjs text eol=lf

@@ -7,6 +7,7 @@ const SETTINGS_PAGES = [
   { href: '/dashboard/settings/google-drive', name: 'Google Drive', description: 'Shared Drive connection.' },
   { href: '/dashboard/settings/ollama', name: 'Ollama', description: 'Local model connection and model management.' },
   { href: '/dashboard/settings/design-preview', name: 'Design Preview', description: 'Live-edit GameForge\'s own color and font tokens and preview the result.' },
+  { href: '/dashboard/settings/deepseek-review', name: 'DeepSeek Review', description: 'The cross-model adversarial code-review technique this project uses internally.' },
 ] as const;
 
 export default function SettingsHubPage() {
