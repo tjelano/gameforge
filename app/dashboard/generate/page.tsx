@@ -115,7 +115,9 @@ export default function GeneratePage() {
 
           <div className="field">
             <label htmlFor="assetType">Asset type</label>
-            <input id="assetType" value={assetType} onChange={e => setAssetType(e.target.value)} placeholder="sprite" />
+            <select id="assetType" value={assetType} onChange={e => setAssetType(e.target.value)}>
+              <option value="sprite">sprite</option>
+            </select>
           </div>
 
           <div className="field">
