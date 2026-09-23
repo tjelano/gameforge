@@ -14,27 +14,22 @@ export default function OverviewPage() {
   useEffect(() => {
     let ignore = false;
     (async () => {
-      try {
-        const [contextResult, activityResult, workerResult] = await Promise.allSettled([
-          fetch('/api/context').then(r => r.json()),
-          fetch('/api/dashboard/activity').then(r => r.json()),
-          fetch('/api/dashboard/worker-status').then(r => r.json()),
-        ]);
-        if (!ignore) {
-          if (contextResult.status === 'fulfilled' && contextResult.value.success) {
-            setContext(contextResult.value.data);
-          }
-          if (activityResult.status === 'fulfilled' && activityResult.value.success) {
-            setActivity(activityResult.value.data);
-          }
-          if (workerResult.status === 'fulfilled' && workerResult.value.success) {
-            setWorkerAlive(workerResult.value.data.alive);
-          }
+      const [contextResult, activityResult, workerResult] = await Promise.allSettled([
+        fetch('/api/context').then(r => r.json()),
+        fetch('/api/dashboard/activity').then(r => r.json()),
+        fetch('/api/dashboard/worker-status').then(r => r.json()),
+      ]);
+      if (!ignore) {
+        if (contextResult.status === 'fulfilled' && contextResult.value.success) {
+          setContext(contextResult.value.data);
         }
-      } catch {
-        // Non-fatal -- the page just shows zeros/an empty activity list.
-      } finally {
-        if (!ignore) setLoading(false);
+        if (activityResult.status === 'fulfilled' && activityResult.value.success) {
+          setActivity(activityResult.value.data);
+        }
+        if (workerResult.status === 'fulfilled' && workerResult.value.success) {
+          setWorkerAlive(workerResult.value.data.alive);
+        }
+        setLoading(false);
       }
     })();
     return () => { ignore = true; };

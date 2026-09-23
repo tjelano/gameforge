@@ -127,10 +127,16 @@ activity.length === 0` empty-state check means `loading === true` falls into the
 ### Fix D1 — Real labels on placeholder-only inputs
 Four confirmed instances, all get a real `<label htmlFor>` matching the visually-hidden pattern already
 established in `DriveBrowser.tsx:251,264` (`position: absolute; width: 1px; height: 1px; overflow:
-hidden; clip: rect(0,0,0,0); white-space: nowrap`) or a plain visible `<label>` where the surrounding
-layout already has room (match whichever convention the immediate sibling inputs on that same page use
-— `styles/page.tsx`'s `importName`/`importFile` inputs already use plain visible labels, so match that
-there rather than introducing the visually-hidden variant into a file that doesn't use it yet):
+hidden; clip: rect(0,0,0,0); white-space: nowrap`).
+
+**Post-implementation note:** as shipped (Task 9), all four instances below use the visually-hidden
+pattern, including `styles/page.tsx`'s two inputs — this paragraph originally called for matching
+those against sibling plain-visible labels on the same page, but the visually-hidden pattern was used
+there too instead. Both patterns give the input a real programmatically-associated `<label>`, which is
+the actual accessibility requirement (a screen reader announces the label either way); the difference
+is purely visual (whether sighted users also see the label text). No functional regression, just a
+deviation from the plan's specific sibling-matching instruction — documenting the actual shipped
+behavior since this doc no longer matches the merged code otherwise:
 1. `app/dashboard/styles/page.tsx:404` — "New Style Bible name" input.
 2. `app/dashboard/styles/page.tsx:481` — Inspo search input.
 3. `app/login/LoginForm.tsx:107` — "Your name" input (the very first form field a new user ever fills

@@ -46,7 +46,9 @@ export default function ExportPage() {
         project (2D only for V1).
       </p>
 
-      {!stylesLoading && !stylesError && styles.length === 0 ? (
+      {stylesLoading ? (
+        <p className="page-subtitle">Loading…</p>
+      ) : !stylesError && styles.length === 0 ? (
         <div className="empty-state">
           No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page before exporting.
         </div>

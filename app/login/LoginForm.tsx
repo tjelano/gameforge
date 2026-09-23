@@ -118,7 +118,7 @@ export function LoginForm({ users }: { users: UserOption[] }) {
             {u.name}
           </button>
         ))}
-        {!expired && !addingAccount && (
+        {!addingAccount && (
           <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={() => { setError(null); setAddingAccount(true); }}>
             + Add another account
           </button>
