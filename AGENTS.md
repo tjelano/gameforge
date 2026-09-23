@@ -22,10 +22,14 @@ A session has no memory of prior sessions unless it checks for one. Do this firs
 2. **Check `docs/superpowers/plans/`** (sorted by date) for the most recent plan — it's the closest
    thing to "what was being worked on." Its paired spec under `docs/superpowers/specs/` has the
    reasoning; the plan has the task breakdown.
-3. **Treat this file's "Shipped Features" list below as a snapshot, not a guarantee** — verify
+3. **Check `docs/knowledge/INDEX.md`** for research findings, brainstorming decisions, codebase
+   gotchas, and deferred backlog items that never made it into a formal spec/plan — a durable,
+   git-versioned counterpart to a session's own private memory. Check it before re-investigating
+   something that may already be answered there.
+4. **Treat this file's "Shipped Features" list below as a snapshot, not a guarantee** — verify
    anything load-bearing against the actual code/git log before relying on it (the "No auth system"
    line below this sentence used to be wrong for months before someone checked).
-4. **Use the `deepseek-review` skill proactively, without being asked, at BOTH the plan level and the
+5. **Use the `deepseek-review` skill proactively, without being asked, at BOTH the plan level and the
    per-task diff level** — it costs fractions of a cent per call (55 requests across a whole session
    billed $0.03 total; a 34-task plan re-review across 6 chunks was ~$0.02), so cost is never a
    reason to skip it. Two uses, both worth doing every time, not just for security-sensitive tasks:
@@ -49,7 +53,7 @@ A session has no memory of prior sessions unless it checks for one. Do this firs
    mid-execution (followed at the plan level only, not per-task) in a real session. A task is not
    done until its diff has gone through DeepSeek Mode 2, the same status as "tests pass," not a
    separate pass to remember afterward.
-5. **Run `npm run lint` as a standard part of every task's own verification, not just `npx vitest
+6. **Run `npm run lint` as a standard part of every task's own verification, not just `npx vitest
    run && npx tsc --noEmit`.** CI (`.github/workflows/ci.yml`) runs Typecheck, Lint, and Test as 3
    separate required steps — a plan whose tasks/reviewers only ever ran the first and third will
    pass every gate locally and still fail CI on push. This has happened twice already (PR #23's
