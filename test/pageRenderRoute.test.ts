@@ -234,4 +234,77 @@ describe('GET /api/pages/[id]/render', () => {
     const resOther = await GET(new NextRequest('http://localhost/x?download=foo'), { params: Promise.resolve({ id: page.id }) });
     expect(resOther.headers.get('Content-Disposition')).toBeNull();
   });
+
+  it('with ?editable=1, keeps data-gf-id and wraps each component with its asset id and a content hash', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const asset = await makeComponentAsset(style.id, 'ided.html', document);
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x?editable=1'), { params: Promise.resolve({ id: page.id }) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-gf-id="1"');
+    expect(body).toContain(`data-gf-component-asset-id="${asset.id}"`);
+
+    const { hashDocument } = await import('@/lib/services/componentElementTree');
+    const expectedHash = hashDocument(document);
+    expect(body).toContain(`data-gf-rev="${expectedHash}"`);
+  });
+
+  it('without ?editable=1, still strips data-gf-id and never emits data-gf-component-asset-id (regression guard)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const asset = await makeComponentAsset(style.id, 'ided.html', document);
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x'), { params: Promise.resolve({ id: page.id }) });
+    const body = await res.text();
+    expect(body).not.toContain('data-gf-id');
+    expect(body).not.toContain('data-gf-component-asset-id');
+  });
+
+  it('editable mode still sanitizes untrusted component content', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const hostileAsset = await makeComponentAsset(style.id, 'hostile.html',
+      '<!DOCTYPE html><html><head><style>.a {}</style></head><body><button onclick="alert(1)">Go</button><script>alert(document.cookie)</script></body></html>');
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([hostileAsset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x?editable=1'), { params: Promise.resolve({ id: page.id }) });
+    const body = await res.text();
+    expect(body).not.toContain('<script');
+    expect(body).not.toContain('onclick');
+  });
+
+  it('?editable=1&download=1 together still produce a clean export (download wins)', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const document = '<!DOCTYPE html><html><head><style>.btn { color: red; }</style></head>'
+      + '<body><button data-gf-id="1" class="btn gf-1">Go</button></body></html>';
+    const asset = await makeComponentAsset(style.id, 'ided.html', document);
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x?editable=1&download=1'), { params: Promise.resolve({ id: page.id }) });
+    const body = await res.text();
+    expect(body).not.toContain('data-gf-id');
+    expect(body).not.toContain('data-gf-component-asset-id');
+    expect(res.headers.get('Content-Disposition')).toContain('attachment');
+  });
+
+  it('editable mode still respects the edited_externally trust bypass', async () => {
+    const style = await styleService.create({ name: 'x', createdBy: 'user-1', parameters: '{}' });
+    const asset = await makeComponentAsset(style.id, 'trusted.html', IMG_DOC);
+    await assetService.update(asset.id, 'user-1', { editedExternally: true });
+    const page = await pageService.create({ styleId: style.id, name: 'x', createdBy: 'user-1' });
+    await pageService.update(page.id, 'user-1', { componentAssetIds: JSON.stringify([asset.id]) });
+
+    const res = await GET(new NextRequest('http://localhost/x?editable=1'), { params: Promise.resolve({ id: page.id }) });
+    const body = await res.text();
+    expect(body).toContain('<img');
+  });
 });

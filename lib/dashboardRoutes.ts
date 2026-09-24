@@ -17,6 +17,7 @@ export const DASHBOARD_ROUTES: DashboardRoute[] = [
   { href: '/dashboard/assets', label: 'Assets' },
   { href: '/dashboard/styles', label: 'Style Bibles' },
   { href: '/dashboard/presets', label: 'Presets' },
+  { href: '/dashboard/website', label: 'Website' },
   { href: '/dashboard/export', label: 'Export' },
   { href: '/dashboard/drive', label: 'Drive' },
   { href: '/dashboard/settings', label: 'Settings' },
@@ -29,14 +30,29 @@ export const DASHBOARD_ROUTES: DashboardRoute[] = [
 ];
 
 // NavRail's own grouping -- Overview and the Settings hub render as their
-// own single links; every other route renders as one flat "tools" group in
-// between, and the 6 individual settings sub-routes are hidden from the
-// visible rail (still valid DASHBOARD_ROUTES entries, so the AI copilot can
-// still navigate straight to one directly). Exported from here rather than
-// computed inline in NavRail.tsx so this exact grouping can be tested
-// without rendering any React.
+// own single links; every other visible route renders under one of two
+// labeled groups (Assets: generation/management of individual UI assets;
+// Website: assembling and shipping a full site from those assets), and the
+// 6 individual settings sub-routes stay hidden from the visible rail (still
+// valid DASHBOARD_ROUTES entries, so the AI copilot can still navigate
+// straight to one directly). Exported from here rather than computed inline
+// in NavRail.tsx so this exact grouping can be tested without rendering any
+// React.
 export const NAV_OVERVIEW_ROUTE = DASHBOARD_ROUTES.find(r => r.href === '/dashboard')!;
 export const NAV_SETTINGS_HUB_ROUTE = DASHBOARD_ROUTES.find(r => r.href === '/dashboard/settings')!;
-export const NAV_PRIMARY_ROUTES = DASHBOARD_ROUTES.filter(
-  r => r.href !== '/dashboard' && r.href !== '/dashboard/settings' && !r.href.startsWith('/dashboard/settings/')
-);
+
+const ASSET_ROUTE_HREFS = [
+  '/dashboard/generate',
+  '/dashboard/ui-sheets',
+  '/dashboard/themes',
+  '/dashboard/components',
+  '/dashboard/jobs',
+  '/dashboard/assets',
+  '/dashboard/styles',
+  '/dashboard/presets',
+];
+const WEBSITE_ROUTE_HREFS = ['/dashboard/website', '/dashboard/export', '/dashboard/drive'];
+
+export const NAV_ASSET_ROUTES = DASHBOARD_ROUTES.filter(r => ASSET_ROUTE_HREFS.includes(r.href));
+export const NAV_WEBSITE_ROUTES = DASHBOARD_ROUTES.filter(r => WEBSITE_ROUTE_HREFS.includes(r.href));
+export const NAV_PRIMARY_ROUTES = [...NAV_ASSET_ROUTES, ...NAV_WEBSITE_ROUTES];

@@ -7,6 +7,11 @@ export interface FrameElementInfo {
   classes: string[];
   id: string | null; // the DOM `id` attribute the element may carry, NOT data-gf-id
   dataGfId: string | null;
+  // Populated only inside a page-mode composed document (composeEditablePageHtml, Task 1 of the
+  // website-builder-workbench plan) -- null for a single-component preview or any click that lands
+  // outside every composed item's wrapper.
+  componentAssetId: string | null;
+  componentRevisionHash: string | null;
   rect: DOMRect;
 }
 
@@ -48,6 +53,11 @@ export function getElementAt(frame: HTMLIFrameElement, frameX: number, frameY: n
   // returning null and showing nothing at all).
   const target = el.closest<HTMLElement>('[data-gf-id]') ?? el;
   const rect = target.getBoundingClientRect();
+  // Independent of `target` above -- a page-mode wrapper (composeEditablePageHtml) is an ancestor
+  // of whatever data-gf-id element target resolved to, so walking from `el` (inclusive) finds the
+  // same nearest wrapper either way. Null for single-component previews, which never emit this
+  // attribute at all.
+  const componentWrapper = el.closest<HTMLElement>('[data-gf-component-asset-id]');
   return {
     tagName: target.tagName.toLowerCase(),
     classes: Array.from(target.classList),
@@ -57,6 +67,8 @@ export function getElementAt(frame: HTMLIFrameElement, frameX: number, frameY: n
     // "absent" — not "has a value" — to satisfy the "null means absent/unselectable" contract
     // ElementPatchPanel's `dataGfId === null` check relies on.
     dataGfId: target.getAttribute('data-gf-id') || null,
+    componentAssetId: componentWrapper?.getAttribute('data-gf-component-asset-id') || null,
+    componentRevisionHash: componentWrapper?.getAttribute('data-gf-rev') || null,
     rect,
   };
 }

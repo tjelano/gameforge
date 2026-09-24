@@ -57,9 +57,20 @@ export function ElementPatchPanel({ patchEndpoint, selection, onPatched }: Eleme
   // selects something else, not just on the panel's final real unmount — so it aborts whatever
   // request belonged to the element being switched away from, with no selection-keyed effect
   // needed for that either.
+  //
+  // `dataGfId` alone is NOT enough to key on: it's only unique within one previewed document.
+  // PreviewFrame's page mode (kind="page", composeEditablePageHtml) composes several components
+  // onto one page at once, and each composed component's own dataGfId sequence independently
+  // restarts at 1 (see test/inspectFrame.test.ts's "resolves componentAssetId..." test, which
+  // deliberately uses data-gf-id="1" in two different wrapped components to prove per-wrapper
+  // scoping). Without componentAssetId in the key, clicking component A's "1" then component B's
+  // "1" produces the same key both times, so React skips the remount and A's stale
+  // instruction/error state silently carries over into B. componentAssetId is null (constant) for
+  // single-component preview mode, so this is a no-op there — the key degenerates to the same
+  // ":<dataGfId>" shape as before, still unique per element within that one document.
   return (
     <ElementPatchPanelInner
-      key={selection.dataGfId ?? 'unselectable'}
+      key={`${selection.componentAssetId ?? ''}:${selection.dataGfId ?? 'unselectable'}`}
       patchEndpoint={patchEndpoint}
       selection={selection}
       onPatched={onPatched}

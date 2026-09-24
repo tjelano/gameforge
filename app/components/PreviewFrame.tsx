@@ -22,10 +22,14 @@ interface PreviewFrameProps {
   src?: string;
   /** Border/radius on the wrapper — omit for thumbnails whose own outer box already draws one. */
   border?: boolean;
-  /** Component previews only: enables the sandbox relaxation and select-mode toggle. */
-  kind?: 'component';
-  /** Enables the Apply UI once an element is selected. Omit for highlight-only select mode. */
-  patchEndpoint?: string;
+  /** Component and page previews: enables the sandbox relaxation and select-mode toggle. */
+  kind?: 'component' | 'page';
+  /**
+   * Enables the Apply UI once an element is selected. Omit for highlight-only select mode. A
+   * function is called with the clicked element's info to resolve the endpoint per click — used by
+   * kind="page", where each click can target a different composed component's own asset id.
+   */
+  patchEndpoint?: string | ((info: FrameElementInfo) => string);
   /**
    * Component previews only: fires on every click, independent of whether select mode is on.
    * Never fires while fullscreen — a consumer of this (e.g. "jump to source" in a sibling
@@ -48,7 +52,7 @@ type Breakpoint = (typeof BREAKPOINTS)[number];
 // sanitizer in the first place), and the route's CSP (COMPONENT_PREVIEW_CSP) is a required
 // invariant of this relaxation.
 function resolveSandbox(kind: PreviewFrameProps['kind']): '' | 'allow-same-origin' {
-  return kind === 'component' ? 'allow-same-origin' : '';
+  return kind === 'component' || kind === 'page' ? 'allow-same-origin' : '';
 }
 
 // Fullscreens the WRAPPER div, not the iframe. For non-component previews the iframe keeps
@@ -77,6 +81,10 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
   const [selectMode, setSelectMode] = useState(false);
   const [selection, setSelection] = useState<(FrameElementInfo & { documentHash: string | null }) | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Component and page previews share every piece of the select/highlight/patch machinery below —
+  // they differ only in how a click's documentHash is resolved (see handleClick in attachAll) and
+  // in what patchEndpoint (Task 6/7 of the workbench plan) resolves to per click.
+  const isEditablePreview = kind === 'component' || kind === 'page';
 
   // `fullscreenchange` fires on `document`, not scoped to one element — many PreviewFrame
   // instances can be mounted at once (e.g. one per page on the style hub), so every instance's
@@ -114,7 +122,7 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
   const attachAll = useCallback(() => {
     const frame = iframeRef.current;
     if (!frame) return;
-    const cleanupAnchor = kind === 'component' ? preventFrameAnchorNavigation(frame) : undefined;
+    const cleanupAnchor = isEditablePreview ? preventFrameAnchorNavigation(frame) : undefined;
     // Listeners attach to the frame's own contentWindow, not the parent window — clientX/clientY
     // on an event from a listener on the frame's own window are already relative to the frame's
     // own viewport, which is exactly what getElementAt (lib/preview/inspectFrame.ts) requires.
@@ -126,7 +134,11 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
     function handleClick(e: MouseEvent) {
       const info = getElementAt(frame!, e.clientX, e.clientY);
       if (selectMode) {
-        const documentHash = getRevisionHash(frame!);
+        // Page mode composes multiple components into one document -- there is no single
+        // page-wide gf-rev meta tag that could mean anything (each component has its own revision).
+        // componentRevisionHash (Task 2) is the per-wrapper hash the patch-element endpoint expects
+        // instead.
+        const documentHash = kind === 'page' ? (info?.componentRevisionHash ?? null) : getRevisionHash(frame!);
         setSelection(info ? { ...info, documentHash } : null);
       }
       // Never while fullscreen: a typical onElementClick consumer (e.g. "jump to source" in a
@@ -141,11 +153,14 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
       if (selectMode) frame.contentWindow?.removeEventListener('mousemove', handleMouseMove);
       frame.contentWindow?.removeEventListener('click', handleClick);
     };
-  }, [kind, selectMode]);
+    // `isEditablePreview` is a pure derivation of `kind` (already listed below), never an
+    // independent input — it cannot change without `kind` also changing, so listing it here is
+    // purely to satisfy exhaustive-deps and never adds a real re-creation case beyond `kind` alone.
+  }, [kind, selectMode, isEditablePreview]);
 
   useEffect(() => {
     const frame = iframeRef.current;
-    if (!frame || kind !== 'component' || !(selectMode || onElementClick)) return;
+    if (!frame || !isEditablePreview || !(selectMode || onElementClick)) return;
     let cleanupAll = attachAll();
     function handleLoad() {
       cleanupAll?.();
@@ -208,7 +223,7 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
   // and edit/page.tsx already use (their own `previewVersion` state) — this component's reload is
   // scoped to component-kind patches specifically, so it appends its own key rather than depending
   // on a parent-supplied version.
-  const effectiveSrc = kind === 'component' && src ? `${src}&patchV=${reloadKey}` : src;
+  const effectiveSrc = isEditablePreview && src ? `${src}&patchV=${reloadKey}` : src;
 
   return (
     <div
@@ -248,7 +263,7 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
               {bp[0].toUpperCase() + bp.slice(1)}
             </button>
           ))}
-          {kind === 'component' ? (
+          {isEditablePreview ? (
             <button
               type="button"
               className="preview-frame-breakpoint-btn"
@@ -270,8 +285,12 @@ export function PreviewFrame({ title, width, height, scale, srcDoc, src, border,
           ⛶
         </button>
       )}
-      {kind === 'component' && patchEndpoint && selection ? (
-        <ElementPatchPanel patchEndpoint={patchEndpoint} selection={selection} onPatched={handlePatched} />
+      {isEditablePreview && patchEndpoint && selection ? (
+        <ElementPatchPanel
+          patchEndpoint={typeof patchEndpoint === 'function' ? patchEndpoint(selection) : patchEndpoint}
+          selection={selection}
+          onPatched={handlePatched}
+        />
       ) : null}
     </div>
   );
