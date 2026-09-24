@@ -19,7 +19,8 @@ export async function GET(req: NextRequest) {
     });
 
     const assets = await assetService.getPage(params.limit, params.offset);
-    return NextResponse.json({ success: true, data: assets });
+    const withContrast = await assetService.withContrastData(assets);
+    return NextResponse.json({ success: true, data: withContrast });
   } catch (error: any) {
     if (error instanceof ZodError) {
       return NextResponse.json({

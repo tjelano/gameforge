@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Asset } from '@/lib/database/schema';
+import type { AssetWithContrast } from '@/lib/database/schema';
 import { AssetCard } from '@/app/components/AssetCard';
 
 const PAGE_SIZE = 50;
 
 export default function AssetsPage() {
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assets, setAssets] = useState<AssetWithContrast[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);

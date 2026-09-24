@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use as usePromise } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Asset, Style, OutputKind, Page } from '@/lib/database/schema';
+import type { Style, OutputKind, Page, AssetWithContrast } from '@/lib/database/schema';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { AssetCard } from '@/app/components/AssetCard';
 import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
@@ -21,7 +21,7 @@ export default function StyleHubPage({ params }: { params: Promise<{ id: string 
   const { user } = useCurrentUser();
 
   const [style, setStyle] = useState<Style | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assets, setAssets] = useState<AssetWithContrast[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [pages, setPages] = useState<Page[]>([]);

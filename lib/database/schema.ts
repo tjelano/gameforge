@@ -41,6 +41,15 @@ export const AssetSchema = z.object({
 });
 export type Asset = z.infer<typeof AssetSchema>;
 
+// Not a DB column -- computed at request time by AssetService.withContrastData() and attached to
+// list-endpoint responses. Lives here (not in AssetService.ts, which imports fs/path/ThemeGenerator
+// for that computation) so client components can import the type without pulling in server-only code.
+export interface AssetContrast {
+  ratio: number;
+  meetsAA: boolean;
+}
+export type AssetWithContrast = Asset & { contrast: AssetContrast | null };
+
 export const JobStatusSchema = z.enum([
   'pending',
   'processing',

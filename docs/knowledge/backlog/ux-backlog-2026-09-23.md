@@ -8,21 +8,25 @@ Five items the user raised mid-session on 2026-09-23, explicitly "planned for la
 scoped or actioned, no design/plan exists for any of them. Do not start on these without the user
 opening the topic first.
 
-1. **Dashboard navigation feels slow — diagnosed, not yet fixed or confirmed live.** Root cause
-   candidate: zero `loading.tsx` files exist anywhere in the app. Next.js App Router shows nothing
-   during a client-side navigation unless the route segment has its own `loading.tsx` — without
-   one, a click sits with no feedback until the destination page's JS loads and fully renders
-   (including its client-side `useEffect`-driven data fetch, this app's established per-page
-   pattern). Fix candidate: add a `loading.tsx` per dashboard route segment (or at least one
-   dashboard-wide) with a simple skeleton/spinner.
-   **Complication:** user measured LCP of 14-18 seconds in Chrome DevTools — much worse than a
-   missing `loading.tsx` alone typically explains (that mostly hurts perceived responsiveness
-   during client-side nav, not raw paint timing this badly). If testing was on `next dev` (not a
-   production build), Next.js dev-mode on-demand route compilation (each route recompiles fresh on
-   first visit) is a strong, cheap-to-rule-out alternative/contributing cause. Check whether LCP
-   drops sharply on a second visit to the same route (would confirm compile-time, not runtime) and
-   whether it holds up under `next build && next start` before treating the `loading.tsx` theory as
-   the whole story. Both causes could be contributing simultaneously.
+1. **Dashboard navigation feels slow — REAL CAUSE FOUND AND FIXED 2026-09-24, was not the
+   `loading.tsx` theory.** The original theory (missing `loading.tsx` files, or dev-mode Turbopack
+   on-demand compilation) was re-checked empirically before acting on it and both turned out to be
+   minor at most: a cold client-side transition measured ~178ms to first paint, and even a fully
+   cold `next dev` process (cache cleared, first-ever request) loaded a heavy page in ~615ms — nowhere
+   near the reported 14-18s LCP.
+   **The real cause:** `AssetCard.tsx` (rendered in a `.map()` on the Assets list page and the Style
+   Hub's asset grid) fetched its own WCAG contrast-check data independently per card
+   (`GET /api/assets/[id]/contrast`). With 50+ theme-kind assets on a page, that's 50+ simultaneous
+   HTTP requests all queuing behind the browser's per-origin connection limit — measured at ~2-3
+   seconds just for that data to resolve on this project's real dev data, and scaling worse as more
+   assets accumulate (exactly the "gets slower over time" pattern this kind of complaint usually
+   describes). See [[gotchas/per-card-fetch-n-plus-1]] for the full diagnosis and the general
+   pattern to watch for elsewhere.
+   **Fix:** moved the contrast computation server-side into the list endpoints themselves
+   (`AssetService.withContrastData()`), so it's computed once per page load instead of fetched N
+   times. Verified live: the same 50-badge page now loads in ~103ms via one API call instead of 100
+   queued ones. `loading.tsx` files still don't exist anywhere in the app and may still be worth
+   adding as a general polish item, but they were never the load-bearing fix here.
 
 2. **Assets page previews are a real bug, not just rough UX** — every asset's preview looks
    identical; they don't reflect how each asset actually looks. Treat as broken functionality when

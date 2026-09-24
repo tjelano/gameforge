@@ -7,7 +7,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     const assets = await assetService.getActiveAssetsForStyle(id);
-    return NextResponse.json({ success: true, data: assets });
+    const withContrast = await assetService.withContrastData(assets);
+    return NextResponse.json({ success: true, data: withContrast });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

@@ -1,14 +1,14 @@
 // app/components/AssetCard.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import type { Asset } from '@/lib/database/schema';
+import type { AssetWithContrast } from '@/lib/database/schema';
 import { buildThemePreviewHtml } from '@/lib/utils/themePreview';
 import { DriveBrowser } from '@/app/dashboard/drive/DriveBrowser';
 import { PreviewFrame } from '@/app/components/PreviewFrame';
 
-export function AssetCard({ asset }: { asset: Asset }) {
+export function AssetCard({ asset }: { asset: AssetWithContrast }) {
   const states: string[] = (() => {
     try {
       return JSON.parse(asset.states);
@@ -17,27 +17,14 @@ export function AssetCard({ asset }: { asset: Asset }) {
     }
   })();
 
-  const [contrast, setContrast] = useState<{ ratio: number; meetsAA: boolean } | null>(null);
+  // Attached server-side by the list endpoint (see AssetService.withContrastData) --
+  // NOT fetched per-card. Fetching this individually per rendered card used to fire
+  // one HTTP request per theme asset on the list page, which compounded into
+  // multi-second loads as the asset count grew (see docs/knowledge/gotchas/).
+  const contrast = asset.contrast;
   const [sharingToDrive, setSharingToDrive] = useState(false);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (asset.output_kind !== 'theme') return;
-    let ignore = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/assets/${asset.id}/contrast`);
-        const body = await res.json();
-        if (!ignore && body.success) setContrast(body.data);
-      } catch {
-        // Purely informational — a failed fetch just means no badge shows.
-      }
-    })();
-    return () => {
-      ignore = true;
-    };
-  }, [asset.id, asset.output_kind]);
 
   async function handleShareToDrive(parentFolderId: string) {
     if (sharingToDrive) return;

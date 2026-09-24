@@ -4,8 +4,10 @@ import path from 'path';
 import { DatabaseConnection } from '@/lib/database';
 import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { IO_WRITE_BATCH_SIZE } from '@/lib/config';
-import { AssetSchema, NineSliceMarginsSchema, type Asset, type NineSliceMargins } from '@/lib/database/schema';
+import { AssetSchema, NineSliceMarginsSchema, type Asset, type AssetWithContrast, type NineSliceMargins } from '@/lib/database/schema';
 import { sanitizeComponentCss } from '@/lib/services/componentSanitize';
+import { parseThemeCss } from '@/lib/services/ThemeGenerator';
+import { getContrastRatio, meetsWcagAA } from '@/lib/services/contrastChecker';
 
 class AssetServiceImpl {
   async create(input: {
@@ -133,6 +135,56 @@ class AssetServiceImpl {
       'SELECT * FROM assets WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT ? OFFSET ?'
     ).all(limit, offset);
     return rows.map(row => AssetSchema.parse(row));
+  }
+
+  /**
+   * Reads and parses a theme asset's CSS file. Shared by the single-asset contrast route
+   * (`/api/assets/[id]/contrast`) and `withContrastData` below, so the two never drift on how a
+   * theme file is located/parsed. Throws on any failure -- callers decide how to surface that
+   * (the route maps it to a specific status code; withContrastData treats it as contrast: null
+   * for just that one asset).
+   */
+  async readThemeTokens(assetId: string, imagePath: string) {
+    let css: string;
+    try {
+      css = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'themes', imagePath), 'utf-8');
+    } catch (e) {
+      console.error(`Failed to read theme file for contrast check (asset ${assetId}):`, e);
+      throw e;
+    }
+    try {
+      return parseThemeCss(css);
+    } catch (e) {
+      console.error(`Failed to parse theme CSS for contrast check (asset ${assetId}):`, e);
+      throw e;
+    }
+  }
+
+  /**
+   * Attaches each theme asset's contrast ratio in one pass, computed from its already-loaded
+   * row data -- for a LIST of assets. Do not fetch this per-asset over the network from a list
+   * page (that was the original bug: N assets meant N separate HTTP round trips, each queued
+   * behind the browser's per-origin connection limit, compounding into multi-second page loads
+   * as the asset count grew). A single-asset page fetching its own contrast via
+   * `/api/assets/[id]/contrast` is fine -- that's one request, not N.
+   */
+  async withContrastData(assets: Asset[]): Promise<AssetWithContrast[]> {
+    return Promise.all(assets.map(async asset => {
+      if (
+        asset.output_kind !== 'theme' || !asset.image_path ||
+        asset.image_path.includes('/') || asset.image_path.includes('\\') || asset.image_path.includes('..')
+      ) {
+        return { ...asset, contrast: null };
+      }
+      try {
+        const tokens = await this.readThemeTokens(asset.id, asset.image_path);
+        const ratio = getContrastRatio(tokens.colorBackground, tokens.colorForeground);
+        return { ...asset, contrast: { ratio, meetsAA: meetsWcagAA(ratio) } };
+      } catch (e) {
+        console.error(`Failed to compute contrast for asset ${asset.id}:`, e);
+        return { ...asset, contrast: null };
+      }
+    }));
   }
 
   /** Only the creator, or an admin, may delete an asset. Mirrors update() above. */

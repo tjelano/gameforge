@@ -1,10 +1,6 @@
 // app/api/assets/[id]/contrast/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import fsPromises from 'fs/promises';
-import path from 'path';
-import { getProjectRoot } from '@/lib/utils/projectRoot';
 import { assetService } from '@/lib/services/AssetService';
-import { parseThemeCss } from '@/lib/services/ThemeGenerator';
 import { getContrastRatio, meetsWcagAA } from '@/lib/services/contrastChecker';
 
 export const dynamic = 'force-dynamic';
@@ -27,20 +23,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ success: false, error: 'Invalid image path' }, { status: 400 });
   }
 
-  let css: string;
-  try {
-    css = await fsPromises.readFile(path.join(getProjectRoot(), 'storage', 'themes', asset.image_path), 'utf-8');
-  } catch (e) {
-    console.error(`Failed to read theme file for contrast check (asset ${id}):`, e);
-    return NextResponse.json({ success: false, error: 'Could not read the theme file' }, { status: 500 });
-  }
-
   let tokens;
   try {
-    tokens = parseThemeCss(css);
-  } catch (e) {
-    console.error(`Failed to parse theme CSS for contrast check (asset ${id}):`, e);
-    return NextResponse.json({ success: false, error: 'Could not parse the theme file' }, { status: 500 });
+    tokens = await assetService.readThemeTokens(id, asset.image_path);
+  } catch {
+    return NextResponse.json({ success: false, error: 'Could not read or parse the theme file' }, { status: 500 });
   }
 
   let ratio: number;
