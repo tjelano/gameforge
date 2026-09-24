@@ -12,6 +12,17 @@ function baseUrl(): string {
 }
 
 function newOAuthClient(): OAuth2Client {
+  // google-auth-library's generateAuthUrl() doesn't validate this itself --
+  // with a missing client_id it silently builds a URL like
+  // "...&client_id=&redirect_uri=" and redirects the browser straight to
+  // Google, which then shows its own generic "Error 400: invalid_request"
+  // page. Catching it here instead lets every caller's existing error
+  // handling (the connect route's try/catch -> ?error=not_configured) work
+  // as already intended, instead of the confusing page never getting a
+  // chance to show.
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    throw new Error('Google Drive is not configured -- set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.');
+  }
   return new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,

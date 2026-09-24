@@ -43,6 +43,18 @@ describe('driveService auth', () => {
     expect(url).toContain('scope=');
   });
 
+  it('getAuthUrl() throws a clear error instead of silently building a broken URL when GOOGLE_CLIENT_ID is missing', async () => {
+    vi.stubEnv('GOOGLE_CLIENT_ID', '');
+    const { driveService } = await import('@/lib/services/DriveService');
+    expect(() => driveService.getAuthUrl()).toThrow('Google Drive is not configured');
+  });
+
+  it('getAuthUrl() throws a clear error when GOOGLE_CLIENT_SECRET is missing', async () => {
+    vi.stubEnv('GOOGLE_CLIENT_SECRET', '');
+    const { driveService } = await import('@/lib/services/DriveService');
+    expect(() => driveService.getAuthUrl()).toThrow('Google Drive is not configured');
+  });
+
   it('exchangeCodeForTokens() stores the refresh token, making isConnected() true', async () => {
     const { driveService } = await import('@/lib/services/DriveService');
     const { OAuth2Client } = await import('google-auth-library');

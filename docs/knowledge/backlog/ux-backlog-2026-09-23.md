@@ -43,16 +43,16 @@ opening the topic first.
    the prompt), instead of the same fixed amber square. This is a real, independently-verified bug
    regardless of whether it's the exact one the user saw — user wasn't sure/didn't confirm whether
    their affected assets were `mock-*` files.
-   **Separate, discovered while investigating:** the project's own `PIXELLAB_API_KEY` in
-   `.env.local` is currently invalid — a direct test generation and a raw `curl` against Pixellab's
+   **Separate, discovered while investigating, RESOLVED 2026-09-24:** the project's `PIXELLAB_API_KEY`
+   in `.env.local` was invalid — a direct test generation and a raw `curl` against Pixellab's
    `/v2/balance` endpoint both returned `401: Invalid API token`. Confirmed the auth scheme itself
-   is correct (`Authorization: Bearer <token>`, matches Pixellab's live OpenAPI spec's
-   `HTTPBearer`/`bearer` scheme exactly) — this is a real, wrong/revoked token value, not a code
-   bug. Needs a working key from the Pixellab dashboard; not something fixable from this
-   repo. **If real generation has been silently failing for a while, that's a stronger candidate for
-   what the user actually saw** than the MockGenerator bug — worth reconciling if this resurfaces:
-   check whether affected assets are real `pixellab-*` files (generated before the key broke) vs.
-   `mock-*` files.
+   was correct (`Authorization: Bearer <token>`, matches Pixellab's live OpenAPI spec's
+   `HTTPBearer`/`bearer` scheme exactly) — a wrong/revoked token value, not a code bug. User updated
+   the key in `.env.local`; re-verified against `/v2/balance` and it now returns 200. **If real
+   generation had been silently failing for a while before this, that was a stronger candidate for
+   what the user originally saw** than the MockGenerator bug — worth reconciling if identical-preview
+   reports resurface: check whether affected assets are real `pixellab-*` files (generated before the
+   key broke) vs. `mock-*` files.
 
 3. **Dashboard IA doesn't distinguish UI-asset creation from website creation, and there's no
    single "create a full website" flow.** Two related asks:
@@ -69,11 +69,21 @@ opening the topic first.
      just doesn't cover this need. Fold "live editing" in as a requirement when this item gets
      brainstormed.
 
-4. **Google Drive connection fails: "Error 400: invalid_request"** on Google's own OAuth consent
-   screen when connecting a drive. Not yet diagnosed — classic Google OAuth error, usually a
-   redirect-URI mismatch, wrong/missing client ID, or a scope misconfiguration in the Google Cloud
-   Console project backing this integration. Check `app/api/drive/connect/route.ts` and whatever
-   env vars configure the OAuth client first.
+4. **Google Drive connection fails: "Error 400: invalid_request" — ROOT-CAUSED AND FIXED 2026-09-24.**
+   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` were never set in `.env.local`.
+   `google-auth-library`'s `generateAuthUrl()` doesn't validate these locally — with them missing it
+   silently builds a URL like `...&client_id=&redirect_uri=` and redirects the browser straight to
+   Google, which rejects it with exactly this generic error (confirmed by calling
+   `generateAuthUrl()` directly with undefined credentials and inspecting the output). The app
+   already had a friendly `?error=not_configured` fallback built for this exact case
+   (`app/api/drive/connect/route.ts`'s own try/catch) — it was just unreachable, since nothing threw
+   before reaching Google. **Fix:** `newOAuthClient()` (`lib/services/DriveService.ts`) now checks
+   for both env vars up front and throws a clear error if either is missing, so the existing
+   try/catch in the connect route actually fires. Verified live: clicking "Connect Google Drive" now
+   redirects to `?error=not_configured` and shows "Connection failed: not_configured" in-app, never
+   reaching Google's page at all. Real Drive integration still needs actual OAuth credentials set up
+   in a Google Cloud Console project — that's on the user if/when they want Drive working, not
+   something fixable from this repo.
 
 5. **Copilot conversation history doesn't seem to persist/load**, though it's unclear if this is a
    real bug or a symptom of item 1 (slow nav/loading generally). Needs isolating from general
