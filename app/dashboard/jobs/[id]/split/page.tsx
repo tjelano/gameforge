@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use as usePromise } from 'react';
 import { useRouter } from 'next/navigation';
-import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
+import { useDraggableBoxes, boxKeyboardDelta } from '@/lib/hooks/useDraggableBoxes';
 import type { PlacedPiece } from '@/lib/utils/pieceShapes';
 import type { Job } from '@/lib/database/schema';
 
@@ -173,6 +173,11 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
         {draggable.boxes.map(box => (
           <div
             key={box.id}
+            className="crop-box"
+            tabIndex={0}
+            role="group"
+            aria-label={`Piece: ${box.label || 'unlabeled'}`}
+            aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight"
             style={{
               position: 'absolute',
               left: box.x,
@@ -184,11 +189,18 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
               cursor: 'move',
             }}
             onMouseDown={e => draggable.startDrag(box.id, 'move', e.clientX, e.clientY)}
+            onKeyDown={e => {
+              const patch = boxKeyboardDelta(e.key, e.shiftKey, box);
+              if (!patch) return;
+              draggable.updateBox(box.id, patch);
+              e.preventDefault();
+            }}
           >
             <input
               value={box.label}
               onChange={e => draggable.updateBox(box.id, { label: e.target.value })}
               onMouseDown={e => e.stopPropagation()}
+              onKeyDown={e => e.stopPropagation()}
               placeholder="label (required)"
               style={{ width: '90%', fontSize: 11, background: 'rgba(0,0,0,0.6)', border: 'none', color: 'var(--ink)' }}
             />
@@ -198,6 +210,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
             />
             <button
               onClick={() => draggable.updateBox(box.id, { included: !box.included })}
+              onKeyDown={e => e.stopPropagation()}
               aria-label={box.included ? 'Exclude piece from split' : 'Include piece in split'}
               style={{ position: 'absolute', top: -8, right: -8, width: 16, height: 16, fontSize: 10, lineHeight: 1 }}
             >

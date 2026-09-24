@@ -111,6 +111,20 @@ async function main() {
     return;
   }
 
+  // The inverse of the above, and just as silent: omitting --system only
+  // makes sense to RESUME an existing thread. If historyFile doesn't exist
+  // either, this is neither a valid fresh Round 1 (no --system given) nor a
+  // valid resume (nothing to resume) -- almost always a caller re-running a
+  // failed Round 1 call without re-adding --system, mistaking it for a
+  // resume. Caught for real: a DeepSeek call timed out before ever writing
+  // history, and a bare retry of the same command would have silently sent
+  // no system prompt at all with no error.
+  if (flag !== "--system" && !existsSync(historyFile)) {
+    console.error(`${historyFile} doesn't exist yet and no --system flag was given -- nothing to resume. Pass --system <system-file> for a fresh Round 1, or check the history-file path if you meant to resume.`);
+    process.exitCode = 2;
+    return;
+  }
+
   let history = [];
   if (existsSync(historyFile)) {
     let historyText;
@@ -132,14 +146,15 @@ async function main() {
 
   history.push({ role: "user", content: readFileSync(messageFile, "utf8") });
 
-  // 5 minutes: generous for a high-effort reasoning call on a large diff/plan,
-  // but bounded so a hung connection doesn't stall the whole review session
-  // indefinitely with no feedback.
-  const PROVIDER_TIMEOUT_MS = 5 * 60 * 1000;
+  // 10 minutes: a real 108KB/14-task plan review (high-effort reasoning,
+  // OpenRouter) genuinely took longer than an earlier 5-minute bound allowed
+  // -- that wasn't a hang, just a big-enough job. Still bounded so a truly
+  // dead connection doesn't stall the session forever with no feedback.
+  const PROVIDER_TIMEOUT_MS = 10 * 60 * 1000;
 
-  let res;
+  let bodyText;
   try {
-    res = await fetch(baseUrl, {
+    const res = await fetch(baseUrl, {
       method: "POST",
       // A redirect response would otherwise be followed automatically
       // (fetch's default), silently carrying the Authorization header's API
@@ -161,16 +176,19 @@ async function main() {
         ...(useOpenRouter ? { reasoning: { effort: "high" } } : {}),
       }),
     });
+    // The abort signal guards the whole request lifecycle, including
+    // streaming the response body -- res.text() must stay inside this same
+    // try, not after it. A large/slow response can abort mid-body-read even
+    // after fetch() itself already resolved with headers, and that threw
+    // uncaught here once for real (a 108KB plan review) before this fix.
+    bodyText = await res.text();
+    if (!res.ok) {
+      console.error(`DeepSeek call failed: HTTP ${res.status}\n${bodyText}`);
+      process.exitCode = 1;
+      return;
+    }
   } catch (e) {
     console.error(`DeepSeek call failed: ${e.name === "TimeoutError" ? `no response after ${PROVIDER_TIMEOUT_MS / 1000}s` : e.message}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const bodyText = await res.text();
-
-  if (!res.ok) {
-    console.error(`DeepSeek call failed: HTTP ${res.status}\n${bodyText}`);
     process.exitCode = 1;
     return;
   }

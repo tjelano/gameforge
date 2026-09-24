@@ -46,29 +46,37 @@ export default function ExportPage() {
         project (2D only for V1).
       </p>
 
-      <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
-        <StyleBiblePicker styles={styles} value={styleId} onChange={setSelectedStyleId} />
-
-        {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{stylesError}</p>}
-
-        <div className="field">
-          <label htmlFor="subdir">Export folder name</label>
-          <input id="subdir" value={subdir} onChange={e => setSubdir(e.target.value)} placeholder="godot" />
+      {stylesLoading ? (
+        <p className="page-subtitle">Loading…</p>
+      ) : !stylesError && styles.length === 0 ? (
+        <div className="empty-state">
+          No Style Bibles yet. Create one on the <strong>Style Bibles</strong> page before exporting.
         </div>
+      ) : (
+        <form className="card" onSubmit={handleExport} style={{ maxWidth: 420 }}>
+          <StyleBiblePicker styles={styles} value={styleId} onChange={setSelectedStyleId} />
 
-        <button className="btn btn-primary" type="submit" disabled={running || !styleId || !subdir.trim() || stylesLoading}>
-          {running ? 'Exporting…' : 'Export to Godot'}
-        </button>
+          {stylesError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{stylesError}</p>}
 
-        {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{error}</p>}
+          <div className="field">
+            <label htmlFor="subdir">Export folder name</label>
+            <input id="subdir" value={subdir} onChange={e => setSubdir(e.target.value)} placeholder="godot" />
+          </div>
 
-        {result && (
-          <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 14 }}>
-            Exported {result.exported} asset{result.exported === 1 ? '' : 's'}
-            {result.skipped > 0 ? ` (${result.skipped} skipped)` : ''} to <code>{result.targetDir}</code>.
-          </p>
-        )}
-      </form>
+          <button className="btn btn-primary" type="submit" disabled={running || !styleId || !subdir.trim() || stylesLoading}>
+            {running ? 'Exporting…' : 'Export to Godot'}
+          </button>
+
+          {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 14 }}>{error}</p>}
+
+          {result && (
+            <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginTop: 14 }}>
+              Exported {result.exported} asset{result.exported === 1 ? '' : 's'}
+              {result.skipped > 0 ? ` (${result.skipped} skipped)` : ''} to <code>{result.targetDir}</code>.
+            </p>
+          )}
+        </form>
+      )}
     </>
   );
 }

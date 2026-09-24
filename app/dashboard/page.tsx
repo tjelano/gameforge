@@ -4,34 +4,43 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { ProjectContextSummary } from '@/lib/services/projectContext';
 import type { ActivityItem } from '@/lib/services/recentActivity';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { POLL_INTERVAL_MS } from '@/lib/config';
 
 export default function OverviewPage() {
   const [context, setContext] = useState<ProjectContextSummary | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [workerAlive, setWorkerAlive] = useState<boolean | null>(null);
 
   useEffect(() => {
     let ignore = false;
     (async () => {
-      try {
-        const [contextRes, activityRes] = await Promise.all([
-          fetch('/api/context'),
-          fetch('/api/dashboard/activity'),
-        ]);
-        const contextBody = await contextRes.json();
-        const activityBody = await activityRes.json();
-        if (!ignore) {
-          if (contextBody.success) setContext(contextBody.data);
-          if (activityBody.success) setActivity(activityBody.data);
+      const [contextResult, activityResult] = await Promise.allSettled([
+        fetch('/api/context').then(r => r.json()),
+        fetch('/api/dashboard/activity').then(r => r.json()),
+      ]);
+      if (!ignore) {
+        if (contextResult.status === 'fulfilled' && contextResult.value.success) {
+          setContext(contextResult.value.data);
         }
-      } catch {
-        // Non-fatal -- the page just shows zeros/an empty activity list.
-      } finally {
-        if (!ignore) setLoading(false);
+        if (activityResult.status === 'fulfilled' && activityResult.value.success) {
+          setActivity(activityResult.value.data);
+        }
+        setLoading(false);
       }
     })();
     return () => { ignore = true; };
   }, []);
+
+  usePolling(async () => {
+    try {
+      const body = await fetch('/api/dashboard/worker-status').then(r => r.json());
+      if (body.success) setWorkerAlive(body.data.alive);
+    } catch {
+      // Non-fatal -- the indicator just keeps its last known value.
+    }
+  }, POLL_INTERVAL_MS);
 
   return (
     <>
@@ -51,6 +60,16 @@ export default function OverviewPage() {
           <div className="stat-card-label">Jobs in flight</div>
           <div className="stat-card-value">{loading ? '—' : context?.inFlightJobs ?? 0}</div>
         </div>
+        <div className="card" style={{ flex: 1, minWidth: 140 }}>
+          <div className="stat-card-label">Worker</div>
+          <div className="stat-card-value" style={{ fontSize: 15 }}>
+            {loading || workerAlive === null
+              ? '—'
+              : workerAlive
+                ? <span style={{ color: '#3fb950' }}>● running</span>
+                : <span style={{ color: 'var(--reject)' }}>○ not detected</span>}
+          </div>
+        </div>
       </div>
 
       <h2 className="frame-label" style={{ marginBottom: 12 }}>Quick actions</h2>
@@ -61,15 +80,21 @@ export default function OverviewPage() {
       </div>
 
       <h2 className="frame-label" style={{ marginBottom: 12 }}>Recent activity</h2>
-      {!loading && activity.length === 0 ? (
+      {loading ? (
+        <p className="page-subtitle">Loading…</p>
+      ) : activity.length === 0 ? (
         <div className="empty-state">No recent activity yet. Generate something to see it here.</div>
       ) : (
         <div>
           {activity.map(item => (
-            <div key={item.id} className="activity-row">
+            <Link
+              key={item.id}
+              href={item.kind === 'job' ? '/dashboard/jobs' : `/dashboard/styles/${item.id}`}
+              className="activity-row"
+            >
               <div>{item.label}</div>
               <div className="activity-row-meta">{new Date(item.timestamp).toLocaleString()}</div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

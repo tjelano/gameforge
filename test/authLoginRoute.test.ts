@@ -70,4 +70,24 @@ describe('POST /api/auth/login', () => {
     const res = await POST(postRequest({ nonsense: true }));
     expect(res.status).toBe(400);
   });
+
+  it('still 403s a {name} POST with no force flag when users already exist (unpulled-git-sync guard)', async () => {
+    await userService.create({ name: 'Alice' });
+    const res = await POST(postRequest({ name: 'Bob' }));
+    expect(res.status).toBe(403);
+    expect((await userService.getAll()).length).toBe(1);
+  });
+
+  it('creates a new account when force:true is sent, even though users already exist', async () => {
+    await userService.create({ name: 'Alice' });
+    const res = await POST(postRequest({ name: 'Bob', force: true }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.name).toBe('Bob');
+    // The core safety property this task's brief relies on: force can never
+    // grant admin, since UserService.create() derives is_admin from its own
+    // fresh COUNT(*) at insert time, independent of the client-sent flag.
+    expect(body.data.isAdmin).toBe(false);
+    expect((await userService.getAll()).length).toBe(2);
+  });
 });

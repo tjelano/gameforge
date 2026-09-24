@@ -10,7 +10,27 @@ interface Box {
   h: number;
 }
 
-const MIN_SIZE = 8;
+export const MIN_SIZE = 8;
+const KEYBOARD_STEP = 4;
+
+// Pure and exported so both real consumer pages (split/page.tsx,
+// ui-sheets/page.tsx) call this exact function from their onKeyDown
+// handlers instead of each hand-copying the same logic, and so a test can
+// exercise the real behavior directly rather than a reimplementation of it.
+// Returns the FINAL absolute patch (not a relative delta) so the call site
+// is always just `const patch = boxKeyboardDelta(...); if (patch)
+// updateBox(box.id, patch);` -- no per-page branching left to get wrong.
+export function boxKeyboardDelta(
+  key: string,
+  shiftKey: boolean,
+  box: { x: number; y: number; w: number; h: number },
+): { x: number } | { y: number } | { w: number } | { h: number } | null {
+  if (key === 'ArrowRight') return shiftKey ? { w: Math.max(MIN_SIZE, box.w + KEYBOARD_STEP) } : { x: box.x + KEYBOARD_STEP };
+  if (key === 'ArrowLeft') return shiftKey ? { w: Math.max(MIN_SIZE, box.w - KEYBOARD_STEP) } : { x: box.x - KEYBOARD_STEP };
+  if (key === 'ArrowDown') return shiftKey ? { h: Math.max(MIN_SIZE, box.h + KEYBOARD_STEP) } : { y: box.y + KEYBOARD_STEP };
+  if (key === 'ArrowUp') return shiftKey ? { h: Math.max(MIN_SIZE, box.h - KEYBOARD_STEP) } : { y: box.y - KEYBOARD_STEP };
+  return null;
+}
 
 export function useDraggableBoxes<T extends Box>(initial: T[]) {
   const [boxes, setBoxes] = useState<T[]>(initial);

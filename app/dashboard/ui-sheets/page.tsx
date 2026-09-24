@@ -5,7 +5,7 @@ import { useStyles } from '@/lib/hooks/useStyles';
 import { usePolling } from '@/lib/hooks/usePolling';
 import { useJobStore } from '@/lib/store/useJobStore';
 import { JobCard } from '@/app/components/JobCard';
-import { useDraggableBoxes } from '@/lib/hooks/useDraggableBoxes';
+import { useDraggableBoxes, boxKeyboardDelta } from '@/lib/hooks/useDraggableBoxes';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 import {
   PIECE_PRESETS,
@@ -162,6 +162,11 @@ export default function UiSheetsPage() {
             {boxes.map(box => (
               <div
                 key={box.id}
+                className="crop-box"
+                tabIndex={0}
+                role="group"
+                aria-label={`Piece: ${box.label || 'unlabeled'}`}
+                aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Shift+ArrowUp Shift+ArrowDown Shift+ArrowLeft Shift+ArrowRight"
                 style={{
                   position: 'absolute',
                   left: box.x,
@@ -173,11 +178,18 @@ export default function UiSheetsPage() {
                   cursor: 'move',
                 }}
                 onMouseDown={e => startDrag(box.id, 'move', e.clientX, e.clientY)}
+                onKeyDown={e => {
+                  const patch = boxKeyboardDelta(e.key, e.shiftKey, box);
+                  if (!patch) return;
+                  updateBox(box.id, patch);
+                  e.preventDefault();
+                }}
               >
                 <input
                   value={box.label}
                   onChange={e => updateBox(box.id, { label: e.target.value })}
                   onMouseDown={e => e.stopPropagation()}
+                  onKeyDown={e => e.stopPropagation()}
                   placeholder="label"
                   style={{ width: '90%', fontSize: 11, background: 'transparent', border: 'none', color: 'var(--ink)' }}
                 />
@@ -187,6 +199,7 @@ export default function UiSheetsPage() {
                 />
                 <button
                   onClick={() => removeBox(box.id)}
+                  onKeyDown={e => e.stopPropagation()}
                   aria-label="Remove piece"
                   style={{ position: 'absolute', top: -8, right: -8, width: 16, height: 16, fontSize: 10, lineHeight: 1 }}
                 >
