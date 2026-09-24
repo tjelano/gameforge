@@ -118,10 +118,12 @@ opening the topic first.
    macrotask delay inside `act()` made it correctly fail against the unguarded code and pass against
    the fix.
 
-6. **Copilot should always run on the connected Ollama model when one is available** — raised
-   2026-09-24. Currently the copilot lets the user pick Claude vs. Ollama vs. OpenRouter per message
-   (see `lib/services/CopilotMessageService.ts` or equivalent); the ask is to default to/prefer
-   Ollama automatically whenever a local model is connected, rather than requiring an explicit
-   per-message choice. Not yet scoped — needs deciding: is this a changed default with the picker
-   still available, or should the picker go away entirely when Ollama is connected? Check
-   `app/dashboard/settings/ollama` for how "connected" is currently detected before implementing.
+6. **Copilot should always run on the connected Ollama model when one is available — ALREADY
+   IMPLEMENTED, confirmed 2026-09-24, no change needed.** `CopilotPanel.tsx`'s
+   `selectedProvider = pickedProvider ?? (ollamaModels.length > 0 ? ollamaModels[0] : 'claude')`
+   already defaults to the first connected Ollama model unless the user explicitly picks something
+   else in the dropdown (a real pick always wins once made). Verified live: opening the panel fresh
+   with a real local Ollama instance connected pre-selected a local model with no user action. User
+   confirmed this already satisfies the request when asked whether they wanted the provider picker
+   removed entirely, or the preference extended to other AI surfaces (Themes/Components
+   generation) — neither, this was it.

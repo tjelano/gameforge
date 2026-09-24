@@ -10,7 +10,7 @@ starting new research on a topic; don't re-derive something already answered.
 - [Reactive persist-effect races an async restore-effect on mount](gotchas/reactive-persist-effect-races-async-restore.md) — a `useEffect` that syncs state to storage also fires on first mount with the state's initial value, which can wipe what a previous mount stored before an async restore effect reads it; a synchronous test mock of an async hook won't catch this.
 
 ## backlog/
-- [UX backlog raised 2026-09-23](backlog/ux-backlog-2026-09-23.md) — slow nav, asset previews, Drive OAuth, and copilot history persistence all FIXED 2026-09-24. Remaining: unified website-creation flow w/ live editing, copilot-always-prefers-Ollama.
+- [UX backlog raised 2026-09-23](backlog/ux-backlog-2026-09-23.md) — slow nav, asset previews, Drive OAuth, copilot history persistence all FIXED 2026-09-24; copilot-prefers-Ollama confirmed already implemented. Remaining: unified website-creation flow w/ live editing (needs brainstorming).
 
 ## research/
 _(empty)_
