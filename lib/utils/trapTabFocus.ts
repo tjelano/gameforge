@@ -7,6 +7,11 @@ const FOCUSABLE_SELECTOR =
  * actually behave as modal to keyboard users. Call from a Tab keydown
  * handler; queries focusables live so it stays correct as dialog content
  * changes (e.g. a nested folder browser re-rendering its own controls).
+ *
+ * Only wraps at the first/last focusable element -- relies on the caller
+ * seeding initial focus inside `container` when the dialog opens (both
+ * current call sites do). If a future caller doesn't, focus starting
+ * outside `container` won't get pulled in.
  */
 export function trapTabFocus(e: KeyboardEvent, container: HTMLElement): void {
   if (e.key !== 'Tab') return;
