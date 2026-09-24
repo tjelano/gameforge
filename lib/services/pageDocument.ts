@@ -71,17 +71,15 @@ function composeItems(
   // pipeline: invisible for a downloaded export (browser default is already
   // white), but a real bug for the Website Builder Workbench's live iframe
   // preview, which sits on top of the dark dashboard and shows straight
-  // through when empty/sparse. Kept on the same source line as the opening
-  // <style> tag (not its own line) so it doesn't trip the "a component's own
-  // `body { ... }` selector never appears unscoped" regression test below,
-  // which only checks for a *line* starting with "body {".
+  // through when empty/sparse.
   const bodyBaseCss = 'body { margin: 0; background: var(--color-bg, #fff); color: var(--color-fg, #212529); font-family: var(--font-body, sans-serif); }';
 
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-${themeBlock}<style>${bodyBaseCss}
+${themeBlock}<style>
+${bodyBaseCss}
 ${styleBlocks.join('\n')}
 </style>
 </head>

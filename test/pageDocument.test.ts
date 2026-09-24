@@ -31,9 +31,14 @@ describe('composePageHtml', () => {
     const html = composePageHtml([
       { html: '<p>hi</p>', css: 'body { margin: 0; }' },
     ]);
-    expect(html).not.toMatch(/^\s*body\s*\{/m); // never appears unscoped
-    expect(html).toContain('body { margin: 0; }'); // still present, but scoped
-    expect(html).toMatch(/\.page-item-0\s+body/);
+    // The component's own `body { margin: 0; }` rule must never appear
+    // unscoped/un-prefixed -- only as ".page-item-0 body { margin: 0; }".
+    // (Not a blanket "no line starts with body{" check: composeItems' own
+    // framework-owned base body rule is a legitimate, intentional unscoped
+    // body rule with different content, and a check keyed on line-start
+    // position would be fragile against it.)
+    expect(html).not.toContain('\nbody { margin: 0; }');
+    expect(html).toContain('.page-item-0 body { margin: 0; }');
   });
 
   it('injects theme CSS exactly once regardless of component count', () => {
