@@ -7,6 +7,11 @@ import { useStyles } from '@/lib/hooks/useStyles';
 import { StyleBiblePicker } from '@/app/components/StyleBiblePicker';
 import { PageEditor } from '@/app/components/PageEditor';
 import { PreviewFrame } from '@/app/components/PreviewFrame';
+import { useJobStore } from '@/lib/store/useJobStore';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { JobCard } from '@/app/components/JobCard';
+
+const COMPONENT_TYPES = ['Button', 'Card', 'Nav Bar', 'Form', 'Other'] as const;
 
 export default function WebsiteWorkbenchPage() {
   const { styles, loading: stylesLoading, error: stylesError } = useStyles();
@@ -20,6 +25,19 @@ export default function WebsiteWorkbenchPage() {
   const [deletingPageId, setDeletingPageId] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
+
+  // Scoped to this Style Bible specifically (unlike the Components page's own global "Live queue",
+  // which shows every style's in-flight component jobs) -- the workbench is a Style-Bible-scoped
+  // building surface, so an unrelated style's jobs would just be noise here.
+  const jobs = useJobStore(s => s.jobs).filter(j => j.output_kind === 'component' && j.style_id === activeStyleId);
+  const refreshActiveJobs = useJobStore(s => s.refreshActive);
+  usePolling(refreshActiveJobs, 2000);
+
+  const [componentType, setComponentType] = useState<typeof COMPONENT_TYPES[number]>('Button');
+  const [componentPrompt, setComponentPrompt] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [promotingJobId, setPromotingJobId] = useState<string | null>(null);
 
   // Reset the page selection when the active Style Bible changes. Done as a conditional
   // render-phase update (React's documented "adjusting state when a prop changes" pattern —
@@ -151,6 +169,58 @@ export default function WebsiteWorkbenchPage() {
     }
   }
 
+  // ponytail: always generates via Claude (no provider picker), unlike the full Components page
+  // (app/dashboard/components/page.tsx), which also offers OpenRouter/Ollama -- a deliberate
+  // corner cut to keep this inline form compact. If a user wants Ollama/OpenRouter for this
+  // generation, add the same provider <select> + openrouterModel input ComponentsPage already has
+  // and thread it into the body below the same way.
+  async function handleGenerateComponent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!activeStyleId || !componentPrompt.trim() || generating) return;
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          styleId: activeStyleId,
+          assetType: 'component',
+          prompt: `${componentType}: ${componentPrompt.trim()}`,
+          outputKind: 'component',
+          options: { componentType },
+        }),
+      });
+      const body = await res.json();
+      if (!body.success) {
+        setGenerateError(body.error ?? 'Generation failed to queue.');
+      } else {
+        setComponentPrompt('');
+        refreshActiveJobs();
+      }
+    } catch {
+      setGenerateError('Could not reach the server.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handlePromoteJob(jobId: string) {
+    setPromotingJobId(jobId);
+    try {
+      const res = await fetch('/api/assets/from-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const body = await res.json();
+      if (body.success) await refreshComponents();
+      await refreshActiveJobs();
+    } finally {
+      setPromotingJobId(null);
+    }
+  }
+
   const selectedPage = pages.find(p => p.id === selectedPageId) ?? null;
 
   return (
@@ -217,6 +287,31 @@ export default function WebsiteWorkbenchPage() {
                 submitLabel={creatingNew ? 'Create Page' : 'Save Changes'}
               />
             )}
+
+            <div className="card" style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Generate new component</div>
+              <form onSubmit={handleGenerateComponent} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <select value={componentType} onChange={e => setComponentType(e.target.value as typeof COMPONENT_TYPES[number])}>
+                  {COMPONENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <textarea
+                  value={componentPrompt}
+                  onChange={e => setComponentPrompt(e.target.value)}
+                  placeholder="a primary call-to-action button, rounded corners"
+                />
+                <button className="btn btn-primary" type="submit" disabled={generating || !componentPrompt.trim()}>
+                  {generating ? 'Queuing…' : 'Queue generation'}
+                </button>
+                {generateError && <p style={{ color: 'var(--reject)', fontSize: 13 }}>{generateError}</p>}
+              </form>
+              {jobs.length > 0 && (
+                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {jobs.map(job => (
+                    <JobCard key={job.id} job={job} onPromote={handlePromoteJob} busy={promotingJobId === job.id} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={{ flex: 1, minWidth: 320 }}>
