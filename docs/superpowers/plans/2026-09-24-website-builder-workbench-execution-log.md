@@ -134,4 +134,29 @@ rate.
    selector than DeepSeek's own incorrect suggestion); cost if wrong: purely cosmetic sidebar spacing,
    zero functional risk.
 
-**Branch is ready to merge. No open Critical/Important findings anywhere in this plan's execution.**
+## Pre-push review finding (caught after the final review, before push)
+
+The mandatory pre-push-review pass (a fresh subagent, different focus than the final code review)
+found one more real, previously-uncaught bug — missed by every earlier pass (8 task reviews, 1 final
+whole-branch review, 1 DeepSeek cross-model pass): `app/components/ElementPatchPanel.tsx`'s remount
+key, `key={selection.dataGfId ?? 'unselectable'}`, was built for PR #32's single-component preview
+mode, where `dataGfId` really is unique within the one document being previewed. This branch's whole
+purpose — composing multiple components onto one page — breaks that uniqueness assumption:
+`dataGfId` sequences independently restart at 1 per component, so two different composed components
+can share the same local id (the exact case `test/inspectFrame.test.ts`'s own "resolves
+componentAssetId... from the nearest wrapper" test deliberately exercises). Selecting an element in
+component A, typing a partial edit instruction, then clicking a same-numbered element in component B
+would silently carry the stale instruction text over (React reuses the panel instance instead of
+remounting it, since the key didn't change) — and applying it would edit the wrong component with no
+visual cue.
+
+**Ruling:** fixed immediately rather than pushing with a known correctness bug, per the pre-push-review
+skill's own "stop, don't push, let the human decide" protocol — the human chose "fix it now, then
+push." Fix: the key now also incorporates `selection.componentAssetId` (`` `${componentAssetId ?? ''}:${dataGfId ?? 'unselectable'}` ``),
+which is always `null` in single-component mode, making the change a no-op there — verified by the
+full existing `elementPatchPanel.test.tsx` suite (12 pre-existing tests) passing unchanged. A new
+regression test reproduces the exact collision (TDD: confirmed RED against the old key, GREEN after
+the fix). Commit `185eb61`. Cost if the fix were somehow wrong: reverting a 13-line, fully tested,
+single-file change with no other consumers.
+
+**Branch is ready to merge. No open Critical/Important findings anywhere — including the pre-push gate.**
