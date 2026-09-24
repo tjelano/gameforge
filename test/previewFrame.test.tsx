@@ -44,6 +44,8 @@ function elementInfoOf(overrides: Partial<FrameElementInfo> = {}): FrameElementI
     classes: ['btn'],
     id: null,
     dataGfId: '1',
+    componentAssetId: null,
+    componentRevisionHash: null,
     rect: new DOMRect(0, 0, 10, 10),
     ...overrides,
   };

@@ -29,6 +29,8 @@ function selectionOf(overrides: Partial<FrameElementInfo & { documentHash: strin
     classes: [] as string[],
     id: null,
     dataGfId: null,
+    componentAssetId: null,
+    componentRevisionHash: null,
     rect: new DOMRect(),
     documentHash: 'h',
     ...overrides,
