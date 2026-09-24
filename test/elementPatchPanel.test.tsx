@@ -29,6 +29,8 @@ function selectionOf(overrides: Partial<FrameElementInfo & { documentHash: strin
     classes: [] as string[],
     id: null,
     dataGfId: null,
+    componentAssetId: null,
+    componentRevisionHash: null,
     rect: new DOMRect(),
     documentHash: 'h',
     ...overrides,
@@ -206,6 +208,35 @@ describe('ElementPatchPanel', () => {
     // B's dataGfId.
     expect((screen.getByPlaceholderText(/describe the change/i) as HTMLTextAreaElement).value).toBe('');
     expect(screen.queryByText(/component changed since you selected/i)).toBeNull();
+  });
+
+  it('resets instruction when a different composed component reuses the same local dataGfId (page mode)', () => {
+    // Page mode (composeEditablePageHtml): each composed component's dataGfId sequence
+    // independently restarts at 1, so two different components can both have an element with
+    // dataGfId === '1' -- componentAssetId is what actually distinguishes them (see
+    // test/inspectFrame.test.ts's "resolves componentAssetId..." test). The remount key must
+    // incorporate componentAssetId too, or switching from component A's "1" to component B's "1"
+    // looks like the same selection and A's stale instruction survives into B.
+    const { rerender } = render(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'button', dataGfId: '1', componentAssetId: 'asset-A' })}
+        onPatched={() => {}}
+      />,
+    );
+
+    typeInstruction('Make A blue');
+    expect((screen.getByPlaceholderText(/describe the change/i) as HTMLTextAreaElement).value).toBe('Make A blue');
+
+    rerender(
+      <ElementPatchPanel
+        patchEndpoint="/x"
+        selection={selectionOf({ tagName: 'span', dataGfId: '1', componentAssetId: 'asset-B' })}
+        onPatched={() => {}}
+      />,
+    );
+
+    expect((screen.getByPlaceholderText(/describe the change/i) as HTMLTextAreaElement).value).toBe('');
   });
 
   it('ignores a response that arrives after the selection has already changed mid-request', async () => {

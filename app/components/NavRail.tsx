@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { NAV_OVERVIEW_ROUTE, NAV_SETTINGS_HUB_ROUTE, NAV_PRIMARY_ROUTES, type DashboardRoute } from '@/lib/dashboardRoutes';
+import { NAV_OVERVIEW_ROUTE, NAV_SETTINGS_HUB_ROUTE, NAV_ASSET_ROUTES, NAV_WEBSITE_ROUTES, type DashboardRoute } from '@/lib/dashboardRoutes';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export function NavRail() {
@@ -63,7 +63,10 @@ export function NavRail() {
         Game<span>Forge</span>
       </div>
       {renderLink(NAV_OVERVIEW_ROUTE)}
-      {NAV_PRIMARY_ROUTES.map(renderLink)}
+      <div className="rail-group-label">Assets</div>
+      {NAV_ASSET_ROUTES.map(renderLink)}
+      <div className="rail-group-label">Website</div>
+      {NAV_WEBSITE_ROUTES.map(renderLink)}
       <div className="rail-divider" />
       {renderLink(NAV_SETTINGS_HUB_ROUTE)}
       {me && (

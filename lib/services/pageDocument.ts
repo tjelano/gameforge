@@ -40,14 +40,28 @@ export function scopeComponentCss(css: string, scopeClass: string): string {
   return root.toString();
 }
 
-export function composePageHtml(items: PageComponentTokens[], themeCss?: string): string {
+export interface EditablePageComponentTokens extends PageComponentTokens {
+  // assetId is always a crypto.randomUUID() from AssetService.create() (never user-typed) and
+  // revisionHash is always a sha256 hex digest from componentElementTree.ts's hashDocument() — both
+  // charsets are always attribute-safe, so no escaping is needed when splicing them into the
+  // wrapper div below (same reasoning PageService.ts's findPagesReferencingAsset uses for its own
+  // unescaped LIKE-pattern interpolation).
+  assetId: string;
+  revisionHash: string;
+}
+
+function composeItems(
+  items: PageComponentTokens[],
+  themeCss: string | undefined,
+  wrapperAttrsFor: (item: PageComponentTokens, i: number) => string,
+): string {
   const styleBlocks: string[] = [];
   const bodyBlocks: string[] = [];
 
   items.forEach((item, i) => {
     const scopeClass = `page-item-${i}`;
     styleBlocks.push(scopeComponentCss(item.css, scopeClass));
-    bodyBlocks.push(`<div class="${scopeClass}">\n${item.html}\n</div>`);
+    bodyBlocks.push(`<div class="${scopeClass}"${wrapperAttrsFor(item, i)}>\n${item.html}\n</div>`);
   });
 
   const themeBlock = themeCss ? `<style>\n${themeCss}\n</style>\n` : '';
@@ -65,4 +79,19 @@ ${bodyBlocks.join('\n')}
 </body>
 </html>
 `;
+}
+
+export function composePageHtml(items: PageComponentTokens[], themeCss?: string): string {
+  return composeItems(items, themeCss, () => '');
+}
+
+// Used by the render route's editable mode (Task 3) for the workbench's live, click-to-edit
+// preview. Never used for export/download — that path always calls composePageHtml above, whose
+// output is untouched by this function's existence (see the regression test in
+// test/pageDocument.test.ts).
+export function composeEditablePageHtml(items: EditablePageComponentTokens[], themeCss?: string): string {
+  return composeItems(items, themeCss, (item) => {
+    const editable = item as EditablePageComponentTokens;
+    return ` data-gf-component-asset-id="${editable.assetId}" data-gf-rev="${editable.revisionHash}"`;
+  });
 }
