@@ -72,7 +72,7 @@ describe('inspectFrame', () => {
     expect(info!.tagName).toBe('button');
     expect(info!.classes).toEqual(['btn', 'primary']);
     expect(info!.dataGfId).toBe('1');
-    expect(Object.keys(info!).sort()).toEqual(['classes', 'dataGfId', 'id', 'rect', 'tagName']);
+    expect(Object.keys(info!).sort()).toEqual(['classes', 'componentAssetId', 'componentRevisionHash', 'dataGfId', 'id', 'rect', 'tagName']);
   });
 
   it('getElementAt resolves to the nearest data-gf-id ancestor, not the element literally hit', () => {
@@ -165,6 +165,67 @@ describe('inspectFrame', () => {
     const info = getElementAt(iframe, 5, 5);
     expect(info).not.toBeNull();
     expect(info!.dataGfId).toBeNull();
+  });
+
+  it('getElementAt resolves componentAssetId and componentRevisionHash from the nearest data-gf-component-asset-id wrapper', () => {
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write(`
+      <html><body>
+        <div class="page-item-0" data-gf-component-asset-id="asset-1" data-gf-rev="hash-1">
+          <button class="btn" data-gf-id="1">Go</button>
+        </div>
+        <div class="page-item-1" data-gf-component-asset-id="asset-2" data-gf-rev="hash-2">
+          <button class="btn" data-gf-id="1">Also Go</button>
+        </div>
+      </body></html>
+    `);
+    iframe.contentDocument!.close();
+    installElementFromPointPolyfill(iframe.contentDocument!);
+    const buttons = iframe.contentDocument!.querySelectorAll('button');
+    buttons[0].getBoundingClientRect = () => new DOMRect(0, 0, 80, 30);
+    buttons[1].getBoundingClientRect = () => new DOMRect(0, 40, 80, 30);
+
+    const first = getElementAt(iframe, 10, 10);
+    expect(first).not.toBeNull();
+    expect(first!.componentAssetId).toBe('asset-1');
+    expect(first!.componentRevisionHash).toBe('hash-1');
+
+    // Two different wrapped components reuse the same data-gf-id ("1") -- confirms resolution is
+    // scoped per-wrapper, not accidentally global across the composed page.
+    const second = getElementAt(iframe, 10, 50);
+    expect(second).not.toBeNull();
+    expect(second!.componentAssetId).toBe('asset-2');
+    expect(second!.componentRevisionHash).toBe('hash-2');
+  });
+
+  it('getElementAt resolves componentAssetId through an icon-inside-button, same as the data-gf-id ancestor walk', () => {
+    iframe.contentDocument!.open();
+    iframe.contentDocument!.write(`
+      <html><body>
+        <div class="page-item-0" data-gf-component-asset-id="asset-1" data-gf-rev="hash-1">
+          <button class="icon-btn" data-gf-id="1"><svg><circle cx="5" cy="5" r="5"></circle></svg></button>
+        </div>
+      </body></html>
+    `);
+    iframe.contentDocument!.close();
+    installElementFromPointPolyfill(iframe.contentDocument!);
+    const btn = iframe.contentDocument!.querySelector('button')!;
+    const svg = iframe.contentDocument!.querySelector('svg')!;
+    btn.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    svg.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    const info = getElementAt(iframe, 110, 60);
+    expect(info).not.toBeNull();
+    expect(info!.componentAssetId).toBe('asset-1');
+  });
+
+  it('getElementAt returns null componentAssetId/componentRevisionHash outside any wrapper (non-page-mode content)', () => {
+    const btn = iframe.contentDocument!.querySelector('button')!;
+    btn.getBoundingClientRect = () => new DOMRect(100, 50, 80, 30);
+    const rect = btn.getBoundingClientRect();
+    const info = getElementAt(iframe, rect.left + 1, rect.top + 1);
+    expect(info).not.toBeNull();
+    expect(info!.componentAssetId).toBeNull();
+    expect(info!.componentRevisionHash).toBeNull();
   });
 
   it('getRevisionHash reads the gf-rev meta tag', () => {
