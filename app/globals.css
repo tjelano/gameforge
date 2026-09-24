@@ -128,11 +128,11 @@ select {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-faint);
-  margin: 16px 12px 4px;
+  margin: 8px 12px 4px;
 }
 
-.rail-group-label:first-of-type {
-  margin-top: 8px;
+.rail-group-label ~ .rail-group-label {
+  margin-top: 16px;
 }
 
 .main {
