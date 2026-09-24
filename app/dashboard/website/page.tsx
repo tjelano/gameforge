@@ -38,6 +38,7 @@ export default function WebsiteWorkbenchPage() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [promotingJobId, setPromotingJobId] = useState<string | null>(null);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   // Reset the page selection when the active Style Bible changes. Done as a conditional
   // render-phase update (React's documented "adjusting state when a prop changes" pattern —
@@ -207,6 +208,7 @@ export default function WebsiteWorkbenchPage() {
 
   async function handlePromoteJob(jobId: string) {
     setPromotingJobId(jobId);
+    setPromoteError(null);
     try {
       const res = await fetch('/api/assets/from-job', {
         method: 'POST',
@@ -214,8 +216,14 @@ export default function WebsiteWorkbenchPage() {
         body: JSON.stringify({ jobId }),
       });
       const body = await res.json();
-      if (body.success) await refreshComponents();
+      if (!body.success) {
+        setPromoteError(body.error ?? 'Could not promote this job.');
+        return;
+      }
+      await refreshComponents();
       await refreshActiveJobs();
+    } catch {
+      setPromoteError('Could not reach the server.');
     } finally {
       setPromotingJobId(null);
     }
@@ -304,6 +312,7 @@ export default function WebsiteWorkbenchPage() {
                 </button>
                 {generateError && <p style={{ color: 'var(--reject)', fontSize: 13 }}>{generateError}</p>}
               </form>
+              {promoteError && <p style={{ color: 'var(--reject)', fontSize: 13, marginTop: 8 }}>{promoteError}</p>}
               {jobs.length > 0 && (
                 <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {jobs.map(job => (
