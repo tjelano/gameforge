@@ -12,11 +12,11 @@ import { assetService } from '@/lib/services/AssetService';
 import { loadReferenceImage, mediaTypeForFilename } from '@/lib/services/referenceImage';
 import { groundComponent } from '@/lib/services/inspoGrounding';
 import { styleService } from '@/lib/services/StyleService';
-import { WORKER_BATCH_SIZE } from '@/lib/config';
+import { settingsService } from '@/lib/services/SettingsService';
+import { WORKER_BATCH_SIZE, WORKER_LAST_SEEN_SETTING_KEY, POLL_INTERVAL_MS } from '@/lib/config';
 import { UiSheetOptionsSchema } from '@/lib/utils/pieceShapes';
 import type { ProviderOverride } from '@/lib/services/providerOverride';
 
-const POLL_INTERVAL_MS = 2000;
 const LOCK_FILE = path.join(getProjectRoot(), '.worker.lock');
 
 function isProcessAlive(pid: number): boolean {
@@ -290,6 +290,21 @@ function scheduleNext(): void {
   }, POLL_INTERVAL_MS);
 }
 
+// Independent of scheduleNext/processJobs on purpose -- see the heartbeat
+// note above Task 6's worker.ts changes in the plan this came from: a
+// heartbeat gated behind a slow job's completion would falsely read "dead"
+// while the worker is busy with real, long-running work.
+function writeHeartbeat(): void {
+  settingsService.set(WORKER_LAST_SEEN_SETTING_KEY, String(Date.now())).catch(error => {
+    console.error('❌ Worker heartbeat write failed:', error);
+  });
+}
+
+function startHeartbeat(): void {
+  writeHeartbeat();
+  setInterval(writeHeartbeat, POLL_INTERVAL_MS);
+}
+
 // Only run the actual worker loop (lock file, signal handlers, polling)
 // when this file is the process entry point (`tsx worker.ts`) — not when
 // a test imports processJob() to exercise it directly.
@@ -301,5 +316,6 @@ if (isMainModule) {
   process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
 
   console.log(`🚀 GameForge worker started (pid ${process.pid}, batch size ${WORKER_BATCH_SIZE}).`);
+  startHeartbeat();
   scheduleNext();
 }

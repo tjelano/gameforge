@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { userService } from '@/lib/services/UserService';
 import { LoginForm } from './LoginForm';
 
@@ -8,7 +9,9 @@ export default async function LoginPage() {
   return (
     <div className="card" style={{ maxWidth: 420 }}>
       <h1 className="page-title">Who are you?</h1>
-      <LoginForm users={users.map(u => ({ id: u.id, name: u.name }))} />
+      <Suspense fallback={null}>
+        <LoginForm users={users.map(u => ({ id: u.id, name: u.name }))} />
+      </Suspense>
     </div>
   );
 }

@@ -65,7 +65,9 @@ export default function AssetsPage() {
 
       {error && <p style={{ color: 'var(--reject)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
 
-      {!loading && !error && assets.length === 0 ? (
+      {loading ? (
+        <p className="page-subtitle">Loading…</p>
+      ) : !error && assets.length === 0 ? (
         <div className="empty-state">
           Nothing promoted yet. Review completed jobs on the <strong>Jobs</strong> page.
         </div>

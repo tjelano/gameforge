@@ -47,6 +47,16 @@ export function NavRail() {
     );
   }
 
+  if (pathname === '/login') {
+    return (
+      <nav className="rail">
+        <div className="rail-brand">
+          Game<span>Forge</span>
+        </div>
+      </nav>
+    );
+  }
+
   return (
     <nav className="rail">
       <div className="rail-brand">

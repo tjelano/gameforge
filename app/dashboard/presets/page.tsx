@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Preset, Style } from '@/lib/database/schema';
 import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
+import { trapTabFocus } from '@/lib/utils/trapTabFocus';
 
 export default function PresetsPage() {
   const router = useRouter();
@@ -20,6 +21,23 @@ export default function PresetsPage() {
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applyBusy, setApplyBusy] = useState(false);
   const [styles, setStyles] = useState<Style[]>([]);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const applyTriggerRef = useRef<HTMLElement | null>(null);
+  const applyDialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (applyingId) {
+      cancelButtonRef.current?.focus();
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') { setApplyingId(null); return; }
+        if (applyDialogRef.current) trapTabFocus(e, applyDialogRef.current);
+      };
+      document.addEventListener('keydown', onKeyDown);
+      return () => document.removeEventListener('keydown', onKeyDown);
+    } else {
+      applyTriggerRef.current?.focus();
+    }
+  }, [applyingId]);
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/presets');
@@ -132,7 +150,8 @@ export default function PresetsPage() {
     };
   }
 
-  function openApply(presetId: string) {
+  function openApply(presetId: string, trigger: HTMLElement) {
+    applyTriggerRef.current = trigger;
     setApplyingId(presetId);
     setApplyMode('new');
     setApplyNewName('');
@@ -216,7 +235,7 @@ export default function PresetsPage() {
                   <span className="badge">{components.length} component{components.length === 1 ? '' : 's'}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-primary" onClick={() => openApply(preset.id)}>Apply</button>
+                  <button className="btn btn-primary" onClick={e => openApply(preset.id, e.currentTarget)}>Apply</button>
                   <button className="btn" onClick={() => setEditingId(preset.id)}>Edit</button>
                   <button
                     className="btn"
@@ -233,11 +252,17 @@ export default function PresetsPage() {
       )}
 
       {applyingId && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div
+          ref={applyDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Apply preset"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+        >
           <div className="card" style={{ width: 420 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <strong>Apply preset</strong>
-              <button className="btn" onClick={() => setApplyingId(null)}>Cancel</button>
+              <button className="btn" ref={cancelButtonRef} onClick={() => setApplyingId(null)}>Cancel</button>
             </div>
             <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
               <label>

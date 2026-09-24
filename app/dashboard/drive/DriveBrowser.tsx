@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePolling } from '@/lib/hooks/usePolling';
+import { trapTabFocus } from '@/lib/utils/trapTabFocus';
 
 export interface DriveFile {
   id: string;
@@ -45,6 +46,27 @@ export function DriveBrowser({
   const [movingItem, setMovingItem] = useState<DriveFile | null>(null);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const moveCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const moveTriggerRef = useRef<HTMLElement | null>(null);
+  const moveDialogRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (movingItem) {
+      moveCancelButtonRef.current?.focus();
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') { setMovingItem(null); return; }
+        if (moveDialogRef.current) trapTabFocus(e, moveDialogRef.current);
+      };
+      document.addEventListener('keydown', onKeyDown);
+      return () => document.removeEventListener('keydown', onKeyDown);
+    } else {
+      if (moveTriggerRef.current?.isConnected) {
+        moveTriggerRef.current.focus();
+      }
+      moveTriggerRef.current = null;
+    }
+  }, [movingItem]);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -203,6 +225,11 @@ export function DriveBrowser({
       } else {
         setMovingItem(null);
         await fetchItems();
+        // The moved item's row (and its Move button, focused by the
+        // movingItem effect right as the dialog closed) is gone from the
+        // refreshed list -- land focus somewhere stable instead of letting
+        // it fall back to the document.
+        rootRef.current?.focus();
       }
     } catch {
       setError('Could not reach the server.');
@@ -212,7 +239,7 @@ export function DriveBrowser({
   }
 
   return (
-    <div>
+    <div ref={rootRef} tabIndex={-1} aria-label="File browser">
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {breadcrumb.map((crumb, i) => (
           <span key={crumb.id}>
@@ -316,7 +343,7 @@ export function DriveBrowser({
                     <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} disabled={isBusy} onClick={() => { setRenamingId(item.id); setRenameValue(item.name); }}>
                       Rename
                     </button>
-                    <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} disabled={isBusy} onClick={() => setMovingItem(item)}>
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 6px' }} disabled={isBusy} onClick={e => { moveTriggerRef.current = e.currentTarget; setMovingItem(item); }}>
                       Move
                     </button>
                     <button className="btn" style={{ fontSize: 11, padding: '2px 6px', color: 'var(--reject)' }} disabled={isBusy} onClick={() => handleTrash(item.id)}>
@@ -331,11 +358,17 @@ export function DriveBrowser({
       )}
 
       {movingItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+        <div
+          ref={moveDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Move ${movingItem.name}`}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+        >
           <div className="card" style={{ width: 480, maxHeight: '80vh', overflow: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
               <strong>Move &quot;{movingItem.name}&quot;</strong>
-              <button className="btn" onClick={() => setMovingItem(null)}>Cancel</button>
+              <button className="btn" ref={moveCancelButtonRef} onClick={() => setMovingItem(null)}>Cancel</button>
             </div>
             <DriveBrowser selectMode onSelectFolder={handleMoveHere} selectBusy={busyItemId !== null} />
           </div>

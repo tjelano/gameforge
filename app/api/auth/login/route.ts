@@ -8,7 +8,23 @@ export const dynamic = 'force-dynamic';
 
 const LoginSchema = z.union([
   z.object({ userId: z.string().min(1) }),
-  z.object({ name: z.string().min(1) }),
+  // force is a deliberate bypass of the 403 below. It is entirely
+  // client-controlled -- there is no server-side check restricting who can
+  // set it to true, so treat this as "any client can always bypass this
+  // guard," not as a gate. Today's UI only sends it from the "+Add another
+  // account" flow (LoginForm), after offering the same "Pull from git
+  // first" choice the guard exists to encourage, but that's a UI
+  // convention, not an enforced restriction. It cannot grant admin: UserService.create() derives
+  // is_admin from its own fresh COUNT(*) at insert time, independent of
+  // this flag, and that count is guaranteed non-zero whenever force is
+  // actually honored (existing.length > 0 is the only case it applies to).
+  // That "guaranteed non-zero" claim also assumes no concurrent user
+  // deletion between the `existing.length` check below and create()'s own
+  // COUNT(*) -- true today because no user-deletion route/feature exists
+  // anywhere in this app; revisit this comment if one is ever added.
+  // Not an oversight -- see this task's own notes in the audit-fixes-2 plan
+  // for the full reasoning.
+  z.object({ name: z.string().min(1), force: z.boolean().optional() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -23,7 +39,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       const existing = await userService.getAll();
-      if (existing.length > 0) {
+      if (existing.length > 0 && !input.force) {
         return NextResponse.json({
           success: false,
           error: 'An account already exists — pick your name from the list, or Pull from git first.',
