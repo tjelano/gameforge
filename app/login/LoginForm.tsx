@@ -43,6 +43,8 @@ export function LoginForm({ users }: { users: UserOption[] }) {
       }
       router.push('/dashboard/generate');
       router.refresh();
+    } catch {
+      setError('Could not reach the server.');
     } finally {
       setSubmitting(false);
     }
@@ -89,6 +91,8 @@ export function LoginForm({ users }: { users: UserOption[] }) {
       }
       router.push('/dashboard/generate');
       router.refresh();
+    } catch {
+      setError('Could not reach the server.');
     } finally {
       setSubmitting(false);
     }

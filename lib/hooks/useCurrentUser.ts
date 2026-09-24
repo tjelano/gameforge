@@ -40,6 +40,7 @@ export function useCurrentUser() {
           // session is stale, so it must not bounce a possibly-still-valid user
           // to the login screen. Same non-redirect treatment as a thrown fetch
           // error below.
+          setUser(null);
           router.replace('/login?reason=expired');
         }
       } catch {

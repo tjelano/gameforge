@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { ProjectContextSummary } from '@/lib/services/projectContext';
 import type { ActivityItem } from '@/lib/services/recentActivity';
+import { usePolling } from '@/lib/hooks/usePolling';
+import { POLL_INTERVAL_MS } from '@/lib/config';
 
 export default function OverviewPage() {
   const [context, setContext] = useState<ProjectContextSummary | null>(null);
@@ -14,10 +16,9 @@ export default function OverviewPage() {
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const [contextResult, activityResult, workerResult] = await Promise.allSettled([
+      const [contextResult, activityResult] = await Promise.allSettled([
         fetch('/api/context').then(r => r.json()),
         fetch('/api/dashboard/activity').then(r => r.json()),
-        fetch('/api/dashboard/worker-status').then(r => r.json()),
       ]);
       if (!ignore) {
         if (contextResult.status === 'fulfilled' && contextResult.value.success) {
@@ -26,14 +27,20 @@ export default function OverviewPage() {
         if (activityResult.status === 'fulfilled' && activityResult.value.success) {
           setActivity(activityResult.value.data);
         }
-        if (workerResult.status === 'fulfilled' && workerResult.value.success) {
-          setWorkerAlive(workerResult.value.data.alive);
-        }
         setLoading(false);
       }
     })();
     return () => { ignore = true; };
   }, []);
+
+  usePolling(async () => {
+    try {
+      const body = await fetch('/api/dashboard/worker-status').then(r => r.json());
+      if (body.success) setWorkerAlive(body.data.alive);
+    } catch {
+      // Non-fatal -- the indicator just keeps its last known value.
+    }
+  }, POLL_INTERVAL_MS);
 
   return (
     <>

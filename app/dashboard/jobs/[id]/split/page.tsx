@@ -210,6 +210,7 @@ export default function SplitPage({ params }: { params: Promise<{ id: string }> 
             />
             <button
               onClick={() => draggable.updateBox(box.id, { included: !box.included })}
+              onKeyDown={e => e.stopPropagation()}
               aria-label={box.included ? 'Exclude piece from split' : 'Include piece in split'}
               style={{ position: 'absolute', top: -8, right: -8, width: 16, height: 16, fontSize: 10, lineHeight: 1 }}
             >

@@ -199,6 +199,7 @@ export default function UiSheetsPage() {
                 />
                 <button
                   onClick={() => removeBox(box.id)}
+                  onKeyDown={e => e.stopPropagation()}
                   aria-label="Remove piece"
                   style={{ position: 'absolute', top: -8, right: -8, width: 16, height: 16, fontSize: 10, lineHeight: 1 }}
                 >

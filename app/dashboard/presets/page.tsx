@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Preset, Style } from '@/lib/database/schema';
 import { PresetForm, type PresetFormValue } from '@/app/components/PresetForm';
+import { trapTabFocus } from '@/lib/utils/trapTabFocus';
 
 export default function PresetsPage() {
   const router = useRouter();
@@ -22,11 +23,15 @@ export default function PresetsPage() {
   const [styles, setStyles] = useState<Style[]>([]);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const applyTriggerRef = useRef<HTMLElement | null>(null);
+  const applyDialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (applyingId) {
       cancelButtonRef.current?.focus();
-      const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setApplyingId(null); };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') { setApplyingId(null); return; }
+        if (applyDialogRef.current) trapTabFocus(e, applyDialogRef.current);
+      };
       document.addEventListener('keydown', onKeyDown);
       return () => document.removeEventListener('keydown', onKeyDown);
     } else {
@@ -248,6 +253,7 @@ export default function PresetsPage() {
 
       {applyingId && (
         <div
+          ref={applyDialogRef}
           role="dialog"
           aria-modal="true"
           aria-label="Apply preset"

@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePolling } from '@/lib/hooks/usePolling';
+import { trapTabFocus } from '@/lib/utils/trapTabFocus';
 
 export interface DriveFile {
   id: string;
@@ -47,11 +48,16 @@ export function DriveBrowser({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const moveCancelButtonRef = useRef<HTMLButtonElement>(null);
   const moveTriggerRef = useRef<HTMLElement | null>(null);
+  const moveDialogRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (movingItem) {
       moveCancelButtonRef.current?.focus();
-      const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setMovingItem(null); };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') { setMovingItem(null); return; }
+        if (moveDialogRef.current) trapTabFocus(e, moveDialogRef.current);
+      };
       document.addEventListener('keydown', onKeyDown);
       return () => document.removeEventListener('keydown', onKeyDown);
     } else {
@@ -219,6 +225,11 @@ export function DriveBrowser({
       } else {
         setMovingItem(null);
         await fetchItems();
+        // The moved item's row (and its Move button, focused by the
+        // movingItem effect right as the dialog closed) is gone from the
+        // refreshed list -- land focus somewhere stable instead of letting
+        // it fall back to the document.
+        rootRef.current?.focus();
       }
     } catch {
       setError('Could not reach the server.');
@@ -228,7 +239,7 @@ export function DriveBrowser({
   }
 
   return (
-    <div>
+    <div ref={rootRef} tabIndex={-1}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {breadcrumb.map((crumb, i) => (
           <span key={crumb.id}>
@@ -348,6 +359,7 @@ export function DriveBrowser({
 
       {movingItem && (
         <div
+          ref={moveDialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={`Move ${movingItem.name}`}
