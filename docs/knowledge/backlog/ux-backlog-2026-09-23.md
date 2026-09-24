@@ -105,6 +105,18 @@ opening the topic first.
    state-change site (send, load, new chat) instead of a generic "watch this state" effect. Verified
    live end-to-end (real dev server, real Ollama-backed conversation, multiple independent page
    reloads to different routes) after the unit test first caught the regression.
+   **Second real bug found by pre-push review, same root class:** `loadConversation`'s slow auto-resume
+   fetch had no staleness guard — if the user opened the panel, hit "New chat," and sent a message
+   before the (still in-flight) resume fetch resolved, the resume's `.then` would unconditionally
+   overwrite the newer conversation once it finally arrived, silently reverting the chat the user was
+   already looking at. Fixed with a monotonic generation counter (`activeGenerationRef`, same shape as
+   `JobCard.tsx`'s existing `latestRequestIdRef` pattern) bumped by every state-changing action
+   (`loadConversation`, `handleNewChat`, `handleSend`), checked before any async response is applied.
+   Caught by a new test simulating a genuinely slow deferred fetch — the first version of that test
+   used a fixed number of `Promise.resolve()` ticks to flush the response and passed even with the
+   guard removed (not enough ticks for the real multi-hop async chain to settle); switching to a real
+   macrotask delay inside `act()` made it correctly fail against the unguarded code and pass against
+   the fix.
 
 6. **Copilot should always run on the connected Ollama model when one is available** — raised
    2026-09-24. Currently the copilot lets the user pick Claude vs. Ollama vs. OpenRouter per message

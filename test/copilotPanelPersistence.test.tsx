@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { useState, useEffect } from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import { CopilotPanel } from '@/app/components/CopilotPanel';
 
 const ACTIVE_CONVERSATION_KEY = 'gameforge-copilot-active-conversation-id';
@@ -162,5 +162,62 @@ describe('CopilotPanel conversation persistence', () => {
 
     await waitFor(() => expect(screen.getByText('hello')).toBeTruthy());
     expect(screen.getByText('first reply')).toBeTruthy();
+  });
+
+  it('a slow, stale auto-resume response does not clobber a newer chat started while it was in flight', async () => {
+    localStorage.setItem(ACTIVE_CONVERSATION_KEY, 'conv-old');
+    const newConversationId = 'conv-new';
+    let resolveOldConversationFetch!: (value: unknown) => void;
+    const oldConversationFetch = new Promise(resolve => { resolveOldConversationFetch = resolve; });
+
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('/api/settings/ollama/models')) {
+        return Promise.resolve({ json: () => Promise.resolve({ success: true, data: { models: [], host: '' } }) });
+      }
+      if (url === '/api/copilot/message') {
+        return Promise.resolve({
+          json: () => Promise.resolve({ success: true, data: { conversationId: newConversationId, reply: { text: 'brand new reply' } } }),
+        });
+      }
+      if (url.includes('/api/copilot/conversations/conv-old')) {
+        // Deliberately slow -- resolved manually later in this test, after
+        // the user has already started a newer chat.
+        return oldConversationFetch.then(() => ({
+          json: () => Promise.resolve({
+            success: true,
+            data: { id: 'conv-old', title: 'x', messages: [{ id: 'm0', role: 'assistant', content: 'stale old reply' }] },
+          }),
+        }));
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ success: false, error: 'unexpected URL in test' }) });
+    }));
+
+    render(<CopilotPanel />);
+    await openPanel();
+
+    // The on-mount auto-resume for conv-old is now in flight but hasn't
+    // resolved. Start a brand-new chat and send a message before it does.
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    fireEvent.change(screen.getByPlaceholderText('Ask the copilot…'), { target: { value: 'hi there' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(screen.getByText('brand new reply')).toBeTruthy());
+    expect(localStorage.getItem(ACTIVE_CONVERSATION_KEY)).toBe(newConversationId);
+
+    // Now let the slow, now-stale resume finally resolve. Its chain has
+    // several real hops (the deferred promise -> fetch's own resolution ->
+    // res.json() -> the state updates -> React's re-render), each its own
+    // microtask/macrotask -- a fixed small number of Promise.resolve() ticks
+    // is not reliably enough to flush all of them. A real macrotask delay
+    // inside act() is what actually lets everything settle.
+    await act(async () => {
+      resolveOldConversationFetch(undefined);
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+
+    // The newer chat must still be what's showing -- the stale response
+    // must not have reverted it.
+    expect(screen.getByText('brand new reply')).toBeTruthy();
+    expect(screen.queryByText('stale old reply')).toBeNull();
+    expect(localStorage.getItem(ACTIVE_CONVERSATION_KEY)).toBe(newConversationId);
   });
 });

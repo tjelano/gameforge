@@ -47,6 +47,14 @@ export function CopilotPanel() {
   const [history, setHistory] = useState<ConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Guards against an out-of-order async response clobbering newer state --
+  // e.g. the on-mount auto-resume fetch is still in flight when the user
+  // opens the panel and starts a brand-new chat (or picks a different
+  // conversation from History) before it resolves; without this, the
+  // slower, now-stale resume response would silently overwrite the chat the
+  // user is already looking at once it finally arrives. Same shape as
+  // JobCard.tsx's latestRequestIdRef guard.
+  const activeGenerationRef = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
@@ -93,10 +101,15 @@ export function CopilotPanel() {
    * to an explicit user action (picking from History) show an error on
    * false; the silent on-mount auto-resume doesn't. */
   async function loadConversation(id: string): Promise<boolean> {
+    const myGeneration = ++activeGenerationRef.current;
     setHistoryLoading(true);
     try {
       const res = await fetch(`/api/copilot/conversations/${id}`);
       const body = await res.json();
+      // Something newer (a send, a new chat, another load) started while
+      // this fetch was in flight -- applying this response now would revert
+      // the chat the user is already looking at back to a stale one.
+      if (myGeneration !== activeGenerationRef.current) return false;
       if (body.success) {
         setConversationId(body.data.id);
         setMessages(body.data.messages);
@@ -135,6 +148,9 @@ export function CopilotPanel() {
   }
 
   function handleNewChat() {
+    // Invalidate any in-flight loadConversation (e.g. the on-mount resume)
+    // so its response can't land after this and revert the fresh chat.
+    activeGenerationRef.current++;
     setConversationId(null);
     setMessages([]);
     setError(null);
@@ -147,6 +163,7 @@ export function CopilotPanel() {
     const text = input.trim();
     if (!text || sending) return;
 
+    const myGeneration = ++activeGenerationRef.current;
     setSending(true);
     setError(null);
     setMessages(prev => [...prev, { role: 'user', content: text }]);
@@ -171,6 +188,9 @@ export function CopilotPanel() {
         setError(body.error ?? 'The copilot could not reply.');
         return;
       }
+      // Something even newer (another send, a new chat) started while this
+      // reply was in flight -- don't resurrect this now-stale conversation.
+      if (myGeneration !== activeGenerationRef.current) return;
       setConversationId(body.data.conversationId);
       persistActiveConversationId(body.data.conversationId);
       setMessages(prev => [...prev, { role: 'assistant', content: body.data.reply.text, toolCall: body.data.reply.toolCall }]);
