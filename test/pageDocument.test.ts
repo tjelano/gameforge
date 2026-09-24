@@ -1,6 +1,6 @@
 // test/pageDocument.test.ts
 import { describe, it, expect } from 'vitest';
-import { composePageHtml } from '@/lib/services/pageDocument';
+import { composePageHtml, composeEditablePageHtml } from '@/lib/services/pageDocument';
 
 describe('composePageHtml', () => {
   it('wraps each component in a uniquely-scoped container, in order', () => {
@@ -72,4 +72,45 @@ describe('composePageHtml', () => {
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<body>');
   });
+});
+
+describe('composeEditablePageHtml', () => {
+  it('wraps each component with its asset id and revision hash as data attributes', () => {
+    const html = composeEditablePageHtml([
+      { html: '<button class="btn">A</button>', css: '.btn { color: red; }', assetId: 'asset-1', revisionHash: 'hash-1' },
+      { html: '<button class="btn">B</button>', css: '.btn { color: blue; }', assetId: 'asset-2', revisionHash: 'hash-2' },
+    ]);
+    expect(html).toContain('data-gf-component-asset-id="asset-1"');
+    expect(html).toContain('data-gf-rev="hash-1"');
+    expect(html).toContain('data-gf-component-asset-id="asset-2"');
+    expect(html).toContain('data-gf-rev="hash-2"');
+  });
+
+  it('still scopes CSS per item the same way composePageHtml does', () => {
+    const html = composeEditablePageHtml([
+      { html: '<div class="title">A</div>', css: '.title { color: red; }', assetId: 'a1', revisionHash: 'h1' },
+      { html: '<div class="title">B</div>', css: '.title { color: blue; }', assetId: 'a2', revisionHash: 'h2' },
+    ]);
+    const matches = [...html.matchAll(/(\.page-item-\d+)\s+\.title/g)].map(m => m[1]);
+    expect(new Set(matches).size).toBe(2);
+  });
+
+  it('produces the exact same output as composePageHtml when the extra fields are stripped, proving no drift between the two wrapper shapes', () => {
+    const plainItems = [
+      { html: '<p>hi</p>', css: '.a { color: red; }' },
+      { html: '<p>bye</p>', css: '.b { color: blue; }' },
+    ];
+    const editableItems = plainItems.map((item, i) => ({ ...item, assetId: `asset-${i}`, revisionHash: `hash-${i}` }));
+    const plain = composePageHtml(plainItems);
+    const editable = composeEditablePageHtml(editableItems)
+      .replace(/ data-gf-component-asset-id="[^"]*"/g, '')
+      .replace(/ data-gf-rev="[^"]*"/g, '');
+    expect(editable).toBe(plain);
+  });
+});
+
+it('composePageHtml output is unaffected by the existence of composeEditablePageHtml (regression guard)', () => {
+  const html = composePageHtml([{ html: '<p>hi</p>', css: '.a { color: red; }' }]);
+  expect(html).not.toContain('data-gf-component-asset-id');
+  expect(html).not.toContain('data-gf-rev');
 });
