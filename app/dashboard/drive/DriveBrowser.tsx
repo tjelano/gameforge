@@ -239,7 +239,7 @@ export function DriveBrowser({
   }
 
   return (
-    <div ref={rootRef} tabIndex={-1}>
+    <div ref={rootRef} tabIndex={-1} aria-label="File browser">
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {breadcrumb.map((crumb, i) => (
           <span key={crumb.id}>
