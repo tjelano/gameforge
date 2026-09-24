@@ -18,6 +18,14 @@ interface ConversationSummary {
   updatedAt: number;
 }
 
+// Conversations are genuinely persisted server-side (CopilotConversationService/
+// CopilotMessageService), but this panel's own React state was not -- a full
+// page reload silently started a brand-new empty chat every time, with no way
+// to tell the last conversation still existed short of manually opening
+// History. Remembering the active conversation id here (not the messages
+// themselves, which are re-fetched fresh) closes that gap.
+const ACTIVE_CONVERSATION_KEY = 'gameforge-copilot-active-conversation-id';
+
 export function CopilotPanel() {
   const { user } = useCurrentUser();
   const router = useRouter();
@@ -44,7 +52,64 @@ export function CopilotPanel() {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
 
+  // Resume the last active conversation on mount, once we know who's logged
+  // in (a stored id from a different user's session on this machine is
+  // simply not found by loadConversation below and left alone).
+  //
+  // Persisting the id is done as an explicit side effect at each place the
+  // state actually changes (below), not via a separate useEffect watching
+  // conversationId -- a reactive effect on that state would also fire once
+  // on this very first mount, while conversationId is still its initial
+  // null, and immediately clear whatever was just stored from a *previous*
+  // session before this resume effect (gated on the async user fetch
+  // resolving) ever got a chance to read it.
+  useEffect(() => {
+    if (!user) return;
+    let storedId: string | null = null;
+    try {
+      storedId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+    } catch {
+      // Storage unavailable (private browsing, blocked) -- just start fresh.
+    }
+    if (storedId) loadConversation(storedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   if (!user || pathname === '/login') return null;
+
+  function persistActiveConversationId(id: string | null) {
+    try {
+      if (id) {
+        localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
+      } else {
+        localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+      }
+    } catch {
+      // Non-fatal -- just means the next reload won't auto-resume.
+    }
+  }
+
+  /** Returns whether the conversation loaded successfully -- callers reacting
+   * to an explicit user action (picking from History) show an error on
+   * false; the silent on-mount auto-resume doesn't. */
+  async function loadConversation(id: string): Promise<boolean> {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/copilot/conversations/${id}`);
+      const body = await res.json();
+      if (body.success) {
+        setConversationId(body.data.id);
+        setMessages(body.data.messages);
+        persistActiveConversationId(body.data.id);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function handleOpenHistory() {
     setMode('history');
@@ -61,19 +126,11 @@ export function CopilotPanel() {
   }
 
   async function handleSelectConversation(id: string) {
-    setHistoryLoading(true);
-    try {
-      const res = await fetch(`/api/copilot/conversations/${id}`);
-      const body = await res.json();
-      if (body.success) {
-        setConversationId(body.data.id);
-        setMessages(body.data.messages);
-        setMode('chat');
-      }
-    } catch {
+    const ok = await loadConversation(id);
+    if (ok) {
+      setMode('chat');
+    } else {
       setError('Could not load that conversation.');
-    } finally {
-      setHistoryLoading(false);
     }
   }
 
@@ -82,6 +139,7 @@ export function CopilotPanel() {
     setMessages([]);
     setError(null);
     setMode('chat');
+    persistActiveConversationId(null);
   }
 
   async function handleSend(e: React.FormEvent) {
@@ -114,6 +172,7 @@ export function CopilotPanel() {
         return;
       }
       setConversationId(body.data.conversationId);
+      persistActiveConversationId(body.data.conversationId);
       setMessages(prev => [...prev, { role: 'assistant', content: body.data.reply.text, toolCall: body.data.reply.toolCall }]);
       if (body.data.reply.toolCall?.name === 'navigate_to_page') {
         router.push(body.data.reply.toolCall.input.path);

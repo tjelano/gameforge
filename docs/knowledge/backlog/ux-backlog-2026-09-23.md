@@ -85,10 +85,26 @@ opening the topic first.
    in a Google Cloud Console project — that's on the user if/when they want Drive working, not
    something fixable from this repo.
 
-5. **Copilot conversation history doesn't seem to persist/load**, though it's unclear if this is a
-   real bug or a symptom of item 1 (slow nav/loading generally). Needs isolating from general
-   slowness before diagnosing — check whether history genuinely fails to save/load vs. just takes a
-   long time to appear.
+5. **Copilot conversation history doesn't seem to persist/load — ROOT-CAUSED AND FIXED 2026-09-24.**
+   Server-side persistence (`CopilotConversationService`/`CopilotMessageService`, the two
+   `/api/copilot/conversations*` routes) was always correct — verified by reading both. The bug was
+   entirely client-side: `CopilotPanel.tsx` held `conversationId`/`messages` in plain React state with
+   zero use of `localStorage`/`sessionStorage`. A full page reload silently started a brand-new empty
+   chat every time; the actual conversation was still safely in the database and reachable via
+   "History," but nothing auto-resumed it, so it read exactly like "history doesn't persist."
+   **Fix:** persist the active conversation id to `localStorage` and auto-resume it on mount (once
+   the async `useCurrentUser` fetch resolves). **A real bug was found and fixed in this fix itself**
+   during verification: an initial version used a `useEffect` reactively watching `conversationId` to
+   sync it to storage — that effect also fires on the component's very first mount, while
+   `conversationId` is still its initial `null`, and immediately wiped whatever a *previous* mount had
+   stored, racing ahead of the async resume effect. A unit test written against a naive synchronous
+   `useCurrentUser` mock did not catch this (it passed even with the bug, since `loadConversation` had
+   already captured the id as a function argument before the wipe mattered) — only a test whose mock
+   genuinely deferred `user` becoming truthy (matching the real hook's actual async timing) could
+   reproduce it. Fixed by replacing the reactive effect with explicit persistence calls at each actual
+   state-change site (send, load, new chat) instead of a generic "watch this state" effect. Verified
+   live end-to-end (real dev server, real Ollama-backed conversation, multiple independent page
+   reloads to different routes) after the unit test first caught the regression.
 
 6. **Copilot should always run on the connected Ollama model when one is available** — raised
    2026-09-24. Currently the copilot lets the user pick Claude vs. Ollama vs. OpenRouter per message

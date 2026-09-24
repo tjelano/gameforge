@@ -7,9 +7,10 @@ starting new research on a topic; don't re-derive something already answered.
 ## gotchas/
 - [Vitest config has no @testing-library/jest-dom](gotchas/vitest-no-jest-dom.md) — use plain-Chai assertions instead of jest-dom matchers.
 - [Per-list-item component fetch creates an unbounded N+1](gotchas/per-card-fetch-n-plus-1.md) — a component rendered in a `.map()` fetching its own data independently looks harmless in isolation; check what happens at N=50+.
+- [Reactive persist-effect races an async restore-effect on mount](gotchas/reactive-persist-effect-races-async-restore.md) — a `useEffect` that syncs state to storage also fires on first mount with the state's initial value, which can wipe what a previous mount stored before an async restore effect reads it; a synchronous test mock of an async hook won't catch this.
 
 ## backlog/
-- [UX backlog raised 2026-09-23](backlog/ux-backlog-2026-09-23.md) — slow nav FIXED, asset previews FIXED (MockGenerator + a separate invalid Pixellab key, both resolved), Drive OAuth 400 FIXED, remaining: copilot history not persisting, unified website-creation flow w/ live editing, copilot-always-prefers-Ollama (added 2026-09-24).
+- [UX backlog raised 2026-09-23](backlog/ux-backlog-2026-09-23.md) — slow nav, asset previews, Drive OAuth, and copilot history persistence all FIXED 2026-09-24. Remaining: unified website-creation flow w/ live editing, copilot-always-prefers-Ollama.
 
 ## research/
 _(empty)_
