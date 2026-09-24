@@ -52,6 +52,8 @@ export default function WebsiteWorkbenchPage() {
     setPrevStyleId(activeStyleId);
     setSelectedPageId(null);
     setCreatingNew(false);
+    setPages([]);
+    setComponents([]);
   }
 
   useEffect(() => {
@@ -118,6 +120,8 @@ export default function WebsiteWorkbenchPage() {
         const orderBody = await orderRes.json();
         if (!orderBody.success) {
           setPageError(orderBody.error ?? 'Page was created, but could not save component order.');
+          await refreshPages();
+          return;
         }
       }
       setCreatingNew(false);
