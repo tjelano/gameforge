@@ -28,9 +28,31 @@ opening the topic first.
    queued ones. `loading.tsx` files still don't exist anywhere in the app and may still be worth
    adding as a general polish item, but they were never the load-bearing fix here.
 
-2. **Assets page previews are a real bug, not just rough UX** — every asset's preview looks
-   identical; they don't reflect how each asset actually looks. Treat as broken functionality when
-   picked up, not a polish item.
+2. **Assets page previews are a real bug — one real cause FIXED 2026-09-24, root cause not fully
+   confirmed against what the user actually saw.** Investigated with no real sprite/image assets
+   available locally to compare against (`storage/images/` was empty — this dev DB has only ever
+   generated theme assets). Ruled out via direct code reading: the DB has a real UNIQUE constraint
+   on `image_path` (two assets can never share a file), the image-serving route and promotion flow
+   both correctly use per-asset unique filenames, and multi-state assets (`states` field) are just
+   text tags, not separate per-state images.
+   **Confirmed and fixed:** `MockGenerator` (`lib/services/ImageGenerator.ts`, used whenever
+   `PIXELLAB_API_KEY` is unset) called a pure function of `size` only
+   (`createPlaceholderPng`, `lib/utils/placeholderImage.ts`) — every mock-generated sprite at the
+   same size was byte-for-byte identical, the prompt completely ignored. Verified live: two
+   differently-prompted mock sprites now render as genuinely different colors (derived by hashing
+   the prompt), instead of the same fixed amber square. This is a real, independently-verified bug
+   regardless of whether it's the exact one the user saw — user wasn't sure/didn't confirm whether
+   their affected assets were `mock-*` files.
+   **Separate, discovered while investigating:** the project's own `PIXELLAB_API_KEY` in
+   `.env.local` is currently invalid — a direct test generation and a raw `curl` against Pixellab's
+   `/v2/balance` endpoint both returned `401: Invalid API token`. Confirmed the auth scheme itself
+   is correct (`Authorization: Bearer <token>`, matches Pixellab's live OpenAPI spec's
+   `HTTPBearer`/`bearer` scheme exactly) — this is a real, wrong/revoked token value, not a code
+   bug. Needs a working key from the Pixellab dashboard; not something fixable from this
+   repo. **If real generation has been silently failing for a while, that's a stronger candidate for
+   what the user actually saw** than the MockGenerator bug — worth reconciling if this resurfaces:
+   check whether affected assets are real `pixellab-*` files (generated before the key broke) vs.
+   `mock-*` files.
 
 3. **Dashboard IA doesn't distinguish UI-asset creation from website creation, and there's no
    single "create a full website" flow.** Two related asks:
@@ -57,3 +79,11 @@ opening the topic first.
    real bug or a symptom of item 1 (slow nav/loading generally). Needs isolating from general
    slowness before diagnosing — check whether history genuinely fails to save/load vs. just takes a
    long time to appear.
+
+6. **Copilot should always run on the connected Ollama model when one is available** — raised
+   2026-09-24. Currently the copilot lets the user pick Claude vs. Ollama vs. OpenRouter per message
+   (see `lib/services/CopilotMessageService.ts` or equivalent); the ask is to default to/prefer
+   Ollama automatically whenever a local model is connected, rather than requiring an explicit
+   per-message choice. Not yet scoped — needs deciding: is this a changed default with the picker
+   still available, or should the picker go away entirely when Ollama is connected? Check
+   `app/dashboard/settings/ollama` for how "connected" is currently detected before implementing.
