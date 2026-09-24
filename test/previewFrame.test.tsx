@@ -78,6 +78,53 @@ describe('PreviewFrame', () => {
     expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin');
   });
 
+  it('renders sandbox="allow-same-origin" for page previews', () => {
+    render(<PreviewFrame title="t" width={100} height={100} src="/api/pages/1/render?editable=1" kind="page" />);
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin');
+  });
+
+  it('shows the select-mode toggle when fullscreen and kind is page', () => {
+    const { container } = render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/pages/1/render?editable=1" kind="page" />,
+    );
+    enterFullscreen(container);
+    expect(screen.getByRole('button', { name: 'Select' })).toBeTruthy();
+  });
+
+  it('resolves patchEndpoint via a function using the clicked element info, for kind="page"', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf({ componentAssetId: 'asset-1', componentRevisionHash: 'hash-1' }));
+    const patchEndpointFn = vi.fn((info: FrameElementInfo) => `/api/assets/${info.componentAssetId}/component/patch-element`);
+
+    const { container } = render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/pages/1/render?editable=1" kind="page" patchEndpoint={patchEndpointFn} />,
+    );
+    enterFullscreen(container);
+    clickSelectToggle();
+
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(patchEndpointFn).toHaveBeenCalledWith(expect.objectContaining({ componentAssetId: 'asset-1' }));
+    expect(screen.getByRole('button', { name: /apply/i })).toBeTruthy();
+  });
+
+  it('uses componentRevisionHash, not getRevisionHash, as the documentHash for kind="page" selections', () => {
+    vi.mocked(getElementAt).mockReturnValue(elementInfoOf({ componentAssetId: 'asset-1', componentRevisionHash: 'hash-1' }));
+
+    const { container } = render(
+      <PreviewFrame title="t" width={100} height={100} src="/api/pages/1/render?editable=1" kind="page" patchEndpoint={() => '/x'} />,
+    );
+    enterFullscreen(container);
+    clickSelectToggle();
+
+    const iframe = screen.getByTitle('t') as HTMLIFrameElement;
+    fireEvent(iframe.contentWindow!, new MouseEvent('click', { clientX: 1, clientY: 1 }));
+
+    expect(getRevisionHash).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /apply/i })).toBeTruthy();
+  });
+
   it('never renders a sandbox value containing allow-scripts', () => {
     render(<PreviewFrame title="t" width={100} height={100} src="/api/components/x" kind="component" />);
     const iframe = screen.getByTitle('t') as HTMLIFrameElement;
