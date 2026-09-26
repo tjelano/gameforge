@@ -31,9 +31,14 @@ describe('composePageHtml', () => {
     const html = composePageHtml([
       { html: '<p>hi</p>', css: 'body { margin: 0; }' },
     ]);
-    expect(html).not.toMatch(/^\s*body\s*\{/m); // never appears unscoped
-    expect(html).toContain('body { margin: 0; }'); // still present, but scoped
-    expect(html).toMatch(/\.page-item-0\s+body/);
+    // The component's own `body { margin: 0; }` rule must never appear
+    // unscoped/un-prefixed -- only as ".page-item-0 body { margin: 0; }".
+    // (Not a blanket "no line starts with body{" check: composeItems' own
+    // framework-owned base body rule is a legitimate, intentional unscoped
+    // body rule with different content, and a check keyed on line-start
+    // position would be fragile against it.)
+    expect(html).not.toContain('\nbody { margin: 0; }');
+    expect(html).toContain('.page-item-0 body { margin: 0; }');
   });
 
   it('injects theme CSS exactly once regardless of component count', () => {
@@ -71,6 +76,26 @@ describe('composePageHtml', () => {
     const html = composePageHtml([]);
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<body>');
+  });
+
+  // Regression test for the Website Builder Workbench "black box" bug: a page
+  // with zero (or few) components rendered inside the live preview iframe had
+  // no explicit <body> background anywhere in the pipeline (themeCss only
+  // ever defines :root custom properties, never a body rule that reads them),
+  // so the transparent iframe showed the dark dashboard behind it instead of
+  // a page preview. composeItems must set a real body background itself.
+  it('gives <body> a real background reading the theme, not just transparent, even with zero components', () => {
+    const themeCss = ':root { --color-bg: #123456; }';
+    const html = composePageHtml([], themeCss);
+    expect(html).toContain('background: var(--color-bg');
+    // Confirm --color-bg maps to `background`, not accidentally swapped with
+    // the --color-fg (text color) variable.
+    expect(html).not.toContain('background: var(--color-fg');
+  });
+
+  it('falls back to a real (non-transparent) background even when no theme is given at all', () => {
+    const html = composePageHtml([]);
+    expect(html).toContain('background: var(--color-bg, #fff)');
   });
 });
 

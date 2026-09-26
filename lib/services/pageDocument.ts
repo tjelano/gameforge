@@ -65,12 +65,21 @@ function composeItems(
   });
 
   const themeBlock = themeCss ? `<style>\n${themeCss}\n</style>\n` : '';
+  // Theme CSS only ever defines :root custom properties (--color-bg, --color-fg,
+  // ...) - never a body rule that actually applies them. Without this, a
+  // composed document's own <body> has no explicit background anywhere in the
+  // pipeline: invisible for a downloaded export (browser default is already
+  // white), but a real bug for the Website Builder Workbench's live iframe
+  // preview, which sits on top of the dark dashboard and shows straight
+  // through when empty/sparse.
+  const bodyBaseCss = 'body { margin: 0; background: var(--color-bg, #fff); color: var(--color-fg, #212529); font-family: var(--font-body, sans-serif); }';
 
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 ${themeBlock}<style>
+${bodyBaseCss}
 ${styleBlocks.join('\n')}
 </style>
 </head>
